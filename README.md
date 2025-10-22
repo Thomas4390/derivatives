@@ -49,53 +49,15 @@ streamlit run streamlit_apps/monte_carlo_simulator/app.py
 
 ### 1. Educational Notebooks (`notebooks/`)
 
-Self-contained Jupyter notebooks covering:
-- **introduction.ipynb**: Basic concepts and derivatives markets
-- **forwards_futures.ipynb**: Forward and futures contracts
-- **options_basics.ipynb**: European and American options
-- **black_scholes.ipynb**: Black-Scholes model and implementation
-- **greeks.ipynb**: Option sensitivities (Delta, Gamma, Vega, Theta, Rho)
-- **volatility.ipynb**: Volatility modeling and implied volatility
-- **swaps.ipynb**: Interest rate and currency swaps
-- **trading_strategies.ipynb**: Advanced trading strategies
+Self-contained Jupyter notebooks
 
 ### 2. Interactive Applications (`streamlit_apps/`)
-
-#### Option Pricer
-Interactive tool for pricing options with:
-- European and American options
-- Black-Scholes and Binomial tree models
-- Real-time Greeks calculation
-- Payoff diagrams
-
-#### Volatility Surface
-Visualize and analyze volatility:
-- 3D volatility surface plotting
-- Implied volatility calculation
-- Volatility smile/skew analysis
-
-#### Strategy Builder
-Build and visualize option strategies:
-- Single leg positions
-- Vertical and horizontal spreads
-- Complex multi-leg strategies
-- P&L analysis
-
-#### Monte Carlo Simulator
-Simulate asset prices and option pricing:
-- Geometric Brownian Motion simulation
-- Path visualization
-- Option pricing via Monte Carlo
 
 **Architecture**: Each app has its frontend (Streamlit UI) separated from backend (business logic)
 
 ### 3. Backend (`backend/`)
 
-Reusable business logic:
-- **models/**: Pricing models (Black-Scholes, Binomial, Monte Carlo)
-- **calculators/**: Greeks calculator, implied volatility solver
-- **data_handlers/**: Data loading and processing utilities
-- **validators/**: Input parameter validation
+Reusable business logic
 
 ### 4. Data (`data/`)
 
