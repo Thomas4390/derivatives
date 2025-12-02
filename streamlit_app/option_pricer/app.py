@@ -29,6 +29,7 @@ from backend.option_pricing.options_calculator import (
     calculate_portfolio_pnl_at_expiry,
     calculate_portfolio_greeks_3d_dte,
     calculate_portfolio_greeks_3d_iv,
+    calculate_greeks_3d_strike,
     find_breakeven_points
 )
 
@@ -38,7 +39,9 @@ from config.constants import (
     DTE_RANGE,
     IV_RANGE,
     SPOT_RANGE_FACTOR,
-    SPOT_RANGE_POINTS
+    SPOT_RANGE_POINTS,
+    DEFAULT_DTE,
+    DEFAULT_IV
 )
 from components.sidebar import render_sidebar
 from charts.pnl_chart import render_pnl_tab
@@ -236,11 +239,15 @@ with tab4:
 with tab5:
     render_3d_tab(
         portfolio_json=portfolio_json,
+        spot_price=spot_price,
         risk_free_rate=risk_free_rate,
+        volatility=DEFAULT_IV / 100,  # Convert percentage to decimal
+        dte=DEFAULT_DTE,
         positions=st.session_state.positions,
         stock_position=st.session_state.stock_position,
         _calculate_greeks_3d_dte_func=calculate_portfolio_greeks_3d_dte,
-        _calculate_greeks_3d_iv_func=calculate_portfolio_greeks_3d_iv
+        _calculate_greeks_3d_iv_func=calculate_portfolio_greeks_3d_iv,
+        _calculate_greeks_3d_strike_func=calculate_greeks_3d_strike
     )
 
 

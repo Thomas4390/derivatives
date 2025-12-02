@@ -516,6 +516,45 @@ def calculate_portfolio_greeks_3d_iv(strikes: np.ndarray, option_types: np.ndarr
 
     return matrix_3d
 
+
+@njit(fastmath=True, cache=True, parallel=True)
+def calculate_greeks_3d_strike(spot_range: np.ndarray, strike_range: np.ndarray,
+                               dte: float, risk_free_rate: float, volatility: float,
+                               option_type: int, position_type: int,
+                               quantity: int) -> np.ndarray:
+    """
+    Calculate 3D matrix of Greeks for single-leg option varying strike: [spot x strike x greek]
+
+    Args:
+        spot_range: Array of spot prices
+        strike_range: Array of strike prices
+        dte: Days to expiration
+        risk_free_rate: Risk-free interest rate
+        volatility: Implied volatility
+        option_type: 1 for call, 0 for put
+        position_type: 1 for long, -1 for short
+        quantity: Number of contracts (already multiplied by 100)
+
+    Returns:
+        3D array of shape (n_spots, n_strikes, 14) containing all Greeks
+    """
+    n_spots = len(spot_range)
+    n_strikes = len(strike_range)
+    time_to_expiry = dte / DAYS_PER_YEAR
+    matrix_3d = np.zeros((n_spots, n_strikes, 14))
+    multiplier = quantity * position_type
+
+    for i in prange(n_spots):
+        for j in range(n_strikes):
+            greeks = calculate_all_greeks(
+                spot_range[i], strike_range[j], time_to_expiry,
+                risk_free_rate, volatility, option_type
+            )
+            matrix_3d[i, j, :] = greeks * multiplier
+
+    return matrix_3d
+
+
 # ============= Breakeven Calculation Functions =============
 
 @njit(fastmath=True, cache=True)
