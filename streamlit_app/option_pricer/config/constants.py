@@ -85,34 +85,183 @@ DTE_RANGE = list(range(1, 91, 3))
 # IV range for calculations (every 2% from 5% to 50%)
 IV_RANGE = list(range(5, 51, 2))
 
+# Strike range for single-leg strategies (percentage of spot: 80% to 120%, step 2%)
+STRIKE_RANGE_FACTORS = [round(0.80 + i * 0.02, 2) for i in range(21)]  # 0.80 to 1.20
+
 # =============================================================================
 # PREDEFINED STRATEGIES
 # =============================================================================
 
 AVAILABLE_STRATEGIES = [
     "",  # Empty option
+    # Vanilla strategies
+    "long_call",
+    "short_call",
+    "long_put",
+    "short_put",
+    # Spread strategies
+    "bull_call_spread",
+    "bear_put_spread",
+    "bull_put_spread",
+    "bear_call_spread",
+    # Volatility strategies
     "long_straddle",
+    "short_straddle",
+    "long_strangle",
+    "short_strangle",
+    # Complex strategies
     "iron_condor",
     "butterfly",
     "covered_call",
     "protective_put",
-    "bull_call_spread",
-    "bear_put_spread",
     "collar"
 ]
 
 # Strategy display names
 STRATEGY_DISPLAY_NAMES = {
     "": "",
+    # Vanilla
+    "long_call": "Long Call",
+    "short_call": "Short Call",
+    "long_put": "Long Put",
+    "short_put": "Short Put",
+    # Spreads
+    "bull_call_spread": "Bull Call Spread",
+    "bear_put_spread": "Bear Put Spread",
+    "bull_put_spread": "Bull Put Spread",
+    "bear_call_spread": "Bear Call Spread",
+    # Volatility
     "long_straddle": "Long Straddle",
+    "short_straddle": "Short Straddle",
+    "long_strangle": "Long Strangle",
+    "short_strangle": "Short Strangle",
+    # Complex
     "iron_condor": "Iron Condor",
     "butterfly": "Butterfly",
     "covered_call": "Covered Call",
     "protective_put": "Protective Put",
-    "bull_call_spread": "Bull Call Spread",
-    "bear_put_spread": "Bear Put Spread",
     "collar": "Collar"
 }
+
+# Strategy leg definitions (option_type, position_type, strike_offset from spot)
+# Standard strike intervals for clear payoff diagrams:
+# - ATM = 1.0 (100% of spot)
+# - 5% OTM/ITM intervals for spreads and strangles
+# - 10% intervals for iron condor wings
+# - Butterfly uses 5% equal spacing for symmetry
+STRATEGY_LEGS = {
+    # ==========================================================================
+    # VANILLA STRATEGIES (Single leg, ATM)
+    # ==========================================================================
+    "long_call": [
+        {"option_type": "call", "position_type": "long", "strike_factor": 1.0, "quantity": 1}
+    ],
+    "short_call": [
+        {"option_type": "call", "position_type": "short", "strike_factor": 1.0, "quantity": 1}
+    ],
+    "long_put": [
+        {"option_type": "put", "position_type": "long", "strike_factor": 1.0, "quantity": 1}
+    ],
+    "short_put": [
+        {"option_type": "put", "position_type": "short", "strike_factor": 1.0, "quantity": 1}
+    ],
+
+    # ==========================================================================
+    # VERTICAL SPREADS (5% width between strikes)
+    # ==========================================================================
+    # Bull Call Spread: Buy lower strike call, Sell higher strike call
+    # Profit when underlying rises, limited risk/reward
+    "bull_call_spread": [
+        {"option_type": "call", "position_type": "long", "strike_factor": 0.975, "quantity": 1},   # Slightly ITM
+        {"option_type": "call", "position_type": "short", "strike_factor": 1.025, "quantity": 1}   # Slightly OTM
+    ],
+
+    # Bear Put Spread: Buy higher strike put, Sell lower strike put
+    # Profit when underlying falls, limited risk/reward
+    "bear_put_spread": [
+        {"option_type": "put", "position_type": "long", "strike_factor": 1.025, "quantity": 1},    # Slightly ITM
+        {"option_type": "put", "position_type": "short", "strike_factor": 0.975, "quantity": 1}    # Slightly OTM
+    ],
+
+    # Bull Put Spread (Credit Spread): Sell higher strike put, Buy lower strike put
+    # Profit when underlying stays above short strike
+    "bull_put_spread": [
+        {"option_type": "put", "position_type": "short", "strike_factor": 0.975, "quantity": 1},   # ATM-ish
+        {"option_type": "put", "position_type": "long", "strike_factor": 0.925, "quantity": 1}     # OTM protection
+    ],
+
+    # Bear Call Spread (Credit Spread): Sell lower strike call, Buy higher strike call
+    # Profit when underlying stays below short strike
+    "bear_call_spread": [
+        {"option_type": "call", "position_type": "short", "strike_factor": 1.025, "quantity": 1},  # ATM-ish
+        {"option_type": "call", "position_type": "long", "strike_factor": 1.075, "quantity": 1}    # OTM protection
+    ],
+
+    # ==========================================================================
+    # VOLATILITY STRATEGIES
+    # ==========================================================================
+    # Straddle: ATM Call + ATM Put (same strike)
+    "long_straddle": [
+        {"option_type": "call", "position_type": "long", "strike_factor": 1.0, "quantity": 1},
+        {"option_type": "put", "position_type": "long", "strike_factor": 1.0, "quantity": 1}
+    ],
+    "short_straddle": [
+        {"option_type": "call", "position_type": "short", "strike_factor": 1.0, "quantity": 1},
+        {"option_type": "put", "position_type": "short", "strike_factor": 1.0, "quantity": 1}
+    ],
+
+    # Strangle: OTM Call + OTM Put (different strikes, 5% OTM each side)
+    "long_strangle": [
+        {"option_type": "put", "position_type": "long", "strike_factor": 0.95, "quantity": 1},     # 5% OTM put
+        {"option_type": "call", "position_type": "long", "strike_factor": 1.05, "quantity": 1}     # 5% OTM call
+    ],
+    "short_strangle": [
+        {"option_type": "put", "position_type": "short", "strike_factor": 0.95, "quantity": 1},    # 5% OTM put
+        {"option_type": "call", "position_type": "short", "strike_factor": 1.05, "quantity": 1}    # 5% OTM call
+    ],
+
+    # ==========================================================================
+    # COMPLEX STRATEGIES
+    # ==========================================================================
+    # Iron Condor: Short strangle + long wings for protection
+    # Symmetric around spot: 90/95 put spread + 105/110 call spread
+    "iron_condor": [
+        {"option_type": "put", "position_type": "long", "strike_factor": 0.90, "quantity": 1},     # Long put wing
+        {"option_type": "put", "position_type": "short", "strike_factor": 0.95, "quantity": 1},    # Short put
+        {"option_type": "call", "position_type": "short", "strike_factor": 1.05, "quantity": 1},   # Short call
+        {"option_type": "call", "position_type": "long", "strike_factor": 1.10, "quantity": 1}     # Long call wing
+    ],
+
+    # Butterfly: Long wings + 2x short middle (5% equal spacing)
+    # Maximum profit at middle strike at expiration
+    "butterfly": [
+        {"option_type": "call", "position_type": "long", "strike_factor": 0.95, "quantity": 1},    # Lower wing
+        {"option_type": "call", "position_type": "short", "strike_factor": 1.0, "quantity": 2},    # Body (ATM)
+        {"option_type": "call", "position_type": "long", "strike_factor": 1.05, "quantity": 1}     # Upper wing
+    ],
+
+    # ==========================================================================
+    # STOCK + OPTIONS STRATEGIES
+    # ==========================================================================
+    # Covered Call: Long stock + Short OTM call
+    "covered_call": [
+        {"option_type": "call", "position_type": "short", "strike_factor": 1.05, "quantity": 1}    # 5% OTM
+    ],
+
+    # Protective Put: Long stock + Long OTM put
+    "protective_put": [
+        {"option_type": "put", "position_type": "long", "strike_factor": 0.95, "quantity": 1}      # 5% OTM
+    ],
+
+    # Collar: Long stock + Long OTM put + Short OTM call
+    "collar": [
+        {"option_type": "put", "position_type": "long", "strike_factor": 0.95, "quantity": 1},     # 5% OTM put
+        {"option_type": "call", "position_type": "short", "strike_factor": 1.05, "quantity": 1}    # 5% OTM call
+    ]
+}
+
+# Strategies that include a stock position
+STRATEGIES_WITH_STOCK = ["covered_call", "protective_put", "collar"]
 
 # =============================================================================
 # UI CONFIGURATION

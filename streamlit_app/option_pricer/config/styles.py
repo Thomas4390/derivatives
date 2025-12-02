@@ -59,6 +59,12 @@ CUSTOM_CSS = """
 
     .stApp {
         font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+        background-color: #f1f5f9;
+    }
+
+    /* Main content area background */
+    .main .block-container {
+        background-color: #f1f5f9;
     }
 
     /* Hide Streamlit branding */
@@ -323,10 +329,28 @@ CUSTOM_CSS = """
     section[data-testid="stSidebar"] {
         background: #f8fafc;
         border-right: 1px solid #e2e8f0;
+        min-width: 380px !important;
+        width: 380px !important;
+    }
+
+    section[data-testid="stSidebar"] > div:first-child {
+        width: 380px !important;
     }
 
     section[data-testid="stSidebar"] .block-container {
         padding-top: 2rem;
+    }
+
+    /* Sidebar input styling */
+    section[data-testid="stSidebar"] .stNumberInput input,
+    section[data-testid="stSidebar"] .stSelectbox > div > div {
+        font-size: 0.9rem;
+    }
+
+    section[data-testid="stSidebar"] .stNumberInput label,
+    section[data-testid="stSidebar"] .stSelectbox label {
+        font-size: 0.8rem;
+        color: #64748b;
     }
 
     .sidebar-header {
@@ -342,20 +366,150 @@ CUSTOM_CSS = """
 
     /* ========== Buttons ========== */
     .stButton > button {
-        font-weight: 500;
-        border-radius: 8px;
-        padding: 0.5rem 1rem;
-        transition: all 0.15s ease;
+        font-weight: 600;
+        font-size: 0.875rem;
+        border-radius: 10px;
+        padding: 0.625rem 1.25rem;
+        transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+        letter-spacing: 0.01em;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.06);
+        border: 1px solid transparent;
     }
 
+    .stButton > button:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15), 0 2px 4px rgba(0, 0, 0, 0.08);
+    }
+
+    .stButton > button:active {
+        transform: translateY(0);
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+    }
+
+    /* Primary buttons - Navy gradient */
     .stButton > button[kind="primary"] {
-        background: linear-gradient(135deg, #1a365d 0%, #2c5282 100%);
+        background: linear-gradient(135deg, #1a365d 0%, #2c5282 50%, #1a365d 100%);
+        background-size: 200% 200%;
+        color: #ffffff;
         border: none;
+        box-shadow: 0 2px 8px rgba(26, 54, 93, 0.25), 0 1px 3px rgba(26, 54, 93, 0.15);
     }
 
     .stButton > button[kind="primary"]:hover {
-        background: linear-gradient(135deg, #2c5282 0%, #3b6ba5 100%);
-        transform: translateY(-1px);
+        background-position: 100% 100%;
+        box-shadow: 0 6px 20px rgba(26, 54, 93, 0.35), 0 3px 8px rgba(26, 54, 93, 0.2);
+    }
+
+    .stButton > button[kind="primary"]:active {
+        box-shadow: 0 2px 4px rgba(26, 54, 93, 0.2);
+    }
+
+    /* Secondary buttons - Clean white with border */
+    .stButton > button[kind="secondary"],
+    .stButton > button:not([kind="primary"]) {
+        background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+        color: #1e293b;
+        border: 1px solid #e2e8f0;
+    }
+
+    .stButton > button[kind="secondary"]:hover,
+    .stButton > button:not([kind="primary"]):hover {
+        background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
+        border-color: #cbd5e1;
+        color: #1a365d;
+    }
+
+    /* Sidebar buttons styling */
+    section[data-testid="stSidebar"] .stButton > button {
+        font-size: 0.8rem !important;
+        padding: 0.5rem 0.75rem !important;
+        border-radius: 8px !important;
+        font-weight: 500 !important;
+    }
+
+    /* Apply Strategy button - Green style */
+    section[data-testid="stSidebar"] .stButton > button[kind="primary"] {
+        background: linear-gradient(135deg, #059669 0%, #0d9488 100%) !important;
+        color: #ffffff !important;
+        border: none !important;
+        box-shadow: 0 2px 8px rgba(5, 150, 105, 0.25) !important;
+    }
+
+    section[data-testid="stSidebar"] .stButton > button[kind="primary"]:hover {
+        background: linear-gradient(135deg, #047857 0%, #0f766e 100%) !important;
+        box-shadow: 0 4px 12px rgba(5, 150, 105, 0.35) !important;
+    }
+
+    /* Clear button - Light with red on hover */
+    section[data-testid="stSidebar"] .stButton > button[kind="secondary"] {
+        background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%) !important;
+        color: #64748b !important;
+        border: 1px solid #e2e8f0 !important;
+    }
+
+    section[data-testid="stSidebar"] .stButton > button[kind="secondary"]:hover {
+        background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%) !important;
+        color: #dc2626 !important;
+        border-color: #fecaca !important;
+    }
+
+    /* Strategy dropdown styling */
+    section[data-testid="stSidebar"] .stSelectbox > div > div {
+        background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%) !important;
+        border: 1px solid #e2e8f0 !important;
+        border-radius: 10px !important;
+        padding: 0.125rem !important;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08) !important;
+        transition: all 0.2s ease !important;
+    }
+
+    section[data-testid="stSidebar"] .stSelectbox > div > div:hover {
+        border-color: #1a365d !important;
+        box-shadow: 0 2px 8px rgba(26, 54, 93, 0.15) !important;
+    }
+
+    section[data-testid="stSidebar"] .stSelectbox > div > div:focus-within {
+        border-color: #1a365d !important;
+        box-shadow: 0 0 0 3px rgba(26, 54, 93, 0.1) !important;
+    }
+
+    section[data-testid="stSidebar"] .stSelectbox [data-baseweb="select"] > div {
+        font-size: 0.9rem !important;
+        font-weight: 500 !important;
+        color: #1e293b !important;
+    }
+
+    /* Dropdown menu items */
+    [data-baseweb="popover"] [role="listbox"] {
+        background: #ffffff !important;
+        border-radius: 10px !important;
+        box-shadow: 0 10px 40px rgba(0, 0, 0, 0.15) !important;
+        border: 1px solid #e2e8f0 !important;
+        padding: 0.5rem !important;
+    }
+
+    [data-baseweb="popover"] [role="option"] {
+        border-radius: 6px !important;
+        padding: 0.5rem 0.75rem !important;
+        font-size: 0.85rem !important;
+        margin: 0.125rem 0 !important;
+    }
+
+    [data-baseweb="popover"] [role="option"]:hover {
+        background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%) !important;
+    }
+
+    [data-baseweb="popover"] [role="option"][aria-selected="true"] {
+        background: linear-gradient(135deg, #1a365d 0%, #2c5282 100%) !important;
+        color: #ffffff !important;
+    }
+
+    /* Button icons and text alignment */
+    .stButton > button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.5rem;
     }
 
     /* ========== Input Fields ========== */
@@ -445,6 +599,38 @@ CUSTOM_CSS = """
         font-size: 1rem;
         font-weight: 600;
         color: #1e293b;
+    }
+
+    /* ========== Toggle Button Group (Vary By controls) ========== */
+    .main .stButton > button {
+        min-width: 90px;
+        font-size: 0.85rem;
+        padding: 0.5rem 0.75rem;
+    }
+
+    /* Vary by toggle - primary selected state */
+    .main .stButton > button[kind="primary"] {
+        background: linear-gradient(135deg, #1a365d 0%, #2c5282 100%) !important;
+        color: #ffffff !important;
+        border: none !important;
+        box-shadow: 0 2px 6px rgba(26, 54, 93, 0.3) !important;
+    }
+
+    /* Vary by toggle - secondary unselected state */
+    .main .stButton > button[kind="secondary"],
+    .main .stButton > button:not([kind="primary"]) {
+        background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%) !important;
+        color: #64748b !important;
+        border: 1px solid #e2e8f0 !important;
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05) !important;
+    }
+
+    .main .stButton > button[kind="secondary"]:hover,
+    .main .stButton > button:not([kind="primary"]):hover {
+        background: linear-gradient(180deg, #f1f5f9 0%, #e2e8f0 100%) !important;
+        color: #1a365d !important;
+        border-color: #cbd5e1 !important;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1) !important;
     }
 
     /* ========== Radio Buttons ========== */

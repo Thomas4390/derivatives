@@ -13,6 +13,7 @@ from config.constants import (
     GREEK_NAMES,
     DTE_RANGE,
     IV_RANGE,
+    STRIKE_RANGE_FACTORS,
     SPOT_RANGE_FACTOR,
     SPOT_RANGE_POINTS
 )
@@ -435,3 +436,128 @@ def get_spot_range(spot_price: float) -> np.ndarray:
         spot_price * (1 + SPOT_RANGE_FACTOR),
         SPOT_RANGE_POINTS
     )
+
+
+@st.cache_data(ttl=3600)
+def calculate_strike_surfaces(
+    spot_price: float,
+    spot_range: tuple,
+    option_type: str,
+    position_type: str,
+    quantity: int,
+    base_strike: float,
+    risk_free_rate: float,
+    _calculate_all_greeks_func,
+    _calculate_pnl_at_expiry_func,
+    _find_breakeven_func=None
+) -> tuple[dict, dict, dict]:
+    """
+    Calculate P&L and Greeks data for varying strike prices (single-leg only).
+
+    Args:
+        spot_price: Current spot price
+        spot_range: Tuple of spot prices
+        option_type: 'call' or 'put'
+        position_type: 'long' or 'short'
+        quantity: Number of contracts
+        base_strike: Base strike price for reference
+        risk_free_rate: Risk-free interest rate
+        _calculate_all_greeks_func: Function to calculate Greeks
+        _calculate_pnl_at_expiry_func: Function to calculate P&L at expiry
+        _find_breakeven_func: Function to find breakeven points
+
+    Returns:
+        Tuple of (pnl_data, greeks_data, breakeven_data) dictionaries keyed by strike
+    """
+    spot_range_arr = np.array(spot_range)
+    pnl_data = {}
+    greeks_data = {}
+    breakeven_data = {}
+    expiry_data = {}
+
+    option_type_int = 1 if option_type == 'call' else 0
+    position_sign = 1 if position_type == 'long' else -1
+
+    # Fixed parameters for strike variation
+    fixed_dte = 31
+    fixed_iv = 0.25
+    time_to_expiry = fixed_dte / 365.0
+
+    for strike_factor in STRIKE_RANGE_FACTORS:
+        strike = round(spot_price * strike_factor, 2)
+        key = f"strike_{int(strike_factor * 100)}"
+
+        pnl_values = np.zeros(len(spot_range_arr))
+        greeks_by_name = {name: np.zeros(len(spot_range_arr)) for name in GREEK_NAMES}
+
+        # Calculate initial premium at this strike
+        initial_greeks = _calculate_all_greeks_func(
+            spot_price, strike, time_to_expiry,
+            risk_free_rate, fixed_iv, option_type_int
+        )
+        premium = initial_greeks[0]
+
+        for i, spot in enumerate(spot_range_arr):
+            greeks = _calculate_all_greeks_func(
+                spot, strike, time_to_expiry,
+                risk_free_rate, fixed_iv, option_type_int
+            )
+
+            option_value = greeks[0]
+            if position_sign == 1:  # Long
+                pnl = (option_value - premium) * quantity * CONTRACT_MULTIPLIER
+            else:  # Short
+                pnl = (premium - option_value) * quantity * CONTRACT_MULTIPLIER
+
+            pnl_values[i] = pnl
+
+            for k, name in enumerate(GREEK_NAMES):
+                greeks_by_name[name][i] = greeks[k] * quantity * CONTRACT_MULTIPLIER * position_sign
+
+        pnl_data[key] = pnl_values
+        greeks_data[key] = greeks_by_name
+
+        # Calculate expiry P&L for this strike
+        expiry_pnl = np.zeros(len(spot_range_arr))
+        strikes_arr = np.array([strike])
+        option_types_arr = np.array([option_type_int])
+        position_types_arr = np.array([position_sign])
+        quantities_arr = np.array([quantity * CONTRACT_MULTIPLIER])
+        premiums_arr = np.array([premium])
+
+        for i, spot in enumerate(spot_range_arr):
+            expiry_pnl[i] = _calculate_pnl_at_expiry_func(
+                spot, strikes_arr, option_types_arr, position_types_arr,
+                quantities_arr, premiums_arr, 0, 0
+            )
+
+        expiry_data[key] = expiry_pnl
+
+        # Calculate breakeven for this strike
+        if _find_breakeven_func:
+            theoretical_min = 0.01
+            theoretical_max = spot_price * 3.0
+            breakeven_result = _find_breakeven_func(
+                strikes_arr, option_types_arr, position_types_arr,
+                quantities_arr, premiums_arr, 0, 0,
+                theoretical_min, theoretical_max, 10000
+            )
+            breakeven_data[key] = breakeven_result
+
+    # Store expiry data in pnl_data
+    pnl_data['expiry_by_strike'] = expiry_data
+
+    return pnl_data, greeks_data, breakeven_data
+
+
+def get_strike_range(spot_price: float) -> list[float]:
+    """
+    Get the list of strike prices for strike variation.
+
+    Args:
+        spot_price: Current spot price
+
+    Returns:
+        List of strike prices
+    """
+    return [round(spot_price * factor, 2) for factor in STRIKE_RANGE_FACTORS]

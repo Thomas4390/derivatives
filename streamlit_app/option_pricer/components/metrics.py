@@ -159,56 +159,148 @@ def render_position_info_banner(
 
 def render_chart_controls(
     slider_key: str,
-    default_dte: bool = True
+    default_dte: bool = True,
+    is_single_leg: bool = False,
+    spot_price: float = 100.0
 ) -> str:
     """
-    Render chart parameter controls.
+    Render chart parameter controls with styled toggle buttons.
 
     Args:
         slider_key: Unique key for the radio button
         default_dte: Whether DTE should be selected by default
+        is_single_leg: Whether this is a single-leg strategy (enables Strike option)
+        spot_price: Current spot price for Strike display
 
     Returns:
-        Selected parameter type ("DTE" or "IV")
+        Selected parameter type ("DTE", "IV", or "Strike")
     """
-    col1, col2 = st.columns([1, 3])
+    options = ["DTE", "IV", "Strike"] if is_single_leg else ["DTE", "IV"]
 
-    with col1:
-        slider_type = st.radio(
-            "Vary by",
-            ["DTE", "IV"],
-            index=0 if default_dte else 1,
-            key=slider_key,
-            horizontal=True
-        )
+    # Initialize session state for this control
+    state_key = f"{slider_key}_selected"
+    if state_key not in st.session_state:
+        st.session_state[state_key] = "DTE" if default_dte else "IV"
 
-    with col2:
-        if slider_type == "DTE":
-            st.markdown("""
-            <div style="
-                background: #f1f5f9;
-                padding: 0.5rem 1rem;
-                border-radius: 6px;
-                font-size: 0.8rem;
-                color: #475569;
-            ">
-                <strong>Days to Expiration</strong> · Fixed IV: 25%
+    # Create button-based toggle with professional styling
+    st.markdown("""
+    <div style="
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+        margin-bottom: 0.5rem;
+    ">
+        <span style="
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: #64748b;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        ">Vary By</span>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # Create columns for buttons
+    cols = st.columns(len(options) + 2)  # Extra columns for spacing
+
+    selected = st.session_state[state_key]
+
+    for idx, option in enumerate(options):
+        with cols[idx]:
+            # Different styling based on option type
+            if option == "DTE":
+                icon = "📅"
+                label = "DTE"
+                description = "Days to Expiry"
+            elif option == "IV":
+                icon = "📊"
+                label = "IV"
+                description = "Volatility"
+            else:
+                icon = "🎯"
+                label = "Strike"
+                description = "Strike Price"
+
+            is_selected = (selected == option)
+
+            # Use button with custom key
+            if st.button(
+                f"{icon} {label}",
+                key=f"{slider_key}_{option}",
+                type="primary" if is_selected else "secondary",
+                use_container_width=True
+            ):
+                st.session_state[state_key] = option
+                st.rerun()
+
+    # Show info panel for selected option
+    selected = st.session_state[state_key]
+
+    if selected == "DTE":
+        st.markdown("""
+        <div style="
+            background: linear-gradient(135deg, #eff6ff 0%, #f0f9ff 100%);
+            padding: 0.75rem 1rem;
+            border-radius: 8px;
+            font-size: 0.85rem;
+            color: #1e40af;
+            border: 1px solid #bfdbfe;
+            margin-top: 0.5rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        ">
+            <span style="font-size: 1rem;">📅</span>
+            <div>
+                <strong>Days to Expiration</strong>
+                <span style="color: #3b82f6; margin-left: 0.5rem;">· Fixed IV: 25%</span>
             </div>
-            """, unsafe_allow_html=True)
-        else:
-            st.markdown("""
-            <div style="
-                background: #f1f5f9;
-                padding: 0.5rem 1rem;
-                border-radius: 6px;
-                font-size: 0.8rem;
-                color: #475569;
-            ">
-                <strong>Implied Volatility</strong> · Fixed DTE: 31 days
+        </div>
+        """, unsafe_allow_html=True)
+    elif selected == "IV":
+        st.markdown("""
+        <div style="
+            background: linear-gradient(135deg, #f5f3ff 0%, #faf5ff 100%);
+            padding: 0.75rem 1rem;
+            border-radius: 8px;
+            font-size: 0.85rem;
+            color: #6b21a8;
+            border: 1px solid #ddd6fe;
+            margin-top: 0.5rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        ">
+            <span style="font-size: 1rem;">📊</span>
+            <div>
+                <strong>Implied Volatility</strong>
+                <span style="color: #8b5cf6; margin-left: 0.5rem;">· Fixed DTE: 31 days</span>
             </div>
-            """, unsafe_allow_html=True)
+        </div>
+        """, unsafe_allow_html=True)
+    else:  # Strike
+        st.markdown(f"""
+        <div style="
+            background: linear-gradient(135deg, #fef3c7 0%, #fffbeb 100%);
+            padding: 0.75rem 1rem;
+            border-radius: 8px;
+            font-size: 0.85rem;
+            color: #92400e;
+            border: 1px solid #fcd34d;
+            margin-top: 0.5rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        ">
+            <span style="font-size: 1rem;">🎯</span>
+            <div>
+                <strong>Strike Price</strong>
+                <span style="color: #d97706; margin-left: 0.5rem;">· Range: ${spot_price * 0.8:.0f} - ${spot_price * 1.2:.0f}</span>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
 
-    return slider_type
+    return selected
 
 
 def render_risk_summary(

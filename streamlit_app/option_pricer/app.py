@@ -182,7 +182,11 @@ with tab1:
         spot_price=spot_price,
         positions=st.session_state.positions,
         stock_position=st.session_state.stock_position,
-        default_premium=default_premium
+        default_premium=default_premium,
+        risk_free_rate=risk_free_rate,
+        calculate_all_greeks_func=calculate_all_greeks,
+        calculate_pnl_at_expiry_func=calculate_portfolio_pnl_at_expiry,
+        find_breakeven_func=find_breakeven_points
     )
 
 
@@ -193,7 +197,10 @@ with tab2:
         spot_range=spot_range,
         spot_price=spot_price,
         positions=st.session_state.positions,
-        stock_position=st.session_state.stock_position
+        stock_position=st.session_state.stock_position,
+        risk_free_rate=risk_free_rate,
+        calculate_all_greeks_func=calculate_all_greeks,
+        calculate_pnl_at_expiry_func=calculate_portfolio_pnl_at_expiry
     )
 
 
@@ -204,7 +211,10 @@ with tab3:
         spot_range=spot_range,
         spot_price=spot_price,
         positions=st.session_state.positions,
-        stock_position=st.session_state.stock_position
+        stock_position=st.session_state.stock_position,
+        risk_free_rate=risk_free_rate,
+        calculate_all_greeks_func=calculate_all_greeks,
+        calculate_pnl_at_expiry_func=calculate_portfolio_pnl_at_expiry
     )
 
 
@@ -215,7 +225,10 @@ with tab4:
         spot_range=spot_range,
         spot_price=spot_price,
         positions=st.session_state.positions,
-        stock_position=st.session_state.stock_position
+        stock_position=st.session_state.stock_position,
+        risk_free_rate=risk_free_rate,
+        calculate_all_greeks_func=calculate_all_greeks,
+        calculate_pnl_at_expiry_func=calculate_portfolio_pnl_at_expiry
     )
 
 

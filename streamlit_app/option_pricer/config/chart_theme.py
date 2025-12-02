@@ -59,16 +59,6 @@ LAYOUT_DEFAULTS = {
         'size': 12,
         'color': '#334155'
     },
-    'title': {
-        'font': {
-            'family': 'Inter, -apple-system, BlinkMacSystemFont, sans-serif',
-            'size': 16,
-            'color': '#1e293b',
-            'weight': 600
-        },
-        'x': 0.5,
-        'xanchor': 'center'
-    },
     'paper_bgcolor': CHART_COLORS['paper'],
     'plot_bgcolor': CHART_COLORS['background'],
     'margin': {
@@ -77,13 +67,14 @@ LAYOUT_DEFAULTS = {
         't': 60,
         'b': 60
     },
-    'hovermode': 'x unified',
+    'hovermode': 'x',
     'hoverlabel': {
-        'bgcolor': 'white',
+        'bgcolor': 'rgba(255, 255, 255, 0.95)',
         'font_size': 12,
         'font_family': 'Inter, sans-serif',
         'bordercolor': '#e2e8f0'
-    }
+    },
+    'spikedistance': -1
 }
 
 AXIS_DEFAULTS = {
@@ -117,25 +108,28 @@ SLIDER_DEFAULTS = {
     'y': -0.12,
     'len': 0.9,
     'x': 0.05,
-    'pad': {'b': 10, 't': 10},
+    'pad': {'b': 10, 't': 50},
     'currentvalue': {
         'prefix': '',
         'font': {
             'family': 'Inter, sans-serif',
-            'size': 12,
+            'size': 13,
             'color': '#1e293b'
         },
-        'xanchor': 'left'
+        'xanchor': 'center',
+        'offset': 20,
+        'visible': True
     },
     'transition': {'duration': 100},
-    'bordercolor': '#e2e8f0',
-    'bgcolor': '#f8fafc',
+    'bordercolor': '#94a3b8',
+    'bgcolor': '#e2e8f0',
+    'activebgcolor': '#1a365d',
     'ticklen': 4,
-    'tickcolor': '#94a3b8',
+    'tickcolor': '#64748b',
     'font': {
         'family': 'JetBrains Mono, monospace',
         'size': 10,
-        'color': '#64748b'
+        'color': '#475569'
     }
 }
 
@@ -222,8 +216,14 @@ def get_layout_config(title: str = None, height: int = 600) -> dict:
 
     if title:
         config['title'] = {
-            **LAYOUT_DEFAULTS['title'],
-            'text': title
+            'text': title,
+            'font': {
+                'family': 'Inter, -apple-system, BlinkMacSystemFont, sans-serif',
+                'size': 16,
+                'color': '#1e293b'
+            },
+            'x': 0.5,
+            'xanchor': 'center'
         }
 
     config['xaxis'] = AXIS_DEFAULTS.copy()
