@@ -1,9 +1,0 @@
-import numpy as np
-
-def antithetic_normal(n_periods, n_paths):
-    """Simple implementation of Normal antithetic variables."""
-    assert n_paths%2 == 0, 'n_paths must be an even number'
-    n2 = int(n_paths/2)
-    z = np.random.normal(0,1, (n_periods, n2))
-    return np.hstack((z,-z))
-

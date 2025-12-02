@@ -3,6 +3,4 @@ numpy>=1.24.0
 scipy>=1.11.0
 numba>=0.58.0
 streamlit>=1.28.0
-
-# Optional: for plotting (if needed)
-matplotlib>=3.6.0
+plotly>=4.0.0
