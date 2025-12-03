@@ -561,3 +561,188 @@ def get_strike_range(spot_price: float) -> list[float]:
         List of strike prices
     """
     return [round(spot_price * factor, 2) for factor in STRIKE_RANGE_FACTORS]
+
+
+@st.cache_data(ttl=3600)
+def calculate_individual_leg_greeks(
+    portfolio_json: str,
+    spot_range: tuple,
+    dte: int,
+    iv: int,
+    risk_free_rate: float,
+    _calculate_all_greeks_func
+) -> dict:
+    """
+    Calculate Greeks for each individual leg of a multi-leg portfolio.
+
+    Args:
+        portfolio_json: JSON string of portfolio data
+        spot_range: Tuple of spot prices
+        dte: Days to expiration
+        iv: Implied volatility (percentage)
+        risk_free_rate: Risk-free interest rate
+        _calculate_all_greeks_func: Function to calculate Greeks
+
+    Returns:
+        Dictionary with Greeks data for each leg, keyed by leg index
+        {
+            'leg_0': {'delta': [...], 'gamma': [...], ...},
+            'leg_1': {'delta': [...], 'gamma': [...], ...},
+            'stock': {'delta': [...], ...} if stock position exists
+        }
+    """
+    portfolio_data = json.loads(portfolio_json)
+    spot_range_arr = np.array(spot_range)
+    time_to_expiry = dte / 365.0
+    iv_decimal = iv / 100.0
+
+    leg_greeks = {}
+
+    # Calculate Greeks for each option leg
+    if portfolio_data.get('options'):
+        for leg_idx, pos in enumerate(portfolio_data['options']):
+            strike = pos['strike']
+            option_type = 1 if pos['option_type'] == 'call' else 0
+            position_sign = 1 if pos['position_type'] == 'long' else -1
+            quantity = pos['quantity'] * CONTRACT_MULTIPLIER
+
+            greeks_by_name = {name: np.zeros(len(spot_range_arr)) for name in GREEK_NAMES}
+
+            for i, spot in enumerate(spot_range_arr):
+                greeks = _calculate_all_greeks_func(
+                    spot, strike, time_to_expiry,
+                    risk_free_rate, iv_decimal, option_type
+                )
+
+                for k, name in enumerate(GREEK_NAMES):
+                    greeks_by_name[name][i] = greeks[k] * quantity * position_sign
+
+            # Add metadata for display
+            leg_greeks[f'leg_{leg_idx}'] = {
+                'greeks': greeks_by_name,
+                'option_type': pos['option_type'],
+                'position_type': pos['position_type'],
+                'strike': strike,
+                'quantity': pos['quantity']
+            }
+
+    # Calculate Greeks for stock position
+    if portfolio_data.get('stock'):
+        stock = portfolio_data['stock']
+        stock_quantity = stock['quantity'] * (1 if stock['position_type'] == 'long' else -1)
+
+        stock_greeks = {name: np.zeros(len(spot_range_arr)) for name in GREEK_NAMES}
+        # Stock only has delta = quantity
+        stock_greeks['delta'] = np.full(len(spot_range_arr), stock_quantity)
+
+        leg_greeks['stock'] = {
+            'greeks': stock_greeks,
+            'position_type': stock['position_type'],
+            'quantity': stock['quantity']
+        }
+
+    return leg_greeks
+
+
+@st.cache_data(ttl=3600)
+def calculate_all_individual_leg_greeks(
+    portfolio_json: str,
+    spot_range: tuple,
+    dte_values: tuple,
+    iv_values: tuple,
+    risk_free_rate: float,
+    _calculate_all_greeks_func
+) -> dict:
+    """
+    Calculate Greeks for each individual leg for all DTE/IV combinations.
+
+    Args:
+        portfolio_json: JSON string of portfolio data
+        spot_range: Tuple of spot prices
+        dte_values: Tuple of DTE values
+        iv_values: Tuple of IV values
+        risk_free_rate: Risk-free interest rate
+        _calculate_all_greeks_func: Function to calculate Greeks
+
+    Returns:
+        Dictionary keyed by "DTE_IV" with leg Greeks for each combination
+        {
+            '31_25': {
+                'leg_0': {'greeks': {...}, 'option_type': 'call', ...},
+                'leg_1': {...},
+            },
+            '31_30': {...},
+            ...
+        }
+    """
+    portfolio_data = json.loads(portfolio_json)
+    spot_range_arr = np.array(spot_range)
+
+    # Extract leg metadata once
+    leg_metadata = {}
+    if portfolio_data.get('options'):
+        for leg_idx, pos in enumerate(portfolio_data['options']):
+            leg_metadata[f'leg_{leg_idx}'] = {
+                'option_type': pos['option_type'],
+                'position_type': pos['position_type'],
+                'strike': pos['strike'],
+                'quantity': pos['quantity'],
+                'option_type_int': 1 if pos['option_type'] == 'call' else 0,
+                'position_sign': 1 if pos['position_type'] == 'long' else -1,
+                'quantity_mult': pos['quantity'] * CONTRACT_MULTIPLIER
+            }
+
+    if portfolio_data.get('stock'):
+        stock = portfolio_data['stock']
+        leg_metadata['stock'] = {
+            'position_type': stock['position_type'],
+            'quantity': stock['quantity'],
+            'stock_quantity': stock['quantity'] * (1 if stock['position_type'] == 'long' else -1)
+        }
+
+    all_leg_greeks = {}
+
+    for dte in dte_values:
+        time_to_expiry = dte / 365.0
+
+        for iv in iv_values:
+            key = f"{dte}_{iv}"
+            iv_decimal = iv / 100.0
+
+            leg_greeks = {}
+
+            # Calculate Greeks for each option leg
+            for leg_key, meta in leg_metadata.items():
+                if leg_key == 'stock':
+                    # Stock only has delta
+                    stock_greeks = {name: np.zeros(len(spot_range_arr)) for name in GREEK_NAMES}
+                    stock_greeks['delta'] = np.full(len(spot_range_arr), meta['stock_quantity'])
+                    leg_greeks['stock'] = {
+                        'greeks': stock_greeks,
+                        'position_type': meta['position_type'],
+                        'quantity': meta['quantity']
+                    }
+                else:
+                    # Option leg
+                    greeks_by_name = {name: np.zeros(len(spot_range_arr)) for name in GREEK_NAMES}
+
+                    for i, spot in enumerate(spot_range_arr):
+                        greeks = _calculate_all_greeks_func(
+                            spot, meta['strike'], time_to_expiry,
+                            risk_free_rate, iv_decimal, meta['option_type_int']
+                        )
+
+                        for k, name in enumerate(GREEK_NAMES):
+                            greeks_by_name[name][i] = greeks[k] * meta['quantity_mult'] * meta['position_sign']
+
+                    leg_greeks[leg_key] = {
+                        'greeks': greeks_by_name,
+                        'option_type': meta['option_type'],
+                        'position_type': meta['position_type'],
+                        'strike': meta['strike'],
+                        'quantity': meta['quantity']
+                    }
+
+            all_leg_greeks[key] = leg_greeks
+
+    return all_leg_greeks

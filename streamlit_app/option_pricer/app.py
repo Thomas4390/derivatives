@@ -203,7 +203,8 @@ with tab2:
         stock_position=st.session_state.stock_position,
         risk_free_rate=risk_free_rate,
         calculate_all_greeks_func=calculate_all_greeks,
-        calculate_pnl_at_expiry_func=calculate_portfolio_pnl_at_expiry
+        calculate_pnl_at_expiry_func=calculate_portfolio_pnl_at_expiry,
+        portfolio_json=portfolio_json
     )
 
 
@@ -217,7 +218,8 @@ with tab3:
         stock_position=st.session_state.stock_position,
         risk_free_rate=risk_free_rate,
         calculate_all_greeks_func=calculate_all_greeks,
-        calculate_pnl_at_expiry_func=calculate_portfolio_pnl_at_expiry
+        calculate_pnl_at_expiry_func=calculate_portfolio_pnl_at_expiry,
+        portfolio_json=portfolio_json
     )
 
 
@@ -231,7 +233,8 @@ with tab4:
         stock_position=st.session_state.stock_position,
         risk_free_rate=risk_free_rate,
         calculate_all_greeks_func=calculate_all_greeks,
-        calculate_pnl_at_expiry_func=calculate_portfolio_pnl_at_expiry
+        calculate_pnl_at_expiry_func=calculate_portfolio_pnl_at_expiry,
+        portfolio_json=portfolio_json
     )
 
 
