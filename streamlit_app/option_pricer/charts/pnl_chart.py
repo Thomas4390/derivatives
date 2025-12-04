@@ -49,13 +49,29 @@ def create_pnl_figure(
         key = f"{value}_{fixed_value}" if slider_type == "DTE" else f"{fixed_value}_{value}"
         visible = (value == default_value)
 
-        hover_template = _create_pnl_hover_template(slider_type, value)
+        # Create hover template matching Greeks format
+        if slider_type == "DTE":
+            hover_template = (
+                '<b>Underlying:</b> $%{x:,.2f}<br>' +
+                f'<b>DTE:</b> {value} days<br>' +
+                '<b>P&L:</b> $%{y:,.2f}<br>' +
+                '<extra></extra>'
+            )
+            trace_name = f'P&L: DTE={value}'
+        else:
+            hover_template = (
+                '<b>Underlying:</b> $%{x:,.2f}<br>' +
+                f'<b>IV:</b> {value}%<br>' +
+                '<b>P&L:</b> $%{y:,.2f}<br>' +
+                '<extra></extra>'
+            )
+            trace_name = f'P&L: IV={value}%'
 
         fig.add_trace(go.Scatter(
             x=spot_range,
             y=pnl_data[key],
             mode='lines',
-            name=f'{slider_type}={value}',
+            name=trace_name,
             visible=visible,
             line=dict(
                 width=LINE_STYLES['primary']['width'],
@@ -71,7 +87,7 @@ def create_pnl_figure(
         x=spot_range,
         y=pnl_data['expiry'],
         mode='lines',
-        name='At Expiration',
+        name='P&L at Expiration',
         visible=True,
         line=dict(
             color=LINE_STYLES['expiry']['color'],
@@ -117,7 +133,9 @@ def create_pnl_figure(
         'sliders': [slider],
         'xaxis': {
             **AXIS_DEFAULTS,
-            'title': {'text': 'Underlying Price', **AXIS_DEFAULTS['title']}
+            'title': {'text': 'Underlying Price', **AXIS_DEFAULTS['title']},
+            'tickprefix': '$',
+            'tickformat': ',.0f'
         },
         'yaxis': {
             **AXIS_DEFAULTS,
@@ -140,24 +158,6 @@ def create_pnl_figure(
     fig.update_layout(**layout)
 
     return fig
-
-
-def _create_pnl_hover_template(slider_type: str, value: int) -> str:
-    """Create hover template for P&L traces."""
-    if slider_type == "DTE":
-        return (
-            '<b>Underlying:</b> $%{x:,.2f}<br>' +
-            f'<b>DTE:</b> {value} days<br>' +
-            '<b>P&L:</b> $%{y:,.2f}<br>' +
-            '<extra></extra>'
-        )
-    else:
-        return (
-            '<b>Underlying:</b> $%{x:,.2f}<br>' +
-            f'<b>IV:</b> {value}%<br>' +
-            '<b>P&L:</b> $%{y:,.2f}<br>' +
-            '<extra></extra>'
-        )
 
 
 def _add_breakeven_lines(fig: go.Figure, breakeven_result) -> None:
@@ -225,14 +225,7 @@ def create_pnl_figure_strike(
 
         visible = (idx == default_idx)
 
-        # P&L curve at 31 DTE
-        hover_template = (
-            '<b>Underlying:</b> $%{x:,.2f}<br>' +
-            f'<b>Strike:</b> ${strike_price_val:.2f} ({moneyness})<br>' +
-            '<b>P&L (31 DTE):</b> $%{y:,.2f}<br>' +
-            '<extra></extra>'
-        )
-
+        # P&L curve at 31 DTE - full hover template
         fig.add_trace(go.Scatter(
             x=spot_range,
             y=pnl_data[key],
@@ -243,12 +236,17 @@ def create_pnl_figure_strike(
                 width=LINE_STYLES['primary']['width'],
                 color=CHART_COLORS['primary']
             ),
-            hovertemplate=hover_template,
+            hovertemplate=(
+                '<b>Underlying:</b> $%{x:,.2f}<br>' +
+                f'<b>Strike:</b> ${strike_price_val:.2f} ({moneyness})<br>' +
+                '<b>P&L (31 DTE):</b> $%{y:,.2f}<br>' +
+                '<extra></extra>'
+            ),
             fill='tozeroy',
             fillcolor='rgba(26, 54, 93, 0.08)'
         ))
 
-        # Expiry curve
+        # Expiry curve - full hover template
         expiry_pnl = expiry_by_strike.get(key, [])
         fig.add_trace(go.Scatter(
             x=spot_range,
@@ -263,7 +261,7 @@ def create_pnl_figure_strike(
             ),
             hovertemplate=(
                 '<b>Underlying:</b> $%{x:,.2f}<br>' +
-                f'<b>Strike:</b> ${strike_price_val:.2f}<br>' +
+                f'<b>Strike:</b> ${strike_price_val:.2f} ({moneyness})<br>' +
                 '<b>P&L at Expiry:</b> $%{y:,.2f}<br>' +
                 '<extra></extra>'
             )
@@ -422,30 +420,16 @@ def create_pnl_figure_strike(
         )
         steps.append(step)
 
-    # Create slider
-    slider = {
+    # Create slider using standard defaults for consistency
+    slider = SLIDER_DEFAULTS.copy()
+    slider.update({
         'active': default_idx,
         'currentvalue': {
-            'prefix': 'Strike Price: ',
-            'visible': True,
-            'xanchor': 'center',
-            'font': {'size': 14, 'color': '#1e293b'}
+            **SLIDER_DEFAULTS['currentvalue'],
+            'prefix': 'Strike Price: '
         },
-        'pad': {'t': 50, 'b': 10},
-        'len': 0.9,
-        'x': 0.05,
-        'xanchor': 'left',
-        'y': -0.15,
-        'yanchor': 'top',
-        'steps': steps,
-        'ticklen': 5,
-        'minorticklen': 3,
-        'bgcolor': '#f1f5f9',
-        'bordercolor': '#e2e8f0',
-        'borderwidth': 1,
-        'activebgcolor': '#1a365d',
-        'font': {'size': 10, 'color': '#64748b'}
-    }
+        'steps': steps
+    })
 
     # Get initial annotations and shapes for default strike
     default_step = steps[default_idx]
@@ -460,7 +444,9 @@ def create_pnl_figure_strike(
         'shapes': initial_shapes,
         'xaxis': {
             **AXIS_DEFAULTS,
-            'title': {'text': 'Underlying Price', **AXIS_DEFAULTS['title']}
+            'title': {'text': 'Underlying Price', **AXIS_DEFAULTS['title']},
+            'tickprefix': '$',
+            'tickformat': ',.0f'
         },
         'yaxis': {
             **AXIS_DEFAULTS,
@@ -468,7 +454,7 @@ def create_pnl_figure_strike(
             'tickprefix': '$',
             'tickformat': ',.0f'
         },
-        'margin': {'l': 70, 'r': 40, 't': 60, 'b': 120},
+        'margin': {'l': 70, 'r': 40, 't': 60, 'b': 100},
         'showlegend': True,
         'legend': {
             'orientation': 'h',
