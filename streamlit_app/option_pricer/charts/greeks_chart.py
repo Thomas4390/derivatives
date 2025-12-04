@@ -585,8 +585,8 @@ def render_greeks_tab(
     show_individual_legs = st.session_state[show_legs_key]
 
     if is_multi_leg and slider_type != "Strike":
-        col1, col2 = st.columns([3, 1])
-        with col2:
+        col1, col2 = st.columns([1, 3])
+        with col1:
             show_individual_legs = st.toggle(
                 "Show Legs",
                 key=show_legs_key,

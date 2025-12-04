@@ -169,8 +169,18 @@ def _render_strategy_builder(
     strategy_legs = STRATEGY_LEGS.get(selected_strategy, [])
     has_stock = selected_strategy in STRATEGIES_WITH_STOCK
 
-    # Initialize session state
-    _initialize_strategy_state(selected_strategy, strategy_legs, has_stock, spot_price)
+    # Initialize session state and check if auto-apply is needed
+    should_auto_apply = _initialize_strategy_state(
+        selected_strategy, strategy_legs, has_stock, spot_price,
+        portfolio_class, option_position_class, stock_position_class, risk_free_rate
+    )
+
+    # Auto-apply strategy when newly selected or spot price changes
+    if should_auto_apply:
+        _apply_strategy(
+            spot_price, risk_free_rate, strategy_legs, has_stock,
+            portfolio_class, option_position_class, stock_position_class
+        )
 
     # Strategy info header
     strategy_name = STRATEGY_DISPLAY_NAMES.get(selected_strategy, selected_strategy)
@@ -220,24 +230,59 @@ def _render_strategy_builder(
     # Summary section
     _render_strategy_summary(total_net_cost, has_stock)
 
-    # Apply button
+    # Apply button (for manual modifications)
     st.markdown("<div style='height: 0.5rem'></div>", unsafe_allow_html=True)
 
-    if st.button("✓  Apply Strategy", use_container_width=True, type="primary", key="apply_strategy_btn"):
+    if st.button("✓  Apply Changes", use_container_width=True, type="primary", key="apply_strategy_btn"):
         _apply_strategy(
             spot_price, risk_free_rate, strategy_legs, has_stock,
             portfolio_class, option_position_class, stock_position_class
         )
 
 
-def _initialize_strategy_state(selected_strategy: str, strategy_legs: list, has_stock: bool, spot_price: float) -> None:
-    """Initialize or reset strategy state when strategy changes."""
+def _initialize_strategy_state(
+    selected_strategy: str,
+    strategy_legs: list,
+    has_stock: bool,
+    spot_price: float,
+    portfolio_class=None,
+    option_position_class=None,
+    stock_position_class=None,
+    risk_free_rate: float = 0.05
+) -> bool:
+    """
+    Initialize or reset strategy state when strategy or spot price changes.
+
+    Returns:
+        bool: True if the strategy should be auto-applied (new selection or spot change)
+    """
     if 'strategy_legs_state' not in st.session_state:
         st.session_state.strategy_legs_state = {}
 
-    if st.session_state.get('last_selected_strategy') != selected_strategy:
+    if 'strategy_version' not in st.session_state:
+        st.session_state.strategy_version = 0
+
+    if 'last_spot_price' not in st.session_state:
+        st.session_state.last_spot_price = spot_price
+
+    strategy_changed = st.session_state.get('last_selected_strategy') != selected_strategy
+    spot_changed = st.session_state.get('last_spot_price') != spot_price
+
+    should_auto_apply = False
+
+    if strategy_changed or spot_changed:
         st.session_state.last_selected_strategy = selected_strategy
+        st.session_state.last_spot_price = spot_price
         st.session_state.strategy_legs_state = {}
+
+        # Increment version to force widget key changes and reset values
+        st.session_state.strategy_version = st.session_state.get('strategy_version', 0) + 1
+
+        # Clear old widget keys from session state to force reset
+        keys_to_remove = [key for key in list(st.session_state.keys())
+                         if key.startswith('leg_') or key.startswith('stock_leg_')]
+        for key in keys_to_remove:
+            del st.session_state[key]
 
         for i, leg in enumerate(strategy_legs):
             st.session_state.strategy_legs_state[i] = {
@@ -253,6 +298,11 @@ def _initialize_strategy_state(selected_strategy: str, strategy_legs: list, has_
                 'quantity': 100,
                 'entry_price': spot_price
             }
+
+        # Auto-apply strategy when newly selected or spot price changes
+        should_auto_apply = True
+
+    return should_auto_apply
 
 
 def _render_leg_editor(
@@ -290,6 +340,9 @@ def _render_leg_editor(
     </div>
     """, unsafe_allow_html=True)
 
+    # Get strategy version for unique widget keys
+    version = st.session_state.get('strategy_version', 0)
+
     # Move inputs outside the HTML div
     col1, col2 = st.columns(2)
 
@@ -299,7 +352,7 @@ def _render_leg_editor(
             ["call", "put"],
             index=0 if option_type == "call" else 1,
             format_func=lambda x: f"{'📈' if x == 'call' else '📉'} {x.upper()}",
-            key=f"leg_{leg_index}_type"
+            key=f"leg_{leg_index}_type_v{version}"
         )
 
     with col2:
@@ -308,7 +361,7 @@ def _render_leg_editor(
             ["long", "short"],
             index=0 if position_type == "long" else 1,
             format_func=lambda x: f"{'🟢' if x == 'long' else '🔴'} {x.upper()}",
-            key=f"leg_{leg_index}_dir"
+            key=f"leg_{leg_index}_dir_v{version}"
         )
 
     # Strike and quantity inputs
@@ -322,7 +375,7 @@ def _render_leg_editor(
             value=float(default_strike),
             step=1.0,
             format="%.2f",
-            key=f"leg_{leg_index}_strike"
+            key=f"leg_{leg_index}_strike_v{version}"
         )
 
     with col4:
@@ -332,7 +385,7 @@ def _render_leg_editor(
             value=int(default_qty),
             min_value=1,
             step=1,
-            key=f"leg_{leg_index}_qty"
+            key=f"leg_{leg_index}_qty_v{version}"
         )
 
     # Update state
@@ -378,6 +431,9 @@ def _render_stock_leg_editor(spot_price: float) -> float:
         'entry_price': spot_price
     })
 
+    # Get strategy version for unique widget keys
+    version = st.session_state.get('strategy_version', 0)
+
     st.markdown("""
     <div style="background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%); border: 1px solid #3b82f640; border-left: 4px solid #3b82f6; border-radius: 8px; padding: 0.75rem; margin-bottom: 0.625rem;">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.625rem;">
@@ -397,7 +453,7 @@ def _render_stock_leg_editor(spot_price: float) -> float:
             ["long", "short"],
             index=0 if stock_state.get('position_type', 'long') == 'long' else 1,
             format_func=lambda x: f"{'🟢' if x == 'long' else '🔴'} {x.upper()}",
-            key="stock_leg_dir"
+            key=f"stock_leg_dir_v{version}"
         )
 
     with col2:
@@ -406,7 +462,7 @@ def _render_stock_leg_editor(spot_price: float) -> float:
             value=int(stock_state.get('quantity', 100)),
             min_value=1,
             step=100,
-            key="stock_leg_qty"
+            key=f"stock_leg_qty_v{version}"
         )
 
     stock_entry = st.number_input(
@@ -414,7 +470,7 @@ def _render_stock_leg_editor(spot_price: float) -> float:
         value=float(stock_state.get('entry_price', spot_price)),
         step=1.0,
         format="%.2f",
-        key="stock_leg_entry"
+        key=f"stock_leg_entry_v{version}"
     )
 
     st.session_state.strategy_legs_state['stock'] = {
