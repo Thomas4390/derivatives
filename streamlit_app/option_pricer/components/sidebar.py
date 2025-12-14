@@ -112,6 +112,8 @@ def _render_strategy_builder(
 
     # Grouped strategies for better organization in dropdown
     strategy_groups = {
+        "── Custom ──": None,
+        "custom": "🎨  Custom Strategy",
         "── Directional ──": None,
         "long_call": "📈  Long Call",
         "short_call": "📉  Short Call",
@@ -166,8 +168,27 @@ def _render_strategy_builder(
         return
 
     # Get strategy configuration
-    strategy_legs = STRATEGY_LEGS.get(selected_strategy, [])
+    is_custom = selected_strategy == "custom"
+    base_strategy_legs = STRATEGY_LEGS.get(selected_strategy, [])
     has_stock = selected_strategy in STRATEGIES_WITH_STOCK
+
+    # Initialize custom legs state if needed
+    if 'custom_legs' not in st.session_state:
+        st.session_state.custom_legs = []
+
+    # Initialize additional legs tracking
+    if 'additional_legs' not in st.session_state:
+        st.session_state.additional_legs = {}
+
+    # For custom strategy, use custom_legs from session state
+    if is_custom:
+        strategy_legs = st.session_state.custom_legs
+        has_stock = st.session_state.get('custom_has_stock', False)
+    else:
+        # Combine base strategy legs with any additional legs
+        additional_legs_key = selected_strategy
+        additional = st.session_state.additional_legs.get(additional_legs_key, [])
+        strategy_legs = list(base_strategy_legs) + additional
 
     # Initialize session state and check if auto-apply is needed
     should_auto_apply = _initialize_strategy_state(
@@ -176,14 +197,14 @@ def _render_strategy_builder(
     )
 
     # Auto-apply strategy when newly selected or spot price changes
-    if should_auto_apply:
+    if should_auto_apply and not is_custom:
         _apply_strategy(
             spot_price, risk_free_rate, strategy_legs, has_stock,
             portfolio_class, option_position_class, stock_position_class
         )
 
     # Strategy info header
-    strategy_name = STRATEGY_DISPLAY_NAMES.get(selected_strategy, selected_strategy)
+    strategy_name = STRATEGY_DISPLAY_NAMES.get(selected_strategy, "Custom Strategy" if is_custom else selected_strategy)
     num_legs = len(strategy_legs)
 
     st.markdown(f"""
@@ -213,19 +234,51 @@ def _render_strategy_builder(
 
     # Render each option leg with improved styling
     leg_costs = []
+    legs_to_remove = []
+    base_leg_count = len(base_strategy_legs) if not is_custom else 0
+
     for i, leg in enumerate(strategy_legs):
-        leg_cost = _render_leg_editor(
+        # Allow removal for custom legs OR additional legs on predefined strategies
+        is_additional_leg = i >= base_leg_count
+        allow_remove = is_custom or is_additional_leg
+
+        leg_cost, should_remove = _render_leg_editor(
             i, leg, spot_price, risk_free_rate,
             portfolio_class, option_position_class,
-            num_legs
+            num_legs,
+            allow_remove=allow_remove,
+            is_additional=is_additional_leg and not is_custom
         )
         leg_costs.append(leg_cost)
+
+        if should_remove:
+            legs_to_remove.append(i)
 
         leg_state = st.session_state.strategy_legs_state.get(i, {})
         if leg_state.get('position_type') == 'long':
             total_net_cost -= leg_cost
         else:
             total_net_cost += leg_cost
+
+    # Handle leg removal
+    if legs_to_remove:
+        for idx in sorted(legs_to_remove, reverse=True):
+            if is_custom:
+                if idx < len(st.session_state.custom_legs):
+                    st.session_state.custom_legs.pop(idx)
+            else:
+                # Remove from additional legs (adjust index for base legs)
+                additional_idx = idx - base_leg_count
+                additional_legs_key = selected_strategy
+                if additional_idx >= 0 and additional_idx < len(st.session_state.additional_legs.get(additional_legs_key, [])):
+                    st.session_state.additional_legs[additional_legs_key].pop(additional_idx)
+        # Reset the legs state
+        st.session_state.strategy_legs_state = {}
+        st.session_state.strategy_version = st.session_state.get('strategy_version', 0) + 1
+        st.rerun()
+
+    # Add Leg button for all strategies
+    _render_add_leg_button(spot_price, is_custom, selected_strategy, strategy_legs)
 
     # Summary section
     _render_strategy_summary(total_net_cost, has_stock)
@@ -305,6 +358,60 @@ def _initialize_strategy_state(
     return should_auto_apply
 
 
+def _render_add_leg_button(spot_price: float, is_custom: bool, selected_strategy: str, strategy_legs: list) -> None:
+    """Render the Add Leg button for all strategies."""
+    st.markdown("<div style='height: 0.5rem'></div>", unsafe_allow_html=True)
+
+    # Initialize additional legs tracking
+    if 'additional_legs' not in st.session_state:
+        st.session_state.additional_legs = {}
+
+    # Get additional legs for current strategy
+    additional_legs_key = selected_strategy if not is_custom else 'custom'
+    if additional_legs_key not in st.session_state.additional_legs:
+        st.session_state.additional_legs[additional_legs_key] = []
+
+    # Elegant Add Leg button
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        if st.button("➕  Add Leg", use_container_width=True, key="add_leg_btn", type="secondary"):
+            # Add a new default leg
+            new_leg = {
+                "option_type": "call",
+                "position_type": "long",
+                "strike_factor": 1.0,
+                "quantity": 1
+            }
+
+            if is_custom:
+                st.session_state.custom_legs.append(new_leg)
+                new_index = len(st.session_state.custom_legs) - 1
+            else:
+                st.session_state.additional_legs[additional_legs_key].append(new_leg)
+                # The new index is the base strategy legs + additional legs
+                new_index = len(STRATEGY_LEGS.get(selected_strategy, [])) + len(st.session_state.additional_legs[additional_legs_key]) - 1
+
+            # Initialize state for the new leg
+            st.session_state.strategy_legs_state[new_index] = {
+                'option_type': 'call',
+                'position_type': 'long',
+                'strike': round(spot_price, 2),
+                'quantity': 1
+            }
+            st.session_state.strategy_version = st.session_state.get('strategy_version', 0) + 1
+            st.rerun()
+
+    # Show hint when no legs (only for custom with no legs)
+    if is_custom and len(st.session_state.custom_legs) == 0:
+        st.markdown("""
+        <div style="text-align: center; padding: 1.5rem 1rem; color: #94a3b8; font-size: 0.85rem; background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%); border-radius: 10px; border: 1px dashed #cbd5e1; margin-top: 0.5rem;">
+            <div style="font-size: 1.5rem; margin-bottom: 0.75rem; opacity: 0.7;">🎨</div>
+            <div style="font-weight: 500; color: #64748b;">Build your custom strategy</div>
+            <div style="font-size: 0.75rem; margin-top: 0.5rem; color: #94a3b8;">Click "Add Leg" to add options legs</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+
 def _render_leg_editor(
     leg_index: int,
     leg_config: dict,
@@ -312,10 +419,13 @@ def _render_leg_editor(
     risk_free_rate: float,
     portfolio_class,
     option_position_class,
-    total_legs: int
-) -> float:
-    """Render an editable leg configuration. Returns the total cost for this leg."""
+    total_legs: int,
+    allow_remove: bool = False,
+    is_additional: bool = False
+) -> tuple[float, bool]:
+    """Render an editable leg configuration. Returns (total_cost, should_remove)."""
     leg_state = st.session_state.strategy_legs_state.get(leg_index, {})
+    should_remove = False
 
     option_type = leg_state.get('option_type', leg_config['option_type'])
     position_type = leg_state.get('position_type', leg_config['position_type'])
@@ -328,20 +438,33 @@ def _render_leg_editor(
     position_badge_bg = "#d1fae5" if is_long else "#fee2e2"
     position_badge_color = "#047857" if is_long else "#b91c1c"
 
-    # Leg container
-    st.markdown(f"""
-    <div style="background: {bg_gradient}; border: 1px solid {border_color}40; border-left: 4px solid {border_color}; border-radius: 8px; padding: 0.75rem; margin-bottom: 0.625rem;">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.625rem;">
-            <div style="display: flex; align-items: center; gap: 0.5rem;">
-                <span style="font-size: 0.7rem; font-weight: 700; color: #475569; text-transform: uppercase;">Leg {leg_index + 1}</span>
-            </div>
-            <span style="background: {position_badge_bg}; color: {position_badge_color}; font-size: 0.65rem; font-weight: 700; padding: 0.2rem 0.5rem; border-radius: 4px; text-transform: uppercase;">{position_type}</span>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    # Get strategy version for unique widget keys
+    # Leg container with optional remove button
     version = st.session_state.get('strategy_version', 0)
+
+    # Label for the leg
+    leg_label = f"Leg {leg_index + 1}"
+    if is_additional:
+        leg_label = f"+ Leg {leg_index + 1}"
+        # Use a slightly different style for additional legs
+        bg_gradient = "linear-gradient(135deg, #fefce8 0%, #fef9c3 100%)" if is_long else "linear-gradient(135deg, #fef2f2 0%, #fecaca 100%)"
+
+    # Build the added badge HTML separately
+    added_badge = '<span style="background: #fef3c7; color: #92400e; font-size: 0.55rem; font-weight: 600; padding: 0.15rem 0.35rem; border-radius: 3px; margin-left: 0.25rem;">ADDED</span>' if is_additional else ''
+
+    # Build the leg header HTML
+    leg_header_html = f'''<div style="background: {bg_gradient}; border: 1px solid {border_color}40; border-left: 4px solid {border_color}; border-radius: 8px; padding: 0.75rem; margin-bottom: 0.625rem;"><div style="display: flex; justify-content: space-between; align-items: center;"><div style="display: flex; align-items: center; gap: 0.5rem;"><span style="font-size: 0.7rem; font-weight: 700; color: #475569; text-transform: uppercase;">{leg_label}</span>{added_badge}</div><span style="background: {position_badge_bg}; color: {position_badge_color}; font-size: 0.65rem; font-weight: 700; padding: 0.2rem 0.5rem; border-radius: 4px; text-transform: uppercase;">{position_type}</span></div></div>'''
+
+    if allow_remove:
+        # Header with remove button integrated
+        header_col1, header_col2 = st.columns([4, 1])
+        with header_col1:
+            st.markdown(leg_header_html, unsafe_allow_html=True)
+        with header_col2:
+            st.markdown("<div style='height: 0.25rem'></div>", unsafe_allow_html=True)
+            if st.button("🗑️", key=f"remove_leg_{leg_index}_v{version}", help="Remove this leg", use_container_width=True):
+                should_remove = True
+    else:
+        st.markdown(leg_header_html, unsafe_allow_html=True)
 
     # Move inputs outside the HTML div
     col1, col2 = st.columns(2)
@@ -420,7 +543,7 @@ def _render_leg_editor(
     </div>
     """, unsafe_allow_html=True)
 
-    return total_cost
+    return total_cost, should_remove
 
 
 def _render_stock_leg_editor(spot_price: float) -> float:
