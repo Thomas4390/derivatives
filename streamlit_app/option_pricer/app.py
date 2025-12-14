@@ -121,17 +121,10 @@ def get_portfolio_json() -> str:
     if positions or stock_position:
         portfolio_data = prepare_portfolio_data(positions, stock_position, spot_price)
     else:
-        # Default position: 1x Long Call ATM
-        default_premium = get_default_premium()
+        # Empty portfolio - no default position
         portfolio_data = {
             'spot_price': spot_price,
-            'options': [{
-                'option_type': 'call',
-                'position_type': 'long',
-                'strike': spot_price,
-                'quantity': 1,
-                'premium_paid': default_premium
-            }],
+            'options': [],
             'stock': None
         }
 

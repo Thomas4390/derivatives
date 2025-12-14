@@ -150,11 +150,13 @@ def _render_strategy_builder(
         return strategy_groups.get(key, STRATEGY_DISPLAY_NAMES.get(key, key))
 
     # Strategy dropdown with custom styling
+    # Use a versioned key to allow resetting the dropdown
+    selector_version = st.session_state.get('selector_version', 0)
     selected_strategy = st.selectbox(
         "Strategy",
         all_options,
         format_func=format_strategy,
-        key="strategy_selector",
+        key=f"strategy_selector_v{selector_version}",
         label_visibility="collapsed"
     )
 
@@ -864,18 +866,17 @@ def _render_positions_section(positions: list, stock_position) -> None:
         st.session_state.custom_legs = []
         st.session_state.custom_has_stock = False
 
-        # Reset strategy selection
+        # Reset strategy selection by incrementing selector version (creates new widget)
+        st.session_state.selector_version = st.session_state.get('selector_version', 0) + 1
         if 'last_selected_strategy' in st.session_state:
             del st.session_state.last_selected_strategy
-        if 'strategy_selector' in st.session_state:
-            del st.session_state.strategy_selector
 
         # Increment version to force widget reset
         st.session_state.strategy_version = st.session_state.get('strategy_version', 0) + 1
 
         # Clear widget keys
         keys_to_remove = [key for key in list(st.session_state.keys())
-                         if key.startswith('leg_') or key.startswith('stock_leg_')]
+                         if key.startswith('leg_') or key.startswith('stock_leg_') or key.startswith('strategy_selector_v')]
         for key in keys_to_remove:
             del st.session_state[key]
 
