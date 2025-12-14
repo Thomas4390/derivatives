@@ -263,6 +263,13 @@ STRATEGY_LEGS = {
 # Strategies that include a stock position
 STRATEGIES_WITH_STOCK = ["covered_call", "protective_put", "collar"]
 
+# Stock position type for each strategy (default is 'long')
+STRATEGY_STOCK_POSITION = {
+    "covered_call": "long",
+    "protective_put": "long",
+    "collar": "long"
+}
+
 # =============================================================================
 # UI CONFIGURATION
 # =============================================================================
