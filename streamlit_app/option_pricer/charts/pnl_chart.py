@@ -101,8 +101,8 @@ def create_pnl_figure(
         )
     ))
 
-    # Add breakeven lines
-    _add_breakeven_lines(fig, breakeven_result)
+    # Add breakeven lines (pass spot_price for smart positioning)
+    _add_breakeven_lines(fig, breakeven_result, spot_price)
 
     # Add reference lines
     fig.add_hline(
@@ -117,11 +117,22 @@ def create_pnl_figure(
         line_dash="dot",
         line_color=CHART_COLORS['accent'],
         line_width=1.5,
-        opacity=0.8,
-        annotation_text="Current",
-        annotation_position="top",
-        annotation_font_size=10,
-        annotation_font_color=CHART_COLORS['accent']
+        opacity=0.8
+    )
+
+    # Add Current Price annotation with box style
+    fig.add_annotation(
+        x=spot_price,
+        y=1.02,
+        xref="x",
+        yref="paper",
+        text="Current Price",
+        showarrow=False,
+        font=dict(size=10, color=CHART_COLORS['accent'], weight='bold'),
+        bgcolor="rgba(255,255,255,0.9)",
+        bordercolor=CHART_COLORS['accent'],
+        borderwidth=1,
+        borderpad=3
     )
 
     # Create slider
@@ -160,22 +171,41 @@ def create_pnl_figure(
     return fig
 
 
-def _add_breakeven_lines(fig: go.Figure, breakeven_result) -> None:
-    """Add breakeven vertical lines to the figure."""
+def _add_breakeven_lines(fig: go.Figure, breakeven_result, spot_price: float = None) -> None:
+    """Add breakeven vertical lines to the figure with label just below Current Price."""
     if not breakeven_result or not breakeven_result.breakeven_points:
         return
 
-    for i, be in enumerate(sorted(breakeven_result.breakeven_points)):
-        label = f"BE: ${be:,.0f}" if len(breakeven_result.breakeven_points) == 1 else f"BE{i+1}"
-        fig.add_vline(
+    breakeven_points = sorted(breakeven_result.breakeven_points)
+
+    for i, be in enumerate(breakeven_points):
+        label = f"BE: ${be:,.0f}" if len(breakeven_points) == 1 else f"BE{i+1}: ${be:,.0f}"
+
+        # Add the vertical line (stops before the label box at y=0.90)
+        fig.add_shape(
+            type="line",
+            x0=be,
+            x1=be,
+            y0=0,
+            y1=0.90,
+            xref="x",
+            yref="paper",
+            line=dict(color=CHART_COLORS['breakeven'], width=1.5, dash="dash")
+        )
+
+        # Add annotation just below Current Price level (y=0.94)
+        fig.add_annotation(
             x=be,
-            line_dash="dash",
-            line_color=CHART_COLORS['breakeven'],
-            line_width=1.5,
-            annotation_text=label,
-            annotation_position="top",
-            annotation_font_size=10,
-            annotation_font_color=CHART_COLORS['breakeven']
+            y=0.94,
+            xref="x",
+            yref="paper",
+            text=label,
+            showarrow=False,
+            font=dict(size=10, color=CHART_COLORS['breakeven'], weight='bold'),
+            bgcolor="rgba(255,255,255,0.9)",
+            bordercolor=CHART_COLORS['breakeven'],
+            borderwidth=1,
+            borderpad=3
         )
 
 
@@ -280,11 +310,22 @@ def create_pnl_figure_strike(
         line_dash="dot",
         line_color=CHART_COLORS['accent'],
         line_width=1.5,
-        opacity=0.8,
-        annotation_text="Spot",
-        annotation_position="top",
-        annotation_font_size=10,
-        annotation_font_color=CHART_COLORS['accent']
+        opacity=0.8
+    )
+
+    # Add Current Price annotation with box style
+    fig.add_annotation(
+        x=spot_price,
+        y=1.02,
+        xref="x",
+        yref="paper",
+        text="Current Price",
+        showarrow=False,
+        font=dict(size=10, color=CHART_COLORS['accent'], weight='bold'),
+        bgcolor="rgba(255,255,255,0.9)",
+        bordercolor=CHART_COLORS['accent'],
+        borderwidth=1,
+        borderpad=3
     )
 
     # Create slider steps with dynamic annotations for metrics
@@ -334,16 +375,19 @@ def create_pnl_figure_strike(
 
         # Build annotations for this step
         annotations = [
-            # Strike price annotation
+            # Strike price annotation with box style (same level as Current Price: y=1.02)
             dict(
                 x=strike_price_val,
-                y=1,
+                y=1.02,
                 xref="x",
                 yref="paper",
                 text=f"Strike: ${strike_price_val:.0f}",
                 showarrow=False,
-                font=dict(size=10, color="#8b5cf6"),
-                yshift=10
+                font=dict(size=10, color="#8b5cf6", weight='bold'),
+                bgcolor="rgba(255,255,255,0.9)",
+                bordercolor="#8b5cf6",
+                borderwidth=1,
+                borderpad=3
             ),
             # Metrics box annotation (top left)
             dict(
@@ -369,17 +413,23 @@ def create_pnl_figure_strike(
             )
         ]
 
-        # Add breakeven vertical line annotations
-        for i, be in enumerate(sorted(breakeven_points)):
+        # Add breakeven vertical line annotations (just below Current Price/Strike level)
+        sorted_be_points = sorted(breakeven_points)
+        for i, be in enumerate(sorted_be_points):
+            label = f"BE: ${be:,.0f}" if len(sorted_be_points) == 1 else f"BE{i+1}: ${be:,.0f}"
+
             annotations.append(dict(
                 x=be,
-                y=1,
+                y=0.94,
                 xref="x",
                 yref="paper",
-                text=f"BE: ${be:,.0f}" if len(breakeven_points) == 1 else f"BE{i+1}",
+                text=label,
                 showarrow=False,
-                font=dict(size=10, color=CHART_COLORS['breakeven']),
-                yshift=-10
+                font=dict(size=10, color=CHART_COLORS['breakeven'], weight='bold'),
+                bgcolor="rgba(255,255,255,0.9)",
+                bordercolor=CHART_COLORS['breakeven'],
+                borderwidth=1,
+                borderpad=3
             ))
 
         # Add strike vertical line shape
@@ -397,14 +447,14 @@ def create_pnl_figure_strike(
             )
         ]
 
-        # Add breakeven vertical lines
+        # Add breakeven vertical lines (stop at y=0.90, before label box)
         for be in breakeven_points:
             shapes.append(dict(
                 type="line",
                 x0=be,
                 x1=be,
                 y0=0,
-                y1=1,
+                y1=0.90,
                 xref="x",
                 yref="paper",
                 line=dict(color=CHART_COLORS['breakeven'], width=1.5, dash="dash")
