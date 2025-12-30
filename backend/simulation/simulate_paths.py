@@ -790,8 +790,8 @@ def simulate_gbm_terminal(
 
     Example
     -------
-    >>> terminals = simulate_gbm_terminal(100, 0.05, 0.2, 1.0, 1_000_000, 252)
-    >>> call_price = price_european_call_mc(terminals, 100, 0.05, 1.0)
+    terminals = simulate_gbm_terminal(100, 0.05, 0.2, 1.0, 1_000_000, 252)
+    call_price = price_european_call_mc(terminals, 100, 0.05, 1.0)
     """
     dt = t / n_steps
     sqrt_dt = np.sqrt(dt)
@@ -1088,8 +1088,8 @@ def simulate_terminal(
 
     Example
     -------
-    >>> terminals = simulate_terminal('gbm', 100, 0.05, 0.2, 1.0, n_paths=1_000_000)
-    >>> call_price = price_european_call_mc(terminals, 100, 0.05, 1.0)
+    terminals = simulate_terminal('gbm', 100, 0.05, 0.2, 1.0, n_paths=1_000_000)
+    call_price = price_european_call_mc(terminals, 100, 0.05, 1.0)
     """
     if seed is not None:
         np.random.seed(seed)

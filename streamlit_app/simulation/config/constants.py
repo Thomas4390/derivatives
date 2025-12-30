@@ -1,0 +1,229 @@
+"""
+Constants for Monte Carlo Simulation Explorer.
+
+This module centralizes all configuration constants used throughout the application.
+"""
+
+# =============================================================================
+# SIMULATION MODELS
+# =============================================================================
+
+# Price path models
+PRICE_MODELS = {
+    "gbm": "Geometric Brownian Motion (GBM)",
+    "heston": "Heston Stochastic Volatility",
+    "merton": "Merton Jump Diffusion",
+    "sabr": "SABR Model"
+}
+
+# Volatility models
+VOLATILITY_MODELS = {
+    "garch": "GARCH(1,1)",
+    "ngarch": "NGARCH (NAGARCH)",
+    "gjr_garch": "GJR-GARCH",
+    "egarch": "EGARCH"
+}
+
+# Simulation modes
+SIMULATION_MODES = {
+    "price": "Price Path Simulation",
+    "volatility": "Volatility Simulation"
+}
+
+# Model descriptions for educational purposes
+MODEL_DESCRIPTIONS = {
+    # Price models
+    "gbm": """
+**Geometric Brownian Motion (Black-Scholes)**
+
+The foundational model for option pricing. Assumes:
+- Constant volatility (σ)
+- Log-normal price distribution
+- Continuous sample paths
+
+**SDE:** dS = r·S·dt + σ·S·dW
+""",
+    "heston": """
+**Heston Stochastic Volatility Model**
+
+Extends GBM with stochastic variance:
+- Mean-reverting variance process
+- Correlation between price and volatility (ρ)
+- Captures volatility smile
+
+**SDEs:**
+- dS = r·S·dt + √V·S·dW_S
+- dV = κ(θ - V)dt + ξ·√V·dW_V
+""",
+    "merton": """
+**Merton Jump Diffusion Model**
+
+Adds jumps to GBM to capture:
+- Sudden price movements (crashes, spikes)
+- Fat tails in return distribution
+- More realistic risk modeling
+
+**SDE:** dS/S = (r - λk)dt + σdW + (J-1)dN
+""",
+    "sabr": """
+**SABR Stochastic Volatility Model**
+
+Popular for interest rate derivatives:
+- CEV-like forward dynamics
+- Stochastic volatility
+- Analytical implied vol approximation
+
+**SDEs:**
+- dF = α·F^β·dW_F
+- dα = ν·α·dW_α
+""",
+    # Volatility models
+    "garch": """
+**GARCH(1,1) - Generalized Autoregressive Conditional Heteroskedasticity**
+
+The workhorse volatility model:
+- Volatility clustering
+- Mean reversion in variance
+- Symmetric response to shocks
+
+**Equation:** σ²_t = ω + α·ε²_{t-1} + β·σ²_{t-1}
+""",
+    "ngarch": """
+**NGARCH (NAGARCH) - Nonlinear Asymmetric GARCH**
+
+Captures the leverage effect:
+- Negative returns increase volatility more
+- More realistic for equity markets
+- Engle & Ng (1993)
+
+**Equation:** σ²_t = ω + α(ε_{t-1} - θσ_{t-1})² + βσ²_{t-1}
+""",
+    "gjr_garch": """
+**GJR-GARCH - Asymmetric GARCH**
+
+Alternative asymmetric model:
+- Uses indicator function for sign
+- Glosten, Jagannathan & Runkle (1993)
+
+**Equation:** σ²_t = ω + (α + γI_{t-1})ε²_{t-1} + βσ²_{t-1}
+""",
+    "egarch": """
+**EGARCH - Exponential GARCH**
+
+Log-volatility model:
+- No positivity constraints needed
+- Nelson (1991)
+- Asymmetric response
+
+**Equation:** ln(σ²_t) = ω + α(|z_{t-1}| - E[|z|]) + γz_{t-1} + βln(σ²_{t-1})
+"""
+}
+
+# =============================================================================
+# DEFAULT SIMULATION PARAMETERS
+# =============================================================================
+
+# Price model defaults
+DEFAULT_SPOT_PRICE = 100.0
+DEFAULT_RISK_FREE_RATE = 0.05
+DEFAULT_VOLATILITY = 0.20
+DEFAULT_TIME_HORIZON = 1.0  # years
+DEFAULT_NUM_PATHS = 1000
+DEFAULT_NUM_STEPS = 252  # daily steps for 1 year
+
+# Heston model defaults
+DEFAULT_HESTON_V0 = 0.04  # Initial variance (20% vol)
+DEFAULT_HESTON_KAPPA = 2.0  # Mean reversion speed
+DEFAULT_HESTON_THETA = 0.04  # Long-term variance
+DEFAULT_HESTON_XI = 0.3  # Vol of vol
+DEFAULT_HESTON_RHO = -0.7  # Correlation
+
+# Merton jump defaults
+DEFAULT_MERTON_LAMBDA = 0.5  # Jump intensity
+DEFAULT_MERTON_MU_J = -0.1  # Mean log-jump
+DEFAULT_MERTON_SIGMA_J = 0.2  # Jump vol
+
+# SABR defaults
+DEFAULT_SABR_BETA = 0.5  # CEV exponent
+DEFAULT_SABR_NU = 0.4  # Vol of vol
+DEFAULT_SABR_RHO = -0.3  # Correlation
+
+# Volatility model defaults
+DEFAULT_GARCH_OMEGA = 0.000002  # Base variance
+DEFAULT_GARCH_ALPHA = 0.05  # ARCH coefficient
+DEFAULT_GARCH_BETA = 0.90  # GARCH coefficient
+DEFAULT_NGARCH_THETA = 0.5  # Leverage parameter
+DEFAULT_GJR_GAMMA = 0.05  # Asymmetry coefficient
+DEFAULT_EGARCH_GAMMA = -0.1  # Asymmetry coefficient
+
+# =============================================================================
+# VISUALIZATION SETTINGS
+# =============================================================================
+
+# Number of paths to display in path charts
+MAX_DISPLAY_PATHS = 100
+
+# Chart heights
+CHART_HEIGHT_STANDARD = 500
+CHART_HEIGHT_LARGE = 600
+CHART_HEIGHT_SMALL = 400
+
+# Percentile bands for path visualization
+PERCENTILE_LOWER = 5
+PERCENTILE_UPPER = 95
+
+# =============================================================================
+# COLOR SCHEMES FOR MODELS
+# =============================================================================
+
+MODEL_COLORS = {
+    "gbm": "#1f77b4",
+    "heston": "#ff7f0e",
+    "merton": "#2ca02c",
+    "sabr": "#d62728",
+    "garch": "#9467bd",
+    "ngarch": "#8c564b",
+    "gjr_garch": "#e377c2",
+    "egarch": "#17becf"
+}
+
+# Path visualization colors
+PATH_COLORS = {
+    "sample_paths": "rgba(26, 54, 93, 0.15)",
+    "mean_path": "#1a365d",
+    "percentile_band": "rgba(13, 148, 136, 0.3)",
+    "initial_price": "#dc2626",
+    "terminal_dist": "#059669"
+}
+
+# =============================================================================
+# EDUCATIONAL CONTENT
+# =============================================================================
+
+# Greek-style parameter symbols
+PARAMETER_SYMBOLS = {
+    "s0": "S₀",
+    "r": "r",
+    "sigma": "σ",
+    "t": "T",
+    "v0": "V₀",
+    "kappa": "κ",
+    "theta": "θ",
+    "xi": "ξ",
+    "rho": "ρ",
+    "lambda_j": "λ",
+    "mu_j": "μⱼ",
+    "sigma_j": "σⱼ",
+    "beta": "β",
+    "nu": "ν",
+    "omega": "ω",
+    "alpha": "α"
+}
+
+# Stationarity conditions
+STATIONARITY_CONDITIONS = {
+    "garch": "α + β < 1",
+    "ngarch": "α(1 + θ²) + β < 1",
+    "gjr_garch": "α + β + γ/2 < 1",
+    "egarch": "|β| < 1"
+}
