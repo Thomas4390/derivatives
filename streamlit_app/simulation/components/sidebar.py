@@ -216,14 +216,14 @@ def render_sidebar() -> Dict[str, Any]:
             run_simulation = st.button(
                 "Run Simulation",
                 type="primary",
-                use_container_width=True
+                width="stretch"
             )
 
         with col2:
             reset = st.button(
                 "Reset Defaults",
                 type="secondary",
-                use_container_width=True
+                width="stretch"
             )
 
         params['run_simulation'] = run_simulation

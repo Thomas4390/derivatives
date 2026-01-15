@@ -701,7 +701,7 @@ def render_greeks_tab(
             'color': '#1e293b'
         }
 
-    st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+    st.plotly_chart(fig, width="stretch", config={'displayModeBar': False})
 
 
 def render_first_order_greeks(

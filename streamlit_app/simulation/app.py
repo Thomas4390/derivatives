@@ -205,7 +205,7 @@ col1, col2, col3 = st.columns([1, 2, 1])
 with col2:
     run_button = st.button(
         "🚀 Run Simulation",
-        use_container_width=True,
+        width="stretch",
         type="primary"
     )
 

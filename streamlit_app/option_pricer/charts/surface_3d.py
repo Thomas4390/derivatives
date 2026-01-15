@@ -323,7 +323,7 @@ def render_3d_tab(
                 opt,
                 key=f"3d_surface_btn_{opt}",
                 type="primary" if is_selected else "secondary",
-                use_container_width=True
+                width="stretch"
             ):
                 st.session_state['3d_surface_type'] = opt
                 st.rerun()
@@ -400,7 +400,7 @@ def render_3d_tab(
         surface_type
     )
 
-    st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': True})
+    st.plotly_chart(fig, width="stretch", config={'displayModeBar': True})
 
     # Info boxes
     _render_3d_info_boxes(selected_greek, y_label, positions, stock_position, surface_type)

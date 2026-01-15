@@ -384,7 +384,7 @@ def _render_interactive_price_path(params: Dict[str, Any]) -> None:
         hovermode='x unified'
     )
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
     # Statistics
     _display_path_statistics(path, returns, s0, "Price")
@@ -590,7 +590,7 @@ def _render_interactive_volatility_path(params: Dict[str, Any]) -> None:
         hovermode='x unified'
     )
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
     # Statistics
     _display_volatility_statistics(variance, volatility, unconditional_var, model_name)

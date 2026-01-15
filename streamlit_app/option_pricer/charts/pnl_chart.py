@@ -673,7 +673,7 @@ def render_pnl_tab(
             position_type=position_type
         )
 
-        st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+        st.plotly_chart(fig, width="stretch", config={'displayModeBar': False})
 
     else:
         # Standard mode (DTE or IV) - show metrics row
@@ -701,4 +701,4 @@ def render_pnl_tab(
             breakeven_result=breakeven_result
         )
 
-        st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+        st.plotly_chart(fig, width="stretch", config={'displayModeBar': False})

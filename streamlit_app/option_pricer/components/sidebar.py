@@ -327,7 +327,7 @@ def _render_strategy_builder(
     # Apply button (for manual modifications)
     st.markdown("<div style='height: 0.5rem'></div>", unsafe_allow_html=True)
 
-    if st.button("✓  Apply Changes", use_container_width=True, type="primary", key="apply_strategy_btn"):
+    if st.button("✓  Apply Changes", width="stretch", type="primary", key="apply_strategy_btn"):
         _apply_strategy(
             spot_price, risk_free_rate, strategy_legs, has_stock,
             portfolio_class, option_position_class, stock_position_class
@@ -417,12 +417,12 @@ def _render_add_leg_button(spot_price: float, is_custom: bool, selected_strategy
     # Two buttons: Add Option and Add Stock (always show both for consistency)
     col1, col2 = st.columns(2)
     with col1:
-        add_option_clicked = st.button("➕ Option", use_container_width=True, key="add_option_leg_btn", type="secondary")
+        add_option_clicked = st.button("➕ Option", width="stretch", key="add_option_leg_btn", type="secondary")
     with col2:
         # Disable stock button if already has stock
         add_stock_clicked = st.button(
             "➕ Stock",
-            use_container_width=True,
+            width="stretch",
             key="add_stock_leg_btn",
             type="secondary",
             disabled=has_stock
@@ -534,7 +534,7 @@ def _render_leg_editor(
             st.markdown(leg_header_html, unsafe_allow_html=True)
         with header_col2:
             st.markdown("<div style='height: 0.25rem'></div>", unsafe_allow_html=True)
-            if st.button("🗑️", key=f"remove_leg_{leg_index}_v{version}", help="Remove this leg", use_container_width=True):
+            if st.button("🗑️", key=f"remove_leg_{leg_index}_v{version}", help="Remove this leg", width="stretch"):
                 should_remove = True
     else:
         st.markdown(leg_header_html, unsafe_allow_html=True)
@@ -649,7 +649,7 @@ def _render_stock_leg_editor(spot_price: float, is_custom: bool, selected_strate
             st.markdown(header_html, unsafe_allow_html=True)
         with header_col2:
             st.markdown("<div style='height: 0.25rem'></div>", unsafe_allow_html=True)
-            if st.button("🗑️", key=f"remove_stock_v{version}", help="Remove stock position", use_container_width=True):
+            if st.button("🗑️", key=f"remove_stock_v{version}", help="Remove stock position", width="stretch"):
                 should_remove = True
     else:
         st.markdown(header_html, unsafe_allow_html=True)
@@ -854,7 +854,7 @@ def _render_positions_section(positions: list, stock_position) -> None:
 
     st.markdown("<div style='height: 0.5rem'></div>", unsafe_allow_html=True)
 
-    if st.button("🗑️  Clear All", use_container_width=True, key="clear_all_btn"):
+    if st.button("🗑️  Clear All", width="stretch", key="clear_all_btn"):
         # Clear all positions
         st.session_state.positions = []
         st.session_state.stock_position = None

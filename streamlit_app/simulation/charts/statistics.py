@@ -181,7 +181,7 @@ def _render_summary_statistics(result, params: Dict[str, Any], result_type: str)
         height=CHART_HEIGHT_STANDARD
     )
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
 
 def _render_convergence_analysis(result, params: Dict[str, Any], result_type: str) -> None:
@@ -285,7 +285,7 @@ def _render_convergence_analysis(result, params: Dict[str, Any], result_type: st
         showlegend=True
     )
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
     # Convergence statistics
     col1, col2, col3 = st.columns(3)
@@ -359,7 +359,7 @@ def _render_performance_metrics(result, params: Dict[str, Any]) -> None:
         height=CHART_HEIGHT_STANDARD
     )
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
     # Memory usage estimate
     st.markdown("##### Memory Usage Estimate")

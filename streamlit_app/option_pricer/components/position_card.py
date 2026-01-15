@@ -118,13 +118,13 @@ def render_positions_list(
     col1, col2 = st.columns(2)
 
     with col1:
-        if st.button("🗑️ Clear All", use_container_width=True, key="clear_all_btn"):
+        if st.button("🗑️ Clear All", width="stretch", key="clear_all_btn"):
             if on_clear_all:
                 on_clear_all()
             st.rerun()
 
     with col2:
-        if st.button("↩️ Remove Last", use_container_width=True, key="remove_last_btn"):
+        if st.button("↩️ Remove Last", width="stretch", key="remove_last_btn"):
             if on_remove_last:
                 on_remove_last()
             st.rerun()

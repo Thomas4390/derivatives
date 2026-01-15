@@ -151,7 +151,7 @@ def _render_sample_paths(result, params: Dict[str, Any]) -> None:
         margin=dict(l=60, r=40, t=60, b=60)
     )
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
     # Path statistics summary
     col1, col2, col3, col4 = st.columns(4)
@@ -260,7 +260,7 @@ def _render_statistics_view(result, params: Dict[str, Any]) -> None:
         )
     )
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
 
 def _render_log_returns(result, params: Dict[str, Any]) -> None:
@@ -360,7 +360,7 @@ def _render_log_returns(result, params: Dict[str, Any]) -> None:
         showlegend=False
     )
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
     # Return statistics
     st.markdown("#### Return Statistics")
@@ -465,7 +465,7 @@ def _render_variance_paths(result, params: Dict[str, Any]) -> None:
     fig.update_yaxes(title_text="Variance", row=1, col=1)
     fig.update_yaxes(title_text="Volatility (%)", row=1, col=2)
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
 
 def _norm_ppf(p: float) -> float:

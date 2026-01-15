@@ -203,7 +203,7 @@ def _render_distribution_analysis(
     fig.update_xaxes(title_text="Theoretical Quantiles", row=2, col=2)
     fig.update_yaxes(title_text="Sample Quantiles (Standardized)", row=2, col=2)
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
     # Distribution statistics table
     st.markdown("#### Distribution Statistics")
@@ -302,7 +302,7 @@ def _render_theoretical_comparison(values: np.ndarray, params: Dict[str, Any]) -
         height=CHART_HEIGHT_STANDARD
     )
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
 
 def _render_vol_theoretical_comparison(values: np.ndarray, params: Dict[str, Any]) -> None:
@@ -329,7 +329,7 @@ def _render_vol_theoretical_comparison(values: np.ndarray, params: Dict[str, Any
         height=CHART_HEIGHT_STANDARD
     )
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
 
 def _render_risk_metrics(
@@ -407,7 +407,7 @@ def _render_risk_metrics(
         height=CHART_HEIGHT_STANDARD
     )
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
     # Additional risk statistics
     st.markdown("#### Additional Risk Statistics")

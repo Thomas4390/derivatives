@@ -151,7 +151,7 @@ def _render_volatility_sample_paths(result, params: Dict[str, Any]) -> None:
         )
     )
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
     # Statistics
     terminal_vol = result.terminal_volatility * 100
@@ -277,7 +277,7 @@ def _render_variance_analysis(result, params: Dict[str, Any]) -> None:
         showlegend=False
     )
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
 
 def _render_leverage_effect(result, params: Dict[str, Any]) -> None:
@@ -322,7 +322,7 @@ def _render_leverage_effect(result, params: Dict[str, Any]) -> None:
         height=CHART_HEIGHT_STANDARD
     )
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
     # Correlation statistic
     valid_mask = ~np.isnan(vol_changes) & ~np.isnan(returns)
@@ -416,7 +416,7 @@ def _render_news_impact_curve(params: Dict[str, Any]) -> None:
         )
     )
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
     st.markdown("""
     **Interpretation:**

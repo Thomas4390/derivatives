@@ -228,7 +228,7 @@ def render_chart_controls(
                 f"{icon} {label}",
                 key=f"{slider_key}_{option}",
                 type="primary" if is_selected else "secondary",
-                use_container_width=True
+                width="stretch"
             ):
                 st.session_state[state_key] = option
                 st.rerun()
