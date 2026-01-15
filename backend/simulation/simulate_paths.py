@@ -3,10 +3,23 @@ Monte Carlo Path Simulation Module - Ultra-Optimized with Numba
 ===============================================================
 
 This module provides high-performance Monte Carlo simulation for various
-stochastic processes used in derivatives pricing:
+stochastic processes under the PHYSICAL MEASURE (P-measure).
+
+P-Measure vs Q-Measure:
+-----------------------
+This module simulates under the REAL-WORLD (P) measure, which is appropriate for:
+    - Scenario analysis and risk management
+    - VaR and stress testing
+    - Backtesting trading strategies
+    - Generating realistic price trajectories
+
+For DERIVATIVES PRICING, use the Q-measure (risk-neutral) where drift = r.
+The P-measure uses drift = μ (expected return), capturing real-world dynamics.
+
+Reference: https://quantnet.com/threads/p-measure-vs-q-measure.3227/
 
 Models Implemented:
-    1. Geometric Brownian Motion (Black-Scholes)
+    1. Geometric Brownian Motion (GBM)
     2. Heston Stochastic Volatility
     3. Merton Jump Diffusion
     4. SABR Stochastic Volatility
@@ -123,7 +136,7 @@ def _generate_correlated_normals(
 @njit(parallel=True, cache=True, fastmath=True)
 def simulate_gbm_paths(
     s0: float,
-    r: float,
+    mu: float,
     sigma: float,
     t: float,
     n_paths: int,
@@ -131,18 +144,21 @@ def simulate_gbm_paths(
     antithetic: bool = True
 ) -> np.ndarray:
     """
-    Simulate price paths using Geometric Brownian Motion (Black-Scholes model).
+    Simulate price paths using Geometric Brownian Motion under P-measure.
 
-    dS = r*S*dt + sigma*S*dW
+    P-MEASURE (Real World):
+        dS = μ*S*dt + σ*S*dW
 
-    Uses exact solution: S(t) = S(0) * exp((r - 0.5*sigma^2)*t + sigma*W(t))
+    Uses exact solution: S(t) = S(0) * exp((μ - 0.5*σ²)*t + σ*W(t))
+
+    Note: For risk-neutral pricing (Q-measure), set μ = r (risk-free rate).
 
     Parameters
     ----------
     s0 : float
         Initial stock price
-    r : float
-        Risk-free interest rate (annualized)
+    mu : float
+        Expected return / drift (annualized) - use risk-free rate r for Q-measure
     sigma : float
         Volatility (annualized)
     t : float
@@ -163,7 +179,7 @@ def simulate_gbm_paths(
     sqrt_dt = np.sqrt(dt)
 
     # Pre-compute drift and diffusion coefficients
-    drift = (r - 0.5 * sigma * sigma) * dt
+    drift = (mu - 0.5 * sigma * sigma) * dt
     diffusion = sigma * sqrt_dt
 
     if antithetic:
@@ -202,22 +218,27 @@ def simulate_gbm_paths(
 @njit(parallel=True, cache=True, fastmath=True)
 def simulate_gbm_paths_vectorized(
     s0: float,
-    r: float,
+    mu: float,
     sigma: float,
     t: float,
     n_paths: int,
     n_steps: int
 ) -> np.ndarray:
     """
-    Vectorized version of GBM simulation - optimized for very large n_paths.
+    Vectorized version of GBM simulation under P-measure.
 
-    This version generates all random numbers at once and uses cumulative sum
-    for better memory locality when n_paths >> n_steps.
+    Optimized for very large n_paths. Generates all random numbers at once
+    and uses cumulative sum for better memory locality.
+
+    Parameters
+    ----------
+    mu : float
+        Expected return / drift (annualized) - use risk-free rate r for Q-measure
     """
     dt = t / n_steps
     sqrt_dt = np.sqrt(dt)
 
-    drift = (r - 0.5 * sigma * sigma) * dt
+    drift = (mu - 0.5 * sigma * sigma) * dt
     diffusion = sigma * sqrt_dt
 
     # Generate all random numbers at once
@@ -248,7 +269,7 @@ def simulate_gbm_paths_vectorized(
 def simulate_heston_paths(
     s0: float,
     v0: float,
-    r: float,
+    mu: float,
     kappa: float,
     theta: float,
     xi: float,
@@ -259,12 +280,15 @@ def simulate_heston_paths(
     scheme: int = 0
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
-    Simulate price paths using the Heston stochastic volatility model.
+    Simulate price paths using the Heston stochastic volatility model under P-measure.
 
-    dS = r*S*dt + sqrt(V)*S*dW_S
-    dV = kappa*(theta - V)*dt + xi*sqrt(V)*dW_V
+    P-MEASURE (Real World):
+        dS = μ*S*dt + sqrt(V)*S*dW_S
+        dV = κ*(θ - V)*dt + ξ*sqrt(V)*dW_V
 
-    Corr(dW_S, dW_V) = rho
+    Corr(dW_S, dW_V) = ρ
+
+    Note: For risk-neutral pricing (Q-measure), set μ = r (risk-free rate).
 
     Parameters
     ----------
@@ -272,8 +296,8 @@ def simulate_heston_paths(
         Initial stock price
     v0 : float
         Initial variance (sigma^2, not sigma)
-    r : float
-        Risk-free interest rate
+    mu : float
+        Expected return / drift (annualized) - use risk-free rate r for Q-measure
     kappa : float
         Mean reversion speed of variance
     theta : float
@@ -329,7 +353,7 @@ def simulate_heston_paths(
                 # Simple Euler scheme
                 sqrt_v = np.sqrt(max(v_curr, 0.0))
                 v_next = v_curr + kappa * (theta - v_curr) * dt + xi * sqrt_v * dw_v
-                s_next = s_curr * np.exp((r - 0.5 * v_curr) * dt + sqrt_v * dw_s)
+                s_next = s_curr * np.exp((mu - 0.5 * v_curr) * dt + sqrt_v * dw_s)
 
             elif scheme == 1:
                 # Full truncation scheme
@@ -337,7 +361,7 @@ def simulate_heston_paths(
                 sqrt_v = np.sqrt(v_plus)
                 v_next = v_curr + kappa * (theta - v_plus) * dt + xi * sqrt_v * dw_v
                 v_next = max(v_next, 0.0)
-                s_next = s_curr * np.exp((r - 0.5 * v_plus) * dt + sqrt_v * dw_s)
+                s_next = s_curr * np.exp((mu - 0.5 * v_plus) * dt + sqrt_v * dw_s)
 
             elif scheme == 2:
                 # Reflection scheme
@@ -345,7 +369,7 @@ def simulate_heston_paths(
                 sqrt_v = np.sqrt(v_plus)
                 v_next = v_curr + kappa * (theta - v_plus) * dt + xi * sqrt_v * dw_v
                 v_next = abs(v_next)
-                s_next = s_curr * np.exp((r - 0.5 * v_plus) * dt + sqrt_v * dw_s)
+                s_next = s_curr * np.exp((mu - 0.5 * v_plus) * dt + sqrt_v * dw_s)
 
             else:  # scheme == 3: QE scheme (simplified)
                 # Quadratic-Exponential scheme for variance
@@ -376,7 +400,7 @@ def simulate_heston_paths(
                         v_next = np.log((1.0 - p) / (1.0 - u)) / beta
 
                 sqrt_v = np.sqrt(v_plus)
-                s_next = s_curr * np.exp((r - 0.5 * v_plus) * dt + sqrt_v * dw_s)
+                s_next = s_curr * np.exp((mu - 0.5 * v_plus) * dt + sqrt_v * dw_s)
 
             v_paths[i, j + 1] = v_next
             s_paths[i, j + 1] = s_next
@@ -388,7 +412,7 @@ def simulate_heston_paths(
 def simulate_heston_single_path(
     s0: float,
     v0: float,
-    r: float,
+    mu: float,
     kappa: float,
     theta: float,
     xi: float,
@@ -397,7 +421,12 @@ def simulate_heston_single_path(
     n_steps: int
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
-    Simulate a single Heston path - useful for visualization.
+    Simulate a single Heston path under P-measure - useful for visualization.
+
+    Parameters
+    ----------
+    mu : float
+        Expected return / drift (annualized) - use risk-free rate r for Q-measure
     """
     dt = t / n_steps
     sqrt_dt = np.sqrt(dt)
@@ -420,7 +449,7 @@ def simulate_heston_single_path(
         sqrt_v = np.sqrt(v_curr)
 
         v_path[j + 1] = max(v_path[j] + kappa * (theta - v_curr) * dt + xi * sqrt_v * dw_v, 0.0)
-        s_path[j + 1] = s_path[j] * np.exp((r - 0.5 * v_curr) * dt + sqrt_v * dw_s)
+        s_path[j + 1] = s_path[j] * np.exp((mu - 0.5 * v_curr) * dt + sqrt_v * dw_s)
 
     return s_path, v_path
 
@@ -432,7 +461,7 @@ def simulate_heston_single_path(
 @njit(parallel=True, cache=True, fastmath=True)
 def simulate_merton_jump_paths(
     s0: float,
-    r: float,
+    mu: float,
     sigma: float,
     lambda_j: float,
     mu_j: float,
@@ -442,21 +471,24 @@ def simulate_merton_jump_paths(
     n_steps: int
 ) -> np.ndarray:
     """
-    Simulate price paths using the Merton Jump Diffusion model.
+    Simulate price paths using the Merton Jump Diffusion model under P-measure.
 
-    dS/S = (r - lambda*k)*dt + sigma*dW + (J-1)*dN
+    P-MEASURE (Real World):
+        dS/S = (μ - λ*k)*dt + σ*dW + (J-1)*dN
 
     Where:
-    - dN is a Poisson process with intensity lambda
-    - J is lognormally distributed: ln(J) ~ N(mu_j, sigma_j^2)
-    - k = E[J-1] = exp(mu_j + 0.5*sigma_j^2) - 1
+    - dN is a Poisson process with intensity λ
+    - J is lognormally distributed: ln(J) ~ N(mu_j, sigma_j²)
+    - k = E[J-1] = exp(mu_j + 0.5*sigma_j²) - 1
+
+    Note: For risk-neutral pricing (Q-measure), set μ = r (risk-free rate).
 
     Parameters
     ----------
     s0 : float
         Initial stock price
-    r : float
-        Risk-free interest rate
+    mu : float
+        Expected return / drift (annualized) - use risk-free rate r for Q-measure
     sigma : float
         Diffusion volatility
     lambda_j : float
@@ -480,11 +512,11 @@ def simulate_merton_jump_paths(
     dt = t / n_steps
     sqrt_dt = np.sqrt(dt)
 
-    # Compensator for risk-neutral drift
+    # Compensator for drift
     k = np.exp(mu_j + 0.5 * sigma_j * sigma_j) - 1.0
 
-    # Adjusted drift under risk-neutral measure
-    drift = (r - lambda_j * k - 0.5 * sigma * sigma) * dt
+    # Adjusted drift under P-measure
+    drift = (mu - lambda_j * k - 0.5 * sigma * sigma) * dt
     diffusion = sigma * sqrt_dt
 
     # Jump intensity per time step
@@ -628,7 +660,7 @@ def _cholesky_decomposition(corr_matrix: np.ndarray) -> np.ndarray:
 @njit(parallel=True, cache=True, fastmath=True)
 def simulate_correlated_gbm_paths(
     s0: np.ndarray,
-    r: float,
+    mu: float,
     sigmas: np.ndarray,
     corr_matrix: np.ndarray,
     t: float,
@@ -636,14 +668,14 @@ def simulate_correlated_gbm_paths(
     n_steps: int
 ) -> np.ndarray:
     """
-    Simulate correlated GBM paths for multiple assets.
+    Simulate correlated GBM paths for multiple assets under P-measure.
 
     Parameters
     ----------
     s0 : np.ndarray
         Initial prices for each asset, shape (n_assets,)
-    r : float
-        Risk-free interest rate
+    mu : float
+        Expected return / drift (annualized) - use risk-free rate r for Q-measure
     sigmas : np.ndarray
         Volatilities for each asset, shape (n_assets,)
     corr_matrix : np.ndarray
@@ -670,7 +702,7 @@ def simulate_correlated_gbm_paths(
     # Pre-compute drifts
     drifts = np.empty(n_assets, dtype=np.float64)
     for k in range(n_assets):
-        drifts[k] = (r - 0.5 * sigmas[k] * sigmas[k]) * dt
+        drifts[k] = (mu - 0.5 * sigmas[k] * sigmas[k]) * dt
 
     paths = np.empty((n_paths, n_steps + 1, n_assets), dtype=np.float64)
 
@@ -706,22 +738,27 @@ def simulate_correlated_gbm_paths(
 @njit(parallel=True, cache=True, fastmath=True)
 def simulate_gbm_with_control_variate(
     s0: float,
-    r: float,
+    mu: float,
     sigma: float,
     t: float,
     n_paths: int,
     n_steps: int
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
-    GBM simulation with geometric average as control variate.
+    GBM simulation with geometric average as control variate under P-measure.
 
     Returns both the price paths and the geometric average paths
     for use in Asian option pricing with variance reduction.
+
+    Parameters
+    ----------
+    mu : float
+        Expected return / drift (annualized) - use risk-free rate r for Q-measure
     """
     dt = t / n_steps
     sqrt_dt = np.sqrt(dt)
 
-    drift = (r - 0.5 * sigma * sigma) * dt
+    drift = (mu - 0.5 * sigma * sigma) * dt
     diffusion = sigma * sqrt_dt
 
     paths = np.empty((n_paths, n_steps + 1), dtype=np.float64)
@@ -752,7 +789,7 @@ def simulate_gbm_with_control_variate(
 @njit(parallel=True, cache=True, fastmath=True)
 def simulate_gbm_terminal(
     s0: float,
-    r: float,
+    mu: float,
     sigma: float,
     t: float,
     n_paths: int,
@@ -760,9 +797,9 @@ def simulate_gbm_terminal(
     antithetic: bool = True
 ) -> np.ndarray:
     """
-    GBM simulation returning ONLY terminal values with antithetic variates.
+    GBM simulation returning ONLY terminal values under P-measure.
 
-    This is the most efficient function for European option pricing:
+    Optimized for scenario analysis and risk management:
     - 1.8x faster than full path simulation
     - 99.6% less memory (8 MB vs 2 GB for 1M paths)
 
@@ -770,8 +807,8 @@ def simulate_gbm_terminal(
     ----------
     s0 : float
         Initial stock price
-    r : float
-        Risk-free interest rate (annualized)
+    mu : float
+        Expected return / drift (annualized) - use risk-free rate r for Q-measure
     sigma : float
         Volatility (annualized)
     t : float
@@ -790,13 +827,17 @@ def simulate_gbm_terminal(
 
     Example
     -------
+    # P-measure (scenario analysis with expected return μ=8%)
+    terminals = simulate_gbm_terminal(100, 0.08, 0.2, 1.0, 1_000_000, 252)
+
+    # Q-measure (pricing with risk-free rate r=5%)
     terminals = simulate_gbm_terminal(100, 0.05, 0.2, 1.0, 1_000_000, 252)
     call_price = price_european_call_mc(terminals, 100, 0.05, 1.0)
     """
     dt = t / n_steps
     sqrt_dt = np.sqrt(dt)
 
-    drift = (r - 0.5 * sigma * sigma) * dt
+    drift = (mu - 0.5 * sigma * sigma) * dt
     diffusion = sigma * sqrt_dt
 
     terminals = np.empty(n_paths, dtype=np.float64)
@@ -830,7 +871,7 @@ def simulate_gbm_terminal(
 def simulate_heston_terminal(
     s0: float,
     v0: float,
-    r: float,
+    mu: float,
     kappa: float,
     theta: float,
     xi: float,
@@ -840,9 +881,9 @@ def simulate_heston_terminal(
     n_steps: int
 ) -> np.ndarray:
     """
-    Heston model simulation returning ONLY terminal values.
+    Heston model simulation returning ONLY terminal values under P-measure.
 
-    Uses full truncation scheme. Optimized for European option pricing.
+    Uses full truncation scheme. Optimized for scenario analysis.
 
     Parameters
     ----------
@@ -850,8 +891,8 @@ def simulate_heston_terminal(
         Initial stock price
     v0 : float
         Initial variance (sigma^2, not sigma)
-    r : float
-        Risk-free interest rate
+    mu : float
+        Expected return / drift (annualized) - use risk-free rate r for Q-measure
     kappa : float
         Mean reversion speed of variance
     theta : float
@@ -893,7 +934,7 @@ def simulate_heston_terminal(
             sqrt_v = np.sqrt(v_plus)
 
             v = max(v + kappa * (theta - v_plus) * dt + xi * sqrt_v * dw_v, 0.0)
-            s = s * np.exp((r - 0.5 * v_plus) * dt + sqrt_v * dw_s)
+            s = s * np.exp((mu - 0.5 * v_plus) * dt + sqrt_v * dw_s)
 
         terminals[i] = s
 
@@ -903,7 +944,7 @@ def simulate_heston_terminal(
 @njit(parallel=True, cache=True, fastmath=True)
 def simulate_merton_terminal(
     s0: float,
-    r: float,
+    mu: float,
     sigma: float,
     lambda_j: float,
     mu_j: float,
@@ -913,16 +954,16 @@ def simulate_merton_terminal(
     n_steps: int
 ) -> np.ndarray:
     """
-    Merton Jump Diffusion simulation returning ONLY terminal values.
+    Merton Jump Diffusion simulation returning ONLY terminal values under P-measure.
 
-    Optimized for European option pricing.
+    Optimized for scenario analysis.
 
     Parameters
     ----------
     s0 : float
         Initial stock price
-    r : float
-        Risk-free interest rate
+    mu : float
+        Expected return / drift (annualized) - use risk-free rate r for Q-measure
     sigma : float
         Diffusion volatility
     lambda_j : float
@@ -947,7 +988,7 @@ def simulate_merton_terminal(
     sqrt_dt = np.sqrt(dt)
 
     k = np.exp(mu_j + 0.5 * sigma_j * sigma_j) - 1.0
-    drift = (r - lambda_j * k - 0.5 * sigma * sigma) * dt
+    drift = (mu - lambda_j * k - 0.5 * sigma * sigma) * dt
     diffusion = sigma * sqrt_dt
     lambda_dt = lambda_j * dt
 
@@ -1046,7 +1087,7 @@ def simulate_sabr_terminal(
 def simulate_terminal(
     model: str,
     s0: float,
-    r: float,
+    mu: float,
     sigma: float,
     t: float,
     n_paths: int = 100000,
@@ -1055,10 +1096,13 @@ def simulate_terminal(
     **kwargs
 ) -> np.ndarray:
     """
-    High-level interface for terminal-only simulation.
+    High-level interface for terminal-only simulation under P-measure.
 
     This is ~1.8x faster and uses ~99% less memory than full path simulation.
-    Use this for European option pricing.
+    Use this for scenario analysis and risk management.
+
+    Note: For derivatives pricing under Q-measure, use drift = r (risk-free rate).
+    This function uses P-measure with drift = mu (expected return).
 
     Parameters
     ----------
@@ -1066,8 +1110,8 @@ def simulate_terminal(
         One of 'gbm', 'heston', 'merton', 'sabr'
     s0 : float
         Initial price
-    r : float
-        Risk-free rate
+    mu : float
+        Expected return (drift under P-measure)
     sigma : float
         Volatility (or initial vol for stochastic vol models)
     t : float
@@ -1088,8 +1132,8 @@ def simulate_terminal(
 
     Example
     -------
-    terminals = simulate_terminal('gbm', 100, 0.05, 0.2, 1.0, n_paths=1_000_000)
-    call_price = price_european_call_mc(terminals, 100, 0.05, 1.0)
+    # Simulate with 8% expected annual return
+    terminals = simulate_terminal('gbm', 100, 0.08, 0.2, 1.0, n_paths=1_000_000)
     """
     if seed is not None:
         np.random.seed(seed)
@@ -1098,7 +1142,7 @@ def simulate_terminal(
 
     if model_lower == 'gbm':
         antithetic = kwargs.get('antithetic', True)
-        return simulate_gbm_terminal(s0, r, sigma, t, n_paths, n_steps, antithetic)
+        return simulate_gbm_terminal(s0, mu, sigma, t, n_paths, n_steps, antithetic)
 
     elif model_lower == 'heston':
         v0 = kwargs.get('v0', sigma * sigma)
@@ -1106,13 +1150,13 @@ def simulate_terminal(
         theta = kwargs.get('theta', sigma * sigma)
         xi = kwargs.get('xi', 0.3)
         rho = kwargs.get('rho', -0.7)
-        return simulate_heston_terminal(s0, v0, r, kappa, theta, xi, rho, t, n_paths, n_steps)
+        return simulate_heston_terminal(s0, v0, mu, kappa, theta, xi, rho, t, n_paths, n_steps)
 
     elif model_lower == 'merton':
         lambda_j = kwargs.get('lambda_j', 0.5)
         mu_j = kwargs.get('mu_j', -0.1)
         sigma_j = kwargs.get('sigma_j', 0.2)
-        return simulate_merton_terminal(s0, r, sigma, lambda_j, mu_j, sigma_j, t, n_paths, n_steps)
+        return simulate_merton_terminal(s0, mu, sigma, lambda_j, mu_j, sigma_j, t, n_paths, n_steps)
 
     elif model_lower == 'sabr':
         alpha0 = kwargs.get('alpha0', sigma)
@@ -1132,7 +1176,7 @@ def simulate_terminal(
 def simulate_paths(
     model: str,
     s0: float,
-    r: float,
+    mu: float,
     sigma: float,
     t: float,
     n_paths: int = 100000,
@@ -1141,7 +1185,15 @@ def simulate_paths(
     **kwargs
 ) -> SimulationResult:
     """
-    High-level interface for simulating price paths.
+    High-level interface for simulating price paths under P-measure.
+
+    This function simulates under the REAL-WORLD (P) measure, which is appropriate for:
+        - Scenario analysis and risk management
+        - VaR and stress testing
+        - Backtesting trading strategies
+        - Generating realistic price trajectories
+
+    Note: For derivatives pricing under Q-measure, use drift = r (risk-free rate).
 
     Parameters
     ----------
@@ -1149,8 +1201,8 @@ def simulate_paths(
         One of 'gbm', 'heston', 'merton', 'sabr'
     s0 : float
         Initial price
-    r : float
-        Risk-free rate
+    mu : float
+        Expected return (drift under P-measure)
     sigma : float
         Volatility (or initial vol for stochastic vol models)
     t : float
@@ -1180,7 +1232,7 @@ def simulate_paths(
 
     if model_lower == 'gbm':
         antithetic = kwargs.get('antithetic', True)
-        paths = simulate_gbm_paths(s0, r, sigma, t, n_paths, n_steps, antithetic)
+        paths = simulate_gbm_paths(s0, mu, sigma, t, n_paths, n_steps, antithetic)
         model_name = "Geometric Brownian Motion"
 
     elif model_lower == 'heston':
@@ -1192,7 +1244,7 @@ def simulate_paths(
         scheme = kwargs.get('scheme', 1)
 
         paths, _ = simulate_heston_paths(
-            s0, v0, r, kappa, theta, xi, rho, t, n_paths, n_steps, scheme
+            s0, v0, mu, kappa, theta, xi, rho, t, n_paths, n_steps, scheme
         )
         model_name = "Heston Stochastic Volatility"
 
@@ -1202,7 +1254,7 @@ def simulate_paths(
         sigma_j = kwargs.get('sigma_j', 0.2)
 
         paths = simulate_merton_jump_paths(
-            s0, r, sigma, lambda_j, mu_j, sigma_j, t, n_paths, n_steps
+            s0, mu, sigma, lambda_j, mu_j, sigma_j, t, n_paths, n_steps
         )
         model_name = "Merton Jump Diffusion"
 

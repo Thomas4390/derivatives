@@ -3,7 +3,18 @@ Volatility Path Simulation Module - Ultra-Optimized with Numba
 ===============================================================
 
 This module provides high-performance Monte Carlo simulation for various
-volatility models used in derivatives pricing and risk management.
+volatility models used in scenario analysis and risk management.
+
+P-Measure (Physical Measure) Implementation:
+--------------------------------------------
+The GARCH-family models simulate volatility dynamics under the REAL-WORLD (P)
+measure. This is appropriate because:
+    - GARCH models are estimated from historical data (observed returns)
+    - The volatility clustering patterns reflect real-world dynamics
+    - Used for VaR, stress testing, and scenario analysis
+
+For joint price-volatility simulations, the price dynamics also use P-measure
+with drift = mu (expected return), NOT the risk-free rate r.
 
 Models Implemented:
     1. GARCH(1,1) - Generalized Autoregressive Conditional Heteroskedasticity
@@ -602,7 +613,7 @@ def simulate_ngarch_terminal(
 @njit(parallel=True, cache=True, fastmath=True)
 def simulate_gbm_garch_paths(
     s0: float,
-    r: float,
+    mu: float,
     sigma0: float,
     omega: float,
     alpha: float,
@@ -614,8 +625,8 @@ def simulate_gbm_garch_paths(
     """
     Simulate joint price and volatility paths using GBM with GARCH(1,1) volatility.
 
-    Model:
-        dS/S = r·dt + σ_t·dW
+    Model (P-measure):
+        dS/S = μ·dt + σ_t·dW
         σ²_t = ω + α·ε²_{t-1} + β·σ²_{t-1}
 
     The GARCH equation operates on standardized returns (z_t), so we use:
@@ -627,8 +638,8 @@ def simulate_gbm_garch_paths(
     ----------
     s0 : float
         Initial stock price
-    r : float
-        Risk-free rate (annualized)
+    mu : float
+        Expected return (drift under P-measure, annualized)
     sigma0 : float
         Initial volatility (annualized)
     omega : float
@@ -672,8 +683,8 @@ def simulate_gbm_garch_paths(
             var_t = variance_paths[i, t_idx]
             sigma_t = np.sqrt(var_t)
 
-            # Log return for price evolution
-            log_return = (r - 0.5 * var_t) * dt + sigma_t * sqrt_dt * z
+            # Log return for price evolution (P-measure: drift = mu)
+            log_return = (mu - 0.5 * var_t) * dt + sigma_t * sqrt_dt * z
             price_paths[i, t_idx + 1] = price_paths[i, t_idx] * np.exp(log_return)
             return_paths[i, t_idx] = log_return
 
@@ -688,7 +699,7 @@ def simulate_gbm_garch_paths(
 @njit(parallel=True, cache=True, fastmath=True)
 def simulate_gbm_ngarch_paths(
     s0: float,
-    r: float,
+    mu: float,
     sigma0: float,
     omega: float,
     alpha: float,
@@ -701,8 +712,8 @@ def simulate_gbm_ngarch_paths(
     """
     Simulate joint price and volatility paths using GBM with NGARCH volatility.
 
-    Model:
-        dS/S = r·dt + σ_t·dW
+    Model (P-measure):
+        dS/S = μ·dt + σ_t·dW
         h_t = ω + α·h_{t-1}·(z_{t-1} - θ)² + β·h_{t-1}
 
     where h_t is conditional variance and z_t ~ N(0,1).
@@ -712,8 +723,8 @@ def simulate_gbm_ngarch_paths(
     ----------
     s0 : float
         Initial stock price
-    r : float
-        Risk-free rate (annualized)
+    mu : float
+        Expected return (drift under P-measure, annualized)
     sigma0 : float
         Initial volatility (annualized)
     omega : float
@@ -757,8 +768,8 @@ def simulate_gbm_ngarch_paths(
             var_t = variance_paths[i, t_idx]
             sigma_t = np.sqrt(var_t)
 
-            # Price evolution
-            log_return = (r - 0.5 * var_t) * dt + sigma_t * sqrt_dt * z
+            # Price evolution (P-measure: drift = mu)
+            log_return = (mu - 0.5 * var_t) * dt + sigma_t * sqrt_dt * z
             price_paths[i, t_idx + 1] = price_paths[i, t_idx] * np.exp(log_return)
             return_paths[i, t_idx] = log_return
 
@@ -1088,7 +1099,7 @@ def simulate_terminal_volatility(
 def simulate_joint_paths(
     volatility_model: str,
     s0: float,
-    r: float,
+    mu: float,
     sigma0: float,
     t: float,
     n_paths: int = 10000,
@@ -1097,9 +1108,10 @@ def simulate_joint_paths(
     **kwargs
 ) -> JointSimulationResult:
     """
-    Simulate joint price and volatility paths.
+    Simulate joint price and volatility paths under P-measure.
 
     Combines GBM price dynamics with GARCH-family volatility.
+    Uses drift = mu (expected return) for realistic scenario analysis.
 
     Parameters
     ----------
@@ -1107,8 +1119,8 @@ def simulate_joint_paths(
         Volatility model: 'garch' or 'ngarch'
     s0 : float
         Initial stock price
-    r : float
-        Risk-free rate (annualized)
+    mu : float
+        Expected return (drift under P-measure, annualized)
     sigma0 : float
         Initial volatility (annualized)
     t : float
@@ -1142,7 +1154,7 @@ def simulate_joint_paths(
         omega = kwargs.get('omega', sigma0**2 * (1 - alpha - beta))
 
         price_paths, variance_paths, return_paths = simulate_gbm_garch_paths(
-            s0, r, sigma0, omega, alpha, beta, t, n_paths, n_steps
+            s0, mu, sigma0, omega, alpha, beta, t, n_paths, n_steps
         )
         vol_model_name = "GARCH(1,1)"
 
@@ -1154,7 +1166,7 @@ def simulate_joint_paths(
         omega = kwargs.get('omega', sigma0**2 * (1 - persistence))
 
         price_paths, variance_paths, return_paths = simulate_gbm_ngarch_paths(
-            s0, r, sigma0, omega, alpha, beta, theta, t, n_paths, n_steps
+            s0, mu, sigma0, omega, alpha, beta, theta, t, n_paths, n_steps
         )
         vol_model_name = "NGARCH"
 
@@ -1378,13 +1390,13 @@ if __name__ == "__main__":
     # =========================================================================
     # Test 5: Joint simulation test
     # =========================================================================
-    print("\n[TEST 5] Joint Price-Volatility Simulation")
+    print("\n[TEST 5] Joint Price-Volatility Simulation (P-measure)")
     print("-" * 40)
 
     joint_result = simulate_joint_paths(
         volatility_model='ngarch',
         s0=100.0,
-        r=0.05,
+        mu=0.08,  # 8% expected return (P-measure)
         sigma0=0.20,
         t=1.0,
         n_paths=10000,

@@ -3,8 +3,20 @@ Monte Carlo Simulation Package
 ==============================
 
 This package provides high-performance Monte Carlo simulation tools for
-derivatives pricing and risk management. All implementations use Numba
+scenario analysis and risk management. All implementations use Numba
 JIT compilation for optimal performance.
+
+P-Measure (Physical Measure) Implementation:
+--------------------------------------------
+All simulations use the REAL-WORLD (P) measure with drift = μ (expected return).
+This is appropriate for:
+    - Scenario analysis and risk management
+    - VaR and stress testing
+    - Backtesting trading strategies
+    - Generating realistic price trajectories
+
+For DERIVATIVES PRICING, use the Q-measure (risk-neutral) where drift = r.
+Simply pass mu=r (risk-free rate) to use risk-neutral dynamics.
 
 Modules:
 --------
@@ -14,11 +26,14 @@ Modules:
 Quick Start:
 ------------
 
-    # Price path simulation
+    # Price path simulation (P-measure with 8% expected return)
     from backend.simulation import simulate_paths, simulate_terminal
 
-    result = simulate_paths('gbm', s0=100, r=0.05, sigma=0.2, t=1.0, n_paths=10000)
+    result = simulate_paths('gbm', s0=100, mu=0.08, sigma=0.2, t=1.0, n_paths=10000)
     print(f"Terminal price mean: ${result.terminal_values.mean():.2f}")
+
+    # For derivatives pricing (Q-measure), use mu=r:
+    result = simulate_paths('gbm', s0=100, mu=0.05, sigma=0.2, t=1.0, n_paths=10000)
 
     # Volatility path simulation
     from backend.simulation import simulate_volatility_paths
@@ -29,7 +44,7 @@ Quick Start:
     # Joint price-volatility simulation
     from backend.simulation import simulate_joint_paths
 
-    result = simulate_joint_paths('ngarch', s0=100, r=0.05, sigma0=0.20, t=1.0)
+    result = simulate_joint_paths('ngarch', s0=100, mu=0.08, sigma0=0.20, t=1.0)
     print(f"Price: ${result.terminal_prices.mean():.2f}")
     print(f"Vol: {result.terminal_volatility.mean()*100:.2f}%")
 
@@ -191,4 +206,4 @@ __all__ = [
     'run_volatility_benchmark',
 ]
 
-__version__ = '1.1.0'
+__version__ = '2.0.0'  # Breaking change: r -> mu (P-measure)
