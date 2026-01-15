@@ -151,6 +151,33 @@ from .simulate_volatility import (
 )
 
 # =============================================================================
+# P&L Engine Exports (Option P&L Simulation)
+# =============================================================================
+
+from .pnl_engine import (
+    # Data classes
+    RiskMetrics,
+
+    # Core P&L calculation (Numba-optimized)
+    calculate_portfolio_pnl_vectorized,
+    calculate_portfolio_pnl_with_stock,
+
+    # Risk metrics
+    compute_risk_metrics,
+    compute_risk_metrics_core,
+    compute_skewness_kurtosis,
+    compute_percentiles,
+
+    # Payoff analysis
+    compute_payoff_curve,
+    find_breakeven_points,
+
+    # Utilities
+    prepare_position_arrays,
+    warm_up_jit,
+)
+
+# =============================================================================
 # Package-level Utilities
 # =============================================================================
 
@@ -204,6 +231,19 @@ __all__ = [
     'run_full_benchmark',
     'benchmark_volatility_simulation',
     'run_volatility_benchmark',
+
+    # P&L Engine
+    'RiskMetrics',
+    'calculate_portfolio_pnl_vectorized',
+    'calculate_portfolio_pnl_with_stock',
+    'compute_risk_metrics',
+    'compute_risk_metrics_core',
+    'compute_skewness_kurtosis',
+    'compute_percentiles',
+    'compute_payoff_curve',
+    'find_breakeven_points',
+    'prepare_position_arrays',
+    'warm_up_jit',
 ]
 
 __version__ = '2.0.0'  # Breaking change: r -> mu (P-measure)

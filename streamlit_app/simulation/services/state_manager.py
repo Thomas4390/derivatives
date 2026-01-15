@@ -31,7 +31,8 @@ from config.constants import (
     DEFAULT_GARCH_BETA,
     DEFAULT_NGARCH_THETA,
     DEFAULT_GJR_GAMMA,
-    DEFAULT_EGARCH_GAMMA
+    DEFAULT_EGARCH_GAMMA,
+    DEFAULT_EXPECTED_RETURN
 )
 
 
@@ -72,6 +73,9 @@ class SimulationParams:
     gjr_gamma: float = DEFAULT_GJR_GAMMA
     egarch_gamma: float = DEFAULT_EGARCH_GAMMA
 
+    # Option P&L parameters
+    expected_return: float = DEFAULT_EXPECTED_RETURN
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
         return asdict(self)
@@ -99,6 +103,23 @@ def init_session_state() -> None:
 
     if 'show_mean_path' not in st.session_state:
         st.session_state.show_mean_path = True
+
+    # Simulation results by mode
+    if 'price_result' not in st.session_state:
+        st.session_state.price_result = None
+
+    if 'vol_result' not in st.session_state:
+        st.session_state.vol_result = None
+
+    if 'pnl_result' not in st.session_state:
+        st.session_state.pnl_result = None
+
+    # Option P&L specific state
+    if 'option_positions' not in st.session_state:
+        st.session_state.option_positions = []
+
+    if 'stock_position' not in st.session_state:
+        st.session_state.stock_position = None
 
 
 def get_simulation_params() -> SimulationParams:
@@ -170,3 +191,49 @@ def reset_to_defaults() -> None:
     st.session_state.volatility_model = 'garch'
     st.session_state.simulation_mode = 'price_paths'
     st.session_state.last_simulation_result = None
+    st.session_state.price_result = None
+    st.session_state.vol_result = None
+    st.session_state.pnl_result = None
+    st.session_state.option_positions = []
+    st.session_state.stock_position = None
+
+
+def get_pnl_result() -> Any:
+    """Get the cached P&L simulation result."""
+    return st.session_state.get('pnl_result', None)
+
+
+def set_pnl_result(result: Any) -> None:
+    """Cache the P&L simulation result."""
+    st.session_state.pnl_result = result
+
+
+def clear_pnl_result() -> None:
+    """Clear cached P&L simulation result."""
+    st.session_state.pnl_result = None
+
+
+def get_option_positions() -> list:
+    """Get current option positions."""
+    return st.session_state.get('option_positions', [])
+
+
+def set_option_positions(positions: list) -> None:
+    """Set option positions."""
+    st.session_state.option_positions = positions
+
+
+def get_stock_position() -> Any:
+    """Get current stock position."""
+    return st.session_state.get('stock_position', None)
+
+
+def set_stock_position(position: Any) -> None:
+    """Set stock position."""
+    st.session_state.stock_position = position
+
+
+def clear_all_positions() -> None:
+    """Clear all option and stock positions."""
+    st.session_state.option_positions = []
+    st.session_state.stock_position = None

@@ -27,7 +27,8 @@ VOLATILITY_MODELS = {
 # Simulation modes
 SIMULATION_MODES = {
     "price": "Price Path Simulation",
-    "volatility": "Volatility Simulation"
+    "volatility": "Volatility Simulation",
+    "option_pnl": "Option P&L Analysis"
 }
 
 # Model descriptions for educational purposes
@@ -227,3 +228,45 @@ STATIONARITY_CONDITIONS = {
     "gjr_garch": "α + β + γ/2 < 1",
     "egarch": "|β| < 1"
 }
+
+# =============================================================================
+# OPTION P&L SIMULATION CONSTANTS
+# =============================================================================
+
+# Contract multiplier (shares per contract)
+CONTRACT_MULTIPLIER = 100
+
+# Default expected return for P-measure simulation
+DEFAULT_EXPECTED_RETURN = 0.08
+
+# P&L visualization colors
+PNL_COLORS = {
+    "profit": "#10b981",
+    "loss": "#ef4444",
+    "neutral": "#6b7280",
+    "var_line": "#f59e0b",
+    "cvar_region": "rgba(239, 68, 68, 0.2)",
+    "breakeven": "#8b5cf6",
+    "payoff_curve": "#3b82f6"
+}
+
+# Risk metric display settings
+RISK_METRICS = {
+    "mean_pnl": {"label": "Mean P&L", "format": "${:.2f}", "color": "#1e293b"},
+    "std_pnl": {"label": "Std Dev", "format": "${:.2f}", "color": "#475569"},
+    "var_95": {"label": "VaR 95%", "format": "${:.2f}", "color": "#f59e0b"},
+    "var_99": {"label": "VaR 99%", "format": "${:.2f}", "color": "#ef4444"},
+    "cvar_95": {"label": "CVaR 95%", "format": "${:.2f}", "color": "#dc2626"},
+    "prob_profit": {"label": "P(Profit)", "format": "{:.1%}", "color": "#10b981"},
+    "max_profit": {"label": "Max Profit", "format": "${:.2f}", "color": "#059669"},
+    "max_loss": {"label": "Max Loss", "format": "${:.2f}", "color": "#b91c1c"},
+    "skewness": {"label": "Skewness", "format": "{:.3f}", "color": "#6366f1"},
+    "kurtosis": {"label": "Kurtosis", "format": "{:.3f}", "color": "#8b5cf6"}
+}
+
+# P&L histogram settings
+PNL_HISTOGRAM_BINS = 50
+PNL_KDE_POINTS = 200
+
+# Scenario analysis settings
+SCENARIO_SCATTER_MAX_POINTS = 5000  # Downsample if more paths

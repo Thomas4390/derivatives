@@ -17,9 +17,16 @@ from config.constants import (
     DEFAULT_VOLATILITY,
     DEFAULT_TIME_HORIZON,
     DEFAULT_NUM_PATHS,
-    DEFAULT_NUM_STEPS
+    DEFAULT_NUM_STEPS,
+    DEFAULT_EXPECTED_RETURN
 )
 from config.styles import param_group_html
+
+# Import Black-Scholes for premium calculation
+from backend.option_pricing.options_calculator import (
+    black_scholes_call_price,
+    black_scholes_put_price
+)
 
 
 def render_sidebar() -> Dict[str, Any]:
@@ -39,13 +46,18 @@ def render_sidebar() -> Dict[str, Any]:
 
         simulation_mode_display = st.radio(
             "Choose simulation type",
-            options=["Price Paths", "Volatility Paths"],
+            options=["Price Paths", "Volatility Paths", "Option P&L"],
             horizontal=True,
             label_visibility="collapsed"
         )
 
         # Map display names to internal keys
-        simulation_mode = "price" if simulation_mode_display == "Price Paths" else "volatility"
+        mode_map = {
+            "Price Paths": "price",
+            "Volatility Paths": "volatility",
+            "Option P&L": "option_pnl"
+        }
+        simulation_mode = mode_map.get(simulation_mode_display, "price")
 
         # =================================================================
         # MODEL SELECTION
@@ -64,7 +76,7 @@ def render_sidebar() -> Dict[str, Any]:
             with st.expander("About this model", expanded=False):
                 st.markdown(MODEL_DESCRIPTIONS.get(price_model, ""))
             vol_model = "garch"  # Default, not used
-        else:
+        elif simulation_mode == "volatility":
             price_model = "gbm"  # Default, not used
             vol_model = st.selectbox(
                 "Volatility Model",
@@ -80,6 +92,18 @@ def render_sidebar() -> Dict[str, Any]:
             # Stationarity condition
             if vol_model in STATIONARITY_CONDITIONS:
                 st.info(f"Stationarity: {STATIONARITY_CONDITIONS[vol_model]}")
+        else:  # option_pnl mode
+            price_model = st.selectbox(
+                "Underlying Model",
+                options=list(PRICE_MODELS.keys()),
+                format_func=lambda x: PRICE_MODELS[x],
+                key="pnl_price_model_select"
+            )
+
+            # Show model description in expander
+            with st.expander("About this model", expanded=False):
+                st.markdown(MODEL_DESCRIPTIONS.get(price_model, ""))
+            vol_model = "garch"  # Default, not used
 
         # =================================================================
         # COMMON PARAMETERS
@@ -182,8 +206,11 @@ def render_sidebar() -> Dict[str, Any]:
         # Model-specific parameters based on simulation mode
         if simulation_mode == "price":
             params.update(_render_price_model_params(price_model, volatility))
-        else:
+        elif simulation_mode == "volatility":
             params.update(_render_volatility_model_params(vol_model, volatility))
+        else:  # option_pnl mode
+            params.update(_render_price_model_params(price_model, volatility))
+            params.update(_render_option_pnl_params(spot_price, risk_free_rate, time_horizon, volatility))
 
         # =================================================================
         # VISUALIZATION OPTIONS
@@ -478,5 +505,64 @@ def _render_volatility_model_params(model: str, base_volatility: float) -> Dict[
             long_run_var = omega / (1 - alpha - beta)
             st.info(f"Long-run volatility: {100*long_run_var**0.5:.1f}%")
             params['garch_omega'] = omega
+
+    return params
+
+
+def _render_option_pnl_params(
+    spot_price: float,
+    risk_free_rate: float,
+    time_horizon: float,
+    volatility: float
+) -> Dict[str, Any]:
+    """Render parameters specific to Option P&L simulation."""
+    from components.strategy_builder import (
+        render_strategy_builder,
+        export_positions_for_pnl_engine,
+        SimulationOptionPosition,
+        SimulationStockPosition
+    )
+
+    params = {}
+
+    # Expected return for P-measure simulation
+    st.markdown('<div class="sidebar-header">Expected Return</div>', unsafe_allow_html=True)
+
+    expected_return = st.number_input(
+        "Expected Return (mu)",
+        min_value=-0.20,
+        max_value=0.50,
+        value=DEFAULT_EXPECTED_RETURN,
+        step=0.01,
+        format="%.2f",
+        help="Annual expected return under P-measure for realistic scenarios"
+    )
+
+    params['expected_return'] = expected_return
+
+    # Strategy Builder
+    st.markdown("---")
+
+    def bs_price(s, k, r, t, sigma, opt_type):
+        """Black-Scholes pricing wrapper."""
+        if opt_type == 'call':
+            return black_scholes_call_price(s, k, t, r, sigma)
+        else:
+            return black_scholes_put_price(s, k, t, r, sigma)
+
+    positions, stock_position = render_strategy_builder(
+        spot_price=spot_price,
+        risk_free_rate=risk_free_rate,
+        time_to_expiry=time_horizon,
+        volatility=volatility,
+        bs_price_function=bs_price
+    )
+
+    # Export positions for Numba engine
+    position_arrays = export_positions_for_pnl_engine(positions, stock_position)
+
+    params['option_positions'] = positions
+    params['stock_position'] = stock_position
+    params['position_arrays'] = position_arrays
 
     return params

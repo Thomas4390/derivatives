@@ -24,11 +24,19 @@ import time
 # Backend imports
 from backend.simulation.simulate_paths import (
     simulate_paths,
+    simulate_terminal,
     SimulationResult
 )
 from backend.simulation.simulate_volatility import (
     simulate_volatility_paths,
     VolatilitySimulationResult
+)
+from backend.simulation.pnl_engine import (
+    calculate_portfolio_pnl_vectorized,
+    calculate_portfolio_pnl_with_stock,
+    compute_risk_metrics,
+    RiskMetrics,
+    warm_up_jit
 )
 
 # Local imports
@@ -45,6 +53,8 @@ from charts.volatility_paths import render_volatility_paths_tab
 from charts.distributions import render_distributions_tab
 from charts.statistics import render_statistics_tab
 from charts.interactive_path import render_interactive_path_tab
+from charts.pnl_distribution import render_pnl_distribution_tab, render_risk_metrics_tab
+from charts.scenario_analysis import render_scenario_analysis_tab
 from services.state_manager import init_session_state
 
 
@@ -166,6 +176,96 @@ def run_volatility_simulation(params: dict) -> VolatilitySimulationResult:
     return simulate_volatility_paths(model=model, **common_params)
 
 
+def run_pnl_simulation(params: dict) -> dict:
+    """Execute Option P&L simulation with given parameters."""
+    import time as time_module
+
+    model = params['price_model']
+    position_arrays = params.get('position_arrays', {})
+
+    # Validate positions exist
+    if len(position_arrays.get('strikes', [])) == 0:
+        raise ValueError("No option positions defined. Please add at least one leg.")
+
+    # Common parameters for terminal-only simulation
+    common_params = {
+        's0': params['spot_price'],
+        'mu': params.get('expected_return', 0.08),  # P-measure drift
+        'sigma': params['volatility'],
+        't': params['time_horizon'],
+        'n_paths': params['num_paths'],
+        'seed': params.get('seed')
+    }
+
+    # Model-specific parameters
+    if model == 'heston':
+        common_params.update({
+            'v0': params['heston_v0'],
+            'kappa': params['heston_kappa'],
+            'theta': params['heston_theta'],
+            'xi': params['heston_xi'],
+            'rho': params['heston_rho']
+        })
+    elif model == 'merton':
+        common_params.update({
+            'lambda_j': params['merton_lambda'],
+            'mu_j': params['merton_mu_j'],
+            'sigma_j': params['merton_sigma_j']
+        })
+    elif model == 'sabr':
+        common_params.update({
+            'alpha0': params['volatility'],
+            'beta': params['sabr_beta'],
+            'rho': params['sabr_rho'],
+            'nu': params['sabr_nu']
+        })
+
+    # Run terminal-only simulation (memory efficient)
+    # Note: simulate_terminal returns np.ndarray directly, not a result object
+    start_time = time_module.perf_counter()
+    terminal_prices = simulate_terminal(model=model, **common_params)
+
+    # Calculate P&L for all paths
+    stock_qty = position_arrays.get('stock_quantity', 0.0)
+    stock_entry = position_arrays.get('stock_entry_price', 0.0)
+
+    if stock_qty != 0.0:
+        pnl_values = calculate_portfolio_pnl_with_stock(
+            terminal_prices,
+            position_arrays['strikes'],
+            position_arrays['option_types'],
+            position_arrays['position_types'],
+            position_arrays['quantities'],
+            position_arrays['premiums'],
+            stock_qty,
+            stock_entry,
+            multiplier=100.0
+        )
+    else:
+        pnl_values = calculate_portfolio_pnl_vectorized(
+            terminal_prices,
+            position_arrays['strikes'],
+            position_arrays['option_types'],
+            position_arrays['position_types'],
+            position_arrays['quantities'],
+            position_arrays['premiums'],
+            multiplier=100.0
+        )
+
+    # Compute risk metrics
+    risk_metrics = compute_risk_metrics(pnl_values)
+
+    computation_time = time_module.perf_counter() - start_time
+
+    return {
+        'terminal_prices': terminal_prices,
+        'pnl_values': pnl_values,
+        'risk_metrics': risk_metrics,
+        'computation_time': computation_time,
+        'num_paths': len(terminal_prices)
+    }
+
+
 # =============================================================================
 # MAIN CONTENT
 # =============================================================================
@@ -194,6 +294,7 @@ if mode_changed or price_model_changed or vol_model_changed:
     # Reset results when model changes
     st.session_state.price_result = None
     st.session_state.vol_result = None
+    st.session_state.pnl_result = None
     # Update tracking variables
     st.session_state.prev_simulation_mode = simulation_mode
     st.session_state.prev_price_model = current_price_model
@@ -219,10 +320,17 @@ if run_button:
                 result = run_price_simulation(params)
                 st.session_state.price_result = result
                 st.session_state.vol_result = None
-            else:
+                st.session_state.pnl_result = None
+            elif simulation_mode == 'volatility':
                 result = run_volatility_simulation(params)
                 st.session_state.vol_result = result
                 st.session_state.price_result = None
+                st.session_state.pnl_result = None
+            else:  # option_pnl
+                result = run_pnl_simulation(params)
+                st.session_state.pnl_result = result
+                st.session_state.price_result = None
+                st.session_state.vol_result = None
 
             elapsed = time.time() - start_time
             st.success(f"Simulation completed in {elapsed*1000:.1f} ms")
@@ -234,9 +342,10 @@ if run_button:
 # Get current results
 price_result = st.session_state.get('price_result')
 vol_result = st.session_state.get('vol_result')
+pnl_result = st.session_state.get('pnl_result')
 
 # Display simulation info
-if price_result is not None or vol_result is not None:
+if price_result is not None or vol_result is not None or pnl_result is not None:
     st.markdown("---")
 
     # Summary metrics
@@ -261,6 +370,16 @@ if price_result is not None or vol_result is not None:
             st.metric("Time Steps", f"{vol_result.num_steps:,}")
         with col4:
             st.metric("Computation Time", f"{vol_result.computation_time*1000:.1f} ms")
+
+    elif simulation_mode == 'option_pnl' and pnl_result is not None:
+        with col1:
+            st.metric("Model", PRICE_MODELS.get(params['price_model'], params['price_model']))
+        with col2:
+            st.metric("Scenarios Simulated", f"{pnl_result['num_paths']:,}")
+        with col3:
+            st.metric("P(Profit)", f"{pnl_result['risk_metrics'].prob_profit:.1%}")
+        with col4:
+            st.metric("Computation Time", f"{pnl_result['computation_time']*1000:.1f} ms")
 
 
 # =============================================================================
@@ -302,6 +421,52 @@ if simulation_mode == 'price':
             params=params,
             result_type="price"
         )
+
+elif simulation_mode == 'option_pnl':
+    # Option P&L Analysis tabs
+    tab1, tab2, tab3 = st.tabs([
+        "📊 P&L Distribution",
+        "📋 Risk Metrics",
+        "🎯 Scenario Analysis"
+    ])
+
+    with tab1:
+        if pnl_result is not None:
+            render_pnl_distribution_tab(
+                pnl_values=pnl_result['pnl_values'],
+                risk_metrics=pnl_result['risk_metrics'],
+                params=params
+            )
+        else:
+            st.info("Run a P&L simulation to see the distribution analysis.")
+            st.markdown("""
+            **How to use:**
+            1. Configure your market parameters in the sidebar
+            2. Add option legs using the Strategy Builder
+            3. Set simulation parameters (model, expected return, paths)
+            4. Click **Run Simulation** to analyze P&L distribution
+            """)
+
+    with tab2:
+        if pnl_result is not None:
+            render_risk_metrics_tab(
+                metrics=pnl_result['risk_metrics'],
+                params=params
+            )
+        else:
+            st.info("Run a P&L simulation to see risk metrics.")
+
+    with tab3:
+        if pnl_result is not None:
+            render_scenario_analysis_tab(
+                terminal_prices=pnl_result['terminal_prices'],
+                pnl_values=pnl_result['pnl_values'],
+                position_arrays=params.get('position_arrays', {}),
+                risk_metrics=pnl_result['risk_metrics'],
+                params=params
+            )
+        else:
+            st.info("Run a P&L simulation to see scenario analysis.")
 
 else:
     # Volatility simulation tabs
@@ -386,6 +551,37 @@ with st.expander("ℹ️ Model Information", expanded=False):
             - $\\rho$: Correlation
             - $\\nu$: Volatility of volatility
             """)
+
+    elif simulation_mode == 'option_pnl':
+        model = params['price_model']
+        st.markdown(f"### Option P&L Analysis with {PRICE_MODELS.get(model, model)}")
+        st.markdown("""
+        **Monte Carlo P&L Simulation**
+
+        This mode simulates the P&L distribution of your option portfolio at expiration
+        using Monte Carlo simulation of the underlying price.
+
+        **Key Concepts:**
+        - **P-Measure (Physical Measure):** Uses expected return (μ) as drift instead of risk-free rate
+        - **Terminal-Only Simulation:** Efficient simulation of just the final price
+        - **P&L at Expiration:** Payoff minus premium paid/received
+        """)
+
+        st.markdown("---")
+        st.markdown("**Risk Metrics Explained:**")
+        st.markdown("""
+        | Metric | Description |
+        |--------|-------------|
+        | **VaR 95%** | Value at Risk - 5th percentile of P&L distribution |
+        | **CVaR 95%** | Conditional VaR - Expected loss in worst 5% scenarios |
+        | **P(Profit)** | Probability of positive P&L at expiration |
+        | **Skewness** | Asymmetry of P&L distribution (negative = left tail) |
+        | **Kurtosis** | Tail heaviness (>3 = fat tails vs normal) |
+        """)
+
+        st.markdown("---")
+        st.markdown(f"**Underlying Model:** {PRICE_MODELS.get(model, model)}")
+        st.markdown(MODEL_DESCRIPTIONS.get(model, "No description available."))
 
     else:
         model = params['vol_model']
