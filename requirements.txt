@@ -1,6 +1,6 @@
 # Core dependencies for Options Greeks Explorer
-numpy>=1.24.0
-scipy>=1.11.0
-numba>=0.58.0
-streamlit>=1.28.0
-plotly>=4.0.0
+numpy>=2.0,<2.4
+scipy>=1.15.0
+numba>=0.62.0
+streamlit>=1.40.0
+plotly>=5.0.0
