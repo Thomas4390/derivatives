@@ -328,6 +328,36 @@ def _render_strategy_builder(
     st.markdown("<div style='height: 0.5rem'></div>", unsafe_allow_html=True)
 
     if st.button("✓  Apply Changes", width="stretch", type="primary", key="apply_strategy_btn"):
+        # Read values directly from widget keys for each leg to ensure we have the latest values
+        version = st.session_state.get('strategy_version', 0)
+        for i in range(len(strategy_legs)):
+            type_key = f"leg_{i}_type_v{version}"
+            dir_key = f"leg_{i}_dir_v{version}"
+            strike_key = f"leg_{i}_strike_v{version}"
+            qty_key = f"leg_{i}_qty_v{version}"
+
+            # Update strategy_legs_state from widget values if they exist
+            if type_key in st.session_state:
+                st.session_state.strategy_legs_state[i] = {
+                    'option_type': st.session_state[type_key],
+                    'position_type': st.session_state[dir_key],
+                    'strike': st.session_state[strike_key],
+                    'quantity': st.session_state[qty_key]
+                }
+
+        # Also update stock state from widget values
+        if has_stock:
+            stock_dir_key = f"stock_leg_dir_v{version}"
+            stock_qty_key = f"stock_leg_qty_v{version}"
+            stock_entry_key = f"stock_leg_entry_v{version}"
+
+            if stock_dir_key in st.session_state:
+                st.session_state.strategy_legs_state['stock'] = {
+                    'position_type': st.session_state[stock_dir_key],
+                    'quantity': st.session_state[stock_qty_key],
+                    'entry_price': st.session_state[stock_entry_key]
+                }
+
         _apply_strategy(
             spot_price, risk_free_rate, strategy_legs, has_stock,
             portfolio_class, option_position_class, stock_position_class
