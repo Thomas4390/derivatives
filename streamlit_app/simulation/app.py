@@ -19,25 +19,11 @@ sys.path.insert(0, str(app_dir))
 
 import streamlit as st
 import numpy as np
-import time
 
 # Backend imports
-from backend.simulation.simulate_paths import (
-    simulate_paths,
-    simulate_terminal,
-    SimulationResult
-)
-from backend.simulation.simulate_volatility import (
-    simulate_volatility_paths,
-    VolatilitySimulationResult
-)
-from backend.simulation.pnl_engine import (
-    calculate_portfolio_pnl_vectorized,
-    calculate_portfolio_pnl_with_stock,
-    compute_risk_metrics,
-    RiskMetrics,
-    warm_up_jit
-)
+from backend.simulation.simulate_paths import SimulationResult
+from backend.simulation.simulate_volatility import VolatilitySimulationResult
+from backend.simulation.pnl_engine import RiskMetrics
 
 # Local imports
 from config.styles import (
@@ -72,6 +58,11 @@ from services.state_manager import (
     mark_results_current,
     are_results_stale,
     check_params_changed
+)
+from services.simulation_runner import (
+    run_price_simulation,
+    run_volatility_simulation,
+    calculate_pnl_from_paths
 )
 
 # Black-Scholes for premium calculation
@@ -498,144 +489,6 @@ def render_visualization_options(key_prefix: str) -> dict:
         'show_percentiles': show_percentiles,
         'show_mean': show_mean,
         'max_display_paths': max_display
-    }
-
-
-# =============================================================================
-# SIMULATION FUNCTIONS
-# =============================================================================
-
-def run_price_simulation(params: dict) -> SimulationResult:
-    """Execute price path simulation."""
-    model = params['price_model']
-
-    common_params = {
-        's0': params['spot_price'],
-        'mu': params.get('expected_return', params['risk_free_rate']),
-        'sigma': params['volatility'],
-        't': params['time_horizon'],
-        'n_paths': params['num_paths'],
-        'n_steps': params['num_steps'],
-        'seed': params.get('seed')
-    }
-
-    if model == 'heston':
-        common_params.update({
-            'v0': params['heston_v0'],
-            'kappa': params['heston_kappa'],
-            'theta': params['heston_theta'],
-            'xi': params['heston_xi'],
-            'rho': params['heston_rho']
-        })
-    elif model == 'merton':
-        common_params.update({
-            'lambda_j': params['merton_lambda'],
-            'mu_j': params['merton_mu_j'],
-            'sigma_j': params['merton_sigma_j']
-        })
-    elif model == 'bates':
-        common_params.update({
-            'v0': params['bates_v0'],
-            'kappa': params['bates_kappa'],
-            'theta': params['bates_theta'],
-            'xi': params['bates_xi'],
-            'rho': params['bates_rho'],
-            'lambda_j': params['bates_lambda'],
-            'mu_j': params['bates_mu_j'],
-            'sigma_j': params['bates_sigma_j']
-        })
-    elif model == 'sabr':
-        common_params.update({
-            'alpha0': params['volatility'],
-            'beta': params['sabr_beta'],
-            'rho': params['sabr_rho'],
-            'nu': params['sabr_nu']
-        })
-
-    return simulate_paths(model=model, **common_params)
-
-
-def run_volatility_simulation(params: dict) -> VolatilitySimulationResult:
-    """Execute volatility simulation."""
-    model = params['vol_model']
-
-    common_params = {
-        'sigma0': params['volatility'],
-        'n_paths': params['num_paths'],
-        'n_steps': params['num_steps'],
-        'seed': params.get('seed')
-    }
-
-    garch_params = {
-        'omega': params.get('garch_omega', 0.00001),
-        'alpha': params['garch_alpha'],
-        'beta': params['garch_beta']
-    }
-
-    if model == 'garch':
-        common_params.update(garch_params)
-    elif model == 'ngarch':
-        common_params.update(garch_params)
-        common_params['theta'] = params['ngarch_theta']
-    elif model == 'gjr_garch':
-        common_params.update(garch_params)
-        common_params['gamma'] = params['gjr_gamma']
-    elif model == 'egarch':
-        common_params.update(garch_params)
-        common_params['gamma'] = params['egarch_gamma']
-
-    return simulate_volatility_paths(model=model, **common_params)
-
-
-def calculate_pnl_from_paths(price_result: SimulationResult, params: dict) -> dict:
-    """Calculate P&L from existing price simulation result."""
-    import time as time_module
-
-    position_arrays = params.get('position_arrays', {})
-
-    if len(position_arrays.get('strikes', [])) == 0:
-        return None
-
-    start_time = time_module.perf_counter()
-
-    # Use terminal prices from the simulation result
-    terminal_prices = price_result.paths[:, -1]
-
-    stock_qty = position_arrays.get('stock_quantity', 0.0)
-    stock_entry = position_arrays.get('stock_entry_price', 0.0)
-
-    if stock_qty != 0.0:
-        pnl_values = calculate_portfolio_pnl_with_stock(
-            terminal_prices,
-            position_arrays['strikes'],
-            position_arrays['option_types'],
-            position_arrays['position_types'],
-            position_arrays['quantities'],
-            position_arrays['premiums'],
-            stock_qty,
-            stock_entry,
-            multiplier=100.0
-        )
-    else:
-        pnl_values = calculate_portfolio_pnl_vectorized(
-            terminal_prices,
-            position_arrays['strikes'],
-            position_arrays['option_types'],
-            position_arrays['position_types'],
-            position_arrays['quantities'],
-            position_arrays['premiums'],
-            multiplier=100.0
-        )
-
-    risk_metrics = compute_risk_metrics(pnl_values)
-    computation_time = time_module.perf_counter() - start_time
-
-    return {
-        'terminal_prices': terminal_prices,
-        'pnl_values': pnl_values,
-        'risk_metrics': risk_metrics,
-        'computation_time': computation_time,
-        'num_paths': len(terminal_prices)
     }
 
 
