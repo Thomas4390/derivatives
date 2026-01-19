@@ -13,6 +13,7 @@ PRICE_MODELS = {
     "gbm": "Geometric Brownian Motion (GBM)",
     "heston": "Heston Stochastic Volatility",
     "merton": "Merton Jump Diffusion",
+    "bates": "Bates Model (Heston + Jumps)",
     "sabr": "SABR Model"
 }
 
@@ -65,6 +66,18 @@ Adds jumps to GBM to capture:
 - More realistic risk modeling
 
 **SDE:** dS/S = (r - λk)dt + σdW + (J-1)dN
+""",
+    "bates": """
+**Bates Model (Stochastic Volatility + Jumps)**
+
+Combines Heston stochastic volatility with Merton-style jumps:
+- Stochastic variance with mean reversion
+- Jump component for sudden price movements
+- Most flexible equity model for options
+
+**SDEs:**
+- dS = (μ - λk)·S·dt + √V·S·dW_S + (J-1)·S·dN
+- dV = κ(θ - V)dt + ξ·√V·dW_V
 """,
     "sabr": """
 **SABR Stochastic Volatility Model**
@@ -149,6 +162,16 @@ DEFAULT_SABR_BETA = 0.5  # CEV exponent
 DEFAULT_SABR_NU = 0.4  # Vol of vol
 DEFAULT_SABR_RHO = -0.3  # Correlation
 
+# Bates model defaults (combines Heston + Merton parameters)
+DEFAULT_BATES_V0 = 0.04  # Initial variance (20% vol)
+DEFAULT_BATES_KAPPA = 2.0  # Mean reversion speed
+DEFAULT_BATES_THETA = 0.04  # Long-term variance
+DEFAULT_BATES_XI = 0.3  # Vol of vol
+DEFAULT_BATES_RHO = -0.7  # Correlation
+DEFAULT_BATES_LAMBDA = 0.5  # Jump intensity
+DEFAULT_BATES_MU_J = -0.1  # Mean log-jump
+DEFAULT_BATES_SIGMA_J = 0.2  # Jump vol
+
 # Volatility model defaults
 DEFAULT_GARCH_OMEGA = 0.000002  # Base variance
 DEFAULT_GARCH_ALPHA = 0.05  # ARCH coefficient
@@ -181,6 +204,7 @@ MODEL_COLORS = {
     "gbm": "#1f77b4",
     "heston": "#ff7f0e",
     "merton": "#2ca02c",
+    "bates": "#7f3c8d",
     "sabr": "#d62728",
     "garch": "#9467bd",
     "ngarch": "#8c564b",
@@ -270,3 +294,46 @@ PNL_KDE_POINTS = 200
 
 # Scenario analysis settings
 SCENARIO_SCATTER_MAX_POINTS = 5000  # Downsample if more paths
+
+# =============================================================================
+# UI LAYOUT CONSTANTS
+# =============================================================================
+
+# Main tab configuration
+MAIN_TABS = {
+    "config": {"icon": "⚙️", "label": "Configuration"},
+    "price": {"icon": "📈", "label": "Price Paths"},
+    "volatility": {"icon": "📊", "label": "Volatility"},
+    "pnl": {"icon": "💰", "label": "Option P&L"}
+}
+
+# Analysis sub-tabs for each mode
+PRICE_ANALYSIS_TABS = [
+    "🎛️ Interactive Path",
+    "📈 Sample Paths",
+    "📊 Terminal Distribution",
+    "📋 Statistics"
+]
+
+VOLATILITY_ANALYSIS_TABS = [
+    "🎛️ Interactive Path",
+    "📈 Volatility Paths",
+    "📊 Terminal Distribution",
+    "📋 Statistics"
+]
+
+PNL_ANALYSIS_TABS = [
+    "📊 P&L Distribution",
+    "📋 Risk Metrics",
+    "🎯 Scenario Analysis"
+]
+
+# Configuration section groupings
+CONFIG_SECTIONS = {
+    "market": "Market Parameters",
+    "simulation": "Simulation Settings",
+    "price_model": "Price Model",
+    "vol_model": "Volatility Model",
+    "strategy": "Option Strategy",
+    "visualization": "Visualization Options"
+}

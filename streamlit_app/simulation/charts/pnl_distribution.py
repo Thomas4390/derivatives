@@ -20,6 +20,7 @@ from config.constants import (
     PNL_HISTOGRAM_BINS,
     PNL_KDE_POINTS
 )
+from config.styles import render_stats_row
 from backend.simulation import RiskMetrics
 
 
@@ -44,7 +45,11 @@ def render_pnl_distribution_tab(
         st.info("Run a P&L simulation to see distribution analysis.")
         return
 
+    # Section header with native help
     st.markdown("### P&L Distribution Analysis")
+    st.caption(
+        "Probability distribution of strategy P&L outcomes. VaR indicates worst expected loss at confidence level."
+    )
 
     # Summary metrics row
     _render_summary_metrics(risk_metrics)
@@ -60,82 +65,17 @@ def render_pnl_distribution_tab(
 
 
 def _render_summary_metrics(metrics: RiskMetrics) -> None:
-    """Render summary metrics cards."""
-    col1, col2, col3, col4 = st.columns(4)
+    """Render summary metrics cards using styled components."""
+    mean_variant = "green" if metrics.mean_pnl > 0 else "red"
+    prob_variant = "green" if metrics.prob_profit > 0.5 else "red"
 
-    with col1:
-        _render_metric_card(
-            "Mean P&L",
-            metrics.mean_pnl,
-            is_currency=True,
-            is_positive=metrics.mean_pnl > 0
-        )
-
-    with col2:
-        _render_metric_card(
-            "VaR 95%",
-            metrics.var_95,
-            is_currency=True,
-            is_positive=False  # VaR is typically negative
-        )
-
-    with col3:
-        _render_metric_card(
-            "P(Profit)",
-            metrics.prob_profit,
-            is_percentage=True,
-            is_positive=metrics.prob_profit > 0.5
-        )
-
-    with col4:
-        _render_metric_card(
-            "Std Dev",
-            metrics.std_pnl,
-            is_currency=True,
-            is_positive=None  # Neutral
-        )
-
-    st.markdown("<div style='height: 1rem;'></div>", unsafe_allow_html=True)
-
-
-def _render_metric_card(
-    label: str,
-    value: float,
-    is_currency: bool = False,
-    is_percentage: bool = False,
-    is_positive: Optional[bool] = None
-) -> None:
-    """Render a single metric card with styling."""
-    # Determine color
-    if is_positive is None:
-        color = "#475569"  # Neutral gray
-    elif is_positive:
-        color = "#059669"  # Green
-    else:
-        color = "#dc2626"  # Red
-
-    # Format value
-    if is_percentage:
-        formatted = f"{value * 100:.1f}%"
-    elif is_currency:
-        formatted = f"${value:,.2f}"
-    else:
-        formatted = f"{value:.3f}"
-
-    # Determine background based on positive/negative
-    if is_positive is None:
-        bg = "linear-gradient(135deg, #f1f5f9 0%, #e2e8f0 100%)"
-    elif is_positive:
-        bg = "linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%)"
-    else:
-        bg = "linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%)"
-
-    st.markdown(f"""
-    <div style="background: {bg}; border-radius: 10px; padding: 1rem; text-align: center;">
-        <div style="font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; color: #64748b; font-weight: 600; margin-bottom: 0.25rem;">{label}</div>
-        <div style="font-size: 1.25rem; font-weight: 700; color: {color}; font-family: monospace;">{formatted}</div>
-    </div>
-    """, unsafe_allow_html=True)
+    summary_stats = [
+        ("Mean P&L", f"${metrics.mean_pnl:,.2f}", "Profit" if metrics.mean_pnl > 0 else "Loss"),
+        ("VaR 95%", f"${metrics.var_95:,.2f}", "5% worst case"),
+        ("P(Profit)", f"{metrics.prob_profit:.1%}", "Favorable" if metrics.prob_profit > 0.5 else "Unfavorable"),
+        ("Std Dev", f"${metrics.std_pnl:,.2f}", "P&L volatility"),
+    ]
+    render_stats_row(summary_stats, [mean_variant, "amber", prob_variant, "blue"])
 
 
 def _render_histogram(pnl_values: np.ndarray, metrics: RiskMetrics) -> None:
@@ -242,18 +182,19 @@ def _render_histogram(pnl_values: np.ndarray, metrics: RiskMetrics) -> None:
         margin=dict(l=60, r=40, t=60, b=60)
     )
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
-    # Additional stats below chart
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.metric("Skewness", f"{metrics.skewness:.3f}")
-    with col2:
-        st.metric("Kurtosis", f"{metrics.kurtosis:.3f}")
-    with col3:
-        st.metric("Max Profit", f"${metrics.max_profit:,.2f}")
-    with col4:
-        st.metric("Max Loss", f"${metrics.max_loss:,.2f}")
+    # Additional stats below chart with styled cards
+    skew_variant = "green" if metrics.skewness > 0 else "red"
+    kurt_variant = "amber" if metrics.kurtosis > 3 else "slate"
+
+    hist_stats = [
+        ("Skewness", f"{metrics.skewness:+.3f}", "Right-skewed" if metrics.skewness > 0 else "Left-skewed"),
+        ("Kurtosis", f"{metrics.kurtosis:.3f}", "Fat tails" if metrics.kurtosis > 3 else "Normal tails"),
+        ("Max Profit", f"${metrics.max_profit:,.0f}", "Best scenario"),
+        ("Max Loss", f"${metrics.max_loss:,.0f}", "Worst scenario"),
+    ]
+    render_stats_row(hist_stats, [skew_variant, kurt_variant, "green", "red"])
 
 
 def _render_cdf(pnl_values: np.ndarray, metrics: RiskMetrics) -> None:
@@ -276,9 +217,11 @@ def _render_cdf(pnl_values: np.ndarray, metrics: RiskMetrics) -> None:
         fillcolor='rgba(59, 130, 246, 0.1)'
     ))
 
-    # Add percentile markers
-    percentiles = [1, 5, 10, 25, 50, 75, 90, 95, 99]
-    for p in percentiles:
+    # Add percentile markers - key percentiles only to avoid clutter
+    key_percentiles = [5, 25, 50, 75, 95]
+    text_positions = ['bottom right', 'bottom left', 'top center', 'top right', 'top left']
+
+    for p, text_pos in zip(key_percentiles, text_positions):
         idx = int((p / 100) * (n - 1))
         pnl_at_p = sorted_pnl[idx]
 
@@ -294,20 +237,17 @@ def _render_cdf(pnl_values: np.ndarray, metrics: RiskMetrics) -> None:
             x=[pnl_at_p],
             y=[p / 100],
             mode='markers+text',
-            marker=dict(size=8, color=color),
+            marker=dict(size=10, color=color),
             text=[f"P{p}: ${pnl_at_p:,.0f}"],
-            textposition='top center' if p > 50 else 'bottom center',
+            textposition=text_pos,
             showlegend=False,
-            textfont=dict(size=10)
+            textfont=dict(size=9)
         ))
 
-    # Add horizontal lines for key percentiles
-    fig.add_hline(y=0.05, line_dash="dot", line_color="#f59e0b",
-                  annotation_text="5%", annotation_position="left")
-    fig.add_hline(y=0.50, line_dash="dot", line_color="#6b7280",
-                  annotation_text="50%", annotation_position="left")
-    fig.add_hline(y=0.95, line_dash="dot", line_color="#10b981",
-                  annotation_text="95%", annotation_position="left")
+    # Add subtle horizontal reference lines (no annotations - markers have labels)
+    fig.add_hline(y=0.05, line_dash="dot", line_color="#f59e0b", opacity=0.4)
+    fig.add_hline(y=0.50, line_dash="dot", line_color="#6b7280", opacity=0.4)
+    fig.add_hline(y=0.95, line_dash="dot", line_color="#10b981", opacity=0.4)
 
     # Add breakeven line
     fig.add_vline(x=0, line_dash="solid", line_color="#8b5cf6", line_width=2)
@@ -329,36 +269,57 @@ def _render_cdf(pnl_values: np.ndarray, metrics: RiskMetrics) -> None:
         xaxis_title="P&L ($)",
         yaxis_title="Cumulative Probability",
         height=CHART_HEIGHT_STANDARD,
-        yaxis=dict(tickformat='.0%', range=[0, 1]),
+        yaxis=dict(
+            tickformat='.0%',
+            range=[0, 1],
+            dtick=0.25,  # Tick marks at 0%, 25%, 50%, 75%, 100%
+            gridcolor='rgba(0,0,0,0.05)'
+        ),
+        xaxis=dict(gridcolor='rgba(0,0,0,0.05)'),
         hovermode='x unified',
-        margin=dict(l=60, r=40, t=60, b=60)
+        margin=dict(l=50, r=50, t=50, b=50),
+        plot_bgcolor='white'
     )
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
-    # Percentile table
+    # Percentile table with styled design using dataframe
     st.markdown("#### Key Percentiles")
+
+    # Create percentile data
+    import pandas as pd
+
     percentile_data = []
     for p in [1, 5, 10, 25, 50, 75, 90, 95, 99]:
         idx = int((p / 100) * (n - 1))
+        pnl_val = sorted_pnl[idx]
+
+        if p <= 10:
+            category = "🔴 Tail Risk"
+        elif p >= 90:
+            category = "🟢 Upside"
+        else:
+            category = "⚪ Middle"
+
         percentile_data.append({
-            "Percentile": f"{p}%",
-            "P&L": f"${sorted_pnl[idx]:,.2f}"
+            "Percentile": f"P{p}",
+            "P&L Value": f"${pnl_val:,.2f}",
+            "Category": category
         })
 
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.markdown("**Tail Risk (Left)**")
-        for item in percentile_data[:3]:
-            st.markdown(f"- {item['Percentile']}: {item['P&L']}")
-    with col2:
-        st.markdown("**Middle Range**")
-        for item in percentile_data[3:6]:
-            st.markdown(f"- {item['Percentile']}: {item['P&L']}")
-    with col3:
-        st.markdown("**Upside (Right)**")
-        for item in percentile_data[6:]:
-            st.markdown(f"- {item['Percentile']}: {item['P&L']}")
+    df_percentiles = pd.DataFrame(percentile_data)
+
+    # Style the dataframe
+    st.dataframe(
+        df_percentiles,
+        width="stretch",
+        hide_index=True,
+        column_config={
+            "Percentile": st.column_config.TextColumn("Percentile", width="small"),
+            "P&L Value": st.column_config.TextColumn("P&L Value", width="medium"),
+            "Category": st.column_config.TextColumn("Category", width="medium")
+        }
+    )
 
 
 def render_risk_metrics_tab(metrics: RiskMetrics, params: Dict[str, Any]) -> None:
@@ -374,88 +335,52 @@ def render_risk_metrics_tab(metrics: RiskMetrics, params: Dict[str, Any]) -> Non
     """
     st.markdown("### Risk Metrics Dashboard")
 
-    # Primary metrics row
+    # Primary metrics row with styled cards
     st.markdown("#### Performance & Risk")
-    col1, col2, col3, col4 = st.columns(4)
+    mean_variant = "green" if metrics.mean_pnl >= 0 else "red"
+    prob_variant = "green" if metrics.prob_profit > 0.5 else "red"
 
-    with col1:
-        st.markdown("""
-        <div style="background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%); border-radius: 12px; padding: 1.25rem; border-left: 4px solid #3b82f6;">
-            <div style="font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; color: #1d4ed8; font-weight: 600;">Expected P&L</div>
-            <div style="font-size: 1.5rem; font-weight: 700; color: #1e293b; font-family: monospace; margin-top: 0.25rem;">${metrics.mean_pnl:,.2f}</div>
-            <div style="font-size: 0.75rem; color: #64748b; margin-top: 0.25rem;">Mean outcome</div>
-        </div>
-        """, unsafe_allow_html=True)
+    primary_stats = [
+        ("Expected P&L", f"${metrics.mean_pnl:,.2f}", "Mean outcome"),
+        ("VaR 95%", f"${metrics.var_95:,.2f}", "5% worst case"),
+        ("CVaR 95%", f"${metrics.cvar_95:,.2f}", "Expected shortfall"),
+        ("P(Profit)", f"{metrics.prob_profit:.1%}", "Favorable" if metrics.prob_profit > 0.5 else "Unfavorable"),
+    ]
+    render_stats_row(primary_stats, [mean_variant, "amber", "red", prob_variant])
 
-    with col2:
-        st.markdown(f"""
-        <div style="background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%); border-radius: 12px; padding: 1.25rem; border-left: 4px solid #f59e0b;">
-            <div style="font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; color: #b45309; font-weight: 600;">Value at Risk 95%</div>
-            <div style="font-size: 1.5rem; font-weight: 700; color: #1e293b; font-family: monospace; margin-top: 0.25rem;">${metrics.var_95:,.2f}</div>
-            <div style="font-size: 0.75rem; color: #64748b; margin-top: 0.25rem;">5% worst case</div>
-        </div>
-        """, unsafe_allow_html=True)
+    st.markdown("")  # Spacer
 
-    with col3:
-        st.markdown(f"""
-        <div style="background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%); border-radius: 12px; padding: 1.25rem; border-left: 4px solid #ef4444;">
-            <div style="font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; color: #b91c1c; font-weight: 600;">CVaR 95%</div>
-            <div style="font-size: 1.5rem; font-weight: 700; color: #1e293b; font-family: monospace; margin-top: 0.25rem;">${metrics.cvar_95:,.2f}</div>
-            <div style="font-size: 0.75rem; color: #64748b; margin-top: 0.25rem;">Expected shortfall</div>
-        </div>
-        """, unsafe_allow_html=True)
-
-    with col4:
-        prob_color = "#059669" if metrics.prob_profit > 0.5 else "#dc2626"
-        st.markdown(f"""
-        <div style="background: linear-gradient(135deg, {'#ecfdf5' if metrics.prob_profit > 0.5 else '#fef2f2'} 0%, {'#d1fae5' if metrics.prob_profit > 0.5 else '#fee2e2'} 100%); border-radius: 12px; padding: 1.25rem; border-left: 4px solid {prob_color};">
-            <div style="font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; color: {prob_color}; font-weight: 600;">Probability of Profit</div>
-            <div style="font-size: 1.5rem; font-weight: 700; color: {prob_color}; font-family: monospace; margin-top: 0.25rem;">{metrics.prob_profit:.1%}</div>
-            <div style="font-size: 0.75rem; color: #64748b; margin-top: 0.25rem;">P(P&L > 0)</div>
-        </div>
-        """, unsafe_allow_html=True)
-
-    st.markdown("<div style='height: 1rem;'></div>", unsafe_allow_html=True)
-
-    # Secondary metrics
+    # Secondary metrics with styled cards
     st.markdown("#### Distribution Characteristics")
-    col1, col2, col3, col4 = st.columns(4)
+    skew_variant = "green" if metrics.skewness > 0 else "red"
+    kurt_variant = "amber" if metrics.kurtosis > 3 else "slate"
 
-    with col1:
-        st.metric("Standard Deviation", f"${metrics.std_pnl:,.2f}")
-    with col2:
-        # Risk-adjusted return
-        if metrics.std_pnl > 0:
-            sharpe_like = metrics.mean_pnl / metrics.std_pnl
-            st.metric("Return/Risk Ratio", f"{sharpe_like:.3f}")
-        else:
-            st.metric("Return/Risk Ratio", "N/A")
-    with col3:
-        st.metric("Skewness", f"{metrics.skewness:.3f}",
-                  delta="Right-skewed" if metrics.skewness > 0 else "Left-skewed",
-                  delta_color="normal" if metrics.skewness > 0 else "inverse")
-    with col4:
-        st.metric("Excess Kurtosis", f"{metrics.kurtosis:.3f}",
-                  delta="Fat tails" if metrics.kurtosis > 0 else "Thin tails",
-                  delta_color="inverse" if metrics.kurtosis > 3 else "normal")
+    # Risk-adjusted return
+    sharpe_like = metrics.mean_pnl / metrics.std_pnl if metrics.std_pnl > 0 else 0
+    sharpe_variant = "green" if sharpe_like > 0 else "red"
 
-    st.markdown("<div style='height: 1rem;'></div>", unsafe_allow_html=True)
+    dist_stats = [
+        ("Standard Deviation", f"${metrics.std_pnl:,.2f}", "P&L volatility"),
+        ("Return/Risk Ratio", f"{sharpe_like:.3f}" if metrics.std_pnl > 0 else "N/A", "Risk-adjusted"),
+        ("Skewness", f"{metrics.skewness:.3f}", "Right-skewed" if metrics.skewness > 0 else "Left-skewed"),
+        ("Excess Kurtosis", f"{metrics.kurtosis:.3f}", "Fat tails" if metrics.kurtosis > 3 else "Normal tails"),
+    ]
+    render_stats_row(dist_stats, ["blue", sharpe_variant, skew_variant, kurt_variant])
 
-    # Extreme outcomes
+    st.divider()
+
+    # Extreme outcomes with styled cards
     st.markdown("#### Extreme Outcomes")
-    col1, col2, col3, col4 = st.columns(4)
-
-    with col1:
-        st.metric("Maximum Profit", f"${metrics.max_profit:,.2f}")
-    with col2:
-        st.metric("Maximum Loss", f"${metrics.max_loss:,.2f}")
-    with col3:
-        st.metric("VaR 99%", f"${metrics.var_99:,.2f}")
-    with col4:
-        st.metric("CVaR 99%", f"${metrics.cvar_99:,.2f}")
+    extreme_stats = [
+        ("Maximum Profit", f"${metrics.max_profit:,.2f}", "Best scenario"),
+        ("Maximum Loss", f"${metrics.max_loss:,.2f}", "Worst scenario"),
+        ("VaR 99%", f"${metrics.var_99:,.2f}", "1% worst case"),
+        ("CVaR 99%", f"${metrics.cvar_99:,.2f}", "Extreme shortfall"),
+    ]
+    render_stats_row(extreme_stats, ["green", "red", "amber", "red"])
 
     # Risk interpretation
-    st.markdown("<div style='height: 1rem;'></div>", unsafe_allow_html=True)
+    st.divider()
     st.markdown("#### Interpretation")
 
     interpretation = []

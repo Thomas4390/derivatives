@@ -179,6 +179,14 @@ def render_sidebar() -> Dict[str, Any]:
                 step=10
             )
 
+        # Memory validation warning
+        total_samples = num_paths * (num_steps + 1)
+        memory_mb = total_samples * 8 / (1024 * 1024)  # 8 bytes per float64
+        if total_samples > 50_000_000:  # 50M samples ~400MB
+            st.warning(f"⚠️ High memory usage: ~{memory_mb:.0f} MB for {total_samples/1e6:.0f}M samples")
+        elif total_samples > 20_000_000:  # 20M samples ~160MB
+            st.info(f"ℹ️ Memory estimate: ~{memory_mb:.0f} MB")
+
         seed = st.number_input(
             "Random Seed (for reproducibility)",
             min_value=0,
@@ -205,6 +213,20 @@ def render_sidebar() -> Dict[str, Any]:
 
         # Model-specific parameters based on simulation mode
         if simulation_mode == "price":
+            # Expected return for P-measure simulation
+            st.markdown('<div class="sidebar-header">Expected Return</div>', unsafe_allow_html=True)
+            expected_return = st.number_input(
+                "Expected Return (μ)",
+                min_value=-0.20,
+                max_value=0.50,
+                value=DEFAULT_EXPECTED_RETURN,
+                step=0.01,
+                format="%.2f",
+                help="Annual expected return under P-measure",
+                key="price_expected_return"
+            )
+            params['expected_return'] = expected_return
+
             params.update(_render_price_model_params(price_model, volatility))
         elif simulation_mode == "volatility":
             params.update(_render_volatility_model_params(vol_model, volatility))
@@ -360,6 +382,112 @@ def _render_price_model_params(model: str, base_volatility: float) -> Dict[str, 
         params['merton_lambda'] = lambda_j
         params['merton_mu_j'] = mu_j
         params['merton_sigma_j'] = sigma_j
+
+    elif model == "bates":
+        st.markdown('<div class="sidebar-header">Bates Model Parameters</div>', unsafe_allow_html=True)
+
+        # Heston (stochastic volatility) parameters
+        st.markdown("**Stochastic Volatility**")
+        col1, col2 = st.columns(2)
+
+        with col1:
+            v0 = st.number_input(
+                "Initial Variance (V0)",
+                min_value=0.001,
+                max_value=1.0,
+                value=base_volatility ** 2,
+                step=0.01,
+                format="%.4f",
+                key="bates_v0"
+            )
+            kappa = st.number_input(
+                "Mean Reversion (kappa)",
+                min_value=0.1,
+                max_value=10.0,
+                value=2.0,
+                step=0.1,
+                format="%.2f",
+                key="bates_kappa"
+            )
+
+        with col2:
+            theta = st.number_input(
+                "Long-term Var (theta)",
+                min_value=0.001,
+                max_value=1.0,
+                value=base_volatility ** 2,
+                step=0.01,
+                format="%.4f",
+                key="bates_theta"
+            )
+            xi = st.number_input(
+                "Vol of Vol (xi)",
+                min_value=0.01,
+                max_value=1.0,
+                value=0.3,
+                step=0.05,
+                format="%.2f",
+                key="bates_xi"
+            )
+
+        rho = st.slider(
+            "Price-Vol Correlation (rho)",
+            min_value=-0.99,
+            max_value=0.99,
+            value=-0.7,
+            step=0.01,
+            key="bates_rho"
+        )
+
+        # Feller condition check
+        feller = 2 * kappa * theta / (xi ** 2)
+        if feller < 1:
+            st.warning(f"⚠️ Feller condition not satisfied ({feller:.2f} < 1). Variance may reach zero.")
+
+        # Jump parameters
+        st.markdown("**Jump Component**")
+        col1, col2 = st.columns(2)
+
+        with col1:
+            lambda_j = st.number_input(
+                "Jump Intensity (lambda)",
+                min_value=0.0,
+                max_value=5.0,
+                value=0.5,
+                step=0.1,
+                format="%.2f",
+                help="Expected number of jumps per year",
+                key="bates_lambda"
+            )
+            mu_j = st.number_input(
+                "Mean Log-Jump (mu_j)",
+                min_value=-0.5,
+                max_value=0.5,
+                value=-0.1,
+                step=0.01,
+                format="%.3f",
+                key="bates_mu_j"
+            )
+
+        with col2:
+            sigma_j = st.number_input(
+                "Jump Volatility (sigma_j)",
+                min_value=0.01,
+                max_value=0.5,
+                value=0.2,
+                step=0.01,
+                format="%.2f",
+                key="bates_sigma_j"
+            )
+
+        params['bates_v0'] = v0
+        params['bates_kappa'] = kappa
+        params['bates_theta'] = theta
+        params['bates_xi'] = xi
+        params['bates_rho'] = rho
+        params['bates_lambda'] = lambda_j
+        params['bates_mu_j'] = mu_j
+        params['bates_sigma_j'] = sigma_j
 
     elif model == "sabr":
         st.markdown('<div class="sidebar-header">SABR Parameters</div>', unsafe_allow_html=True)
@@ -539,6 +667,11 @@ def _render_option_pnl_params(
     )
 
     params['expected_return'] = expected_return
+
+    st.info(
+        "💡 **P-measure simulation**: Uses expected return (μ) as drift for realistic "
+        "P&L scenarios. This differs from Q-measure (risk-free rate) used for option pricing."
+    )
 
     # Strategy Builder
     st.markdown("---")

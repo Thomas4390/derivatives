@@ -128,10 +128,23 @@ class VolatilitySimulationResult:
 
     @property
     def realized_volatility(self) -> np.ndarray:
-        """Computes realized volatility for each path (annualized std of returns)."""
-        # Annualize assuming daily returns
-        annualization_factor = np.sqrt(252)
-        return np.std(self.return_paths, axis=1) * annualization_factor
+        """
+        Computes realized volatility for each path from variance paths.
+
+        Returns the time-averaged volatility along each path, which is already
+        in annualized form since variance_paths stores annualized variance.
+
+        This avoids the issue of assuming a fixed annualization factor (e.g., 252 days)
+        which would be incorrect for arbitrary time grids.
+
+        Returns
+        -------
+        np.ndarray
+            Realized volatility for each path, shape (n_paths,)
+        """
+        # Use variance paths which are already in annualized form
+        # Compute time-averaged volatility along each path
+        return np.mean(np.sqrt(self.variance_paths), axis=1)
 
     @property
     def long_run_variance(self) -> float:
@@ -854,6 +867,52 @@ def validate_ngarch_params(omega: float, alpha: float, beta: float, theta: float
     return True, "Parameters are valid"
 
 
+def validate_gjr_garch_params(omega: float, alpha: float, beta: float, gamma: float) -> Tuple[bool, str]:
+    """
+    Validate GJR-GARCH parameters.
+
+    Stationarity condition: alpha + beta + gamma/2 < 1
+
+    Returns
+    -------
+    Tuple[bool, str]
+        (is_valid, message)
+    """
+    if omega <= 0:
+        return False, "omega must be positive"
+    if alpha < 0:
+        return False, "alpha must be non-negative"
+    if beta < 0:
+        return False, "beta must be non-negative"
+    if gamma < 0:
+        return False, "gamma must be non-negative for leverage effect"
+
+    persistence = alpha + beta + 0.5 * gamma
+    if persistence >= 1:
+        return False, f"alpha + beta + gamma/2 = {persistence:.4f} >= 1: process is not stationary"
+    return True, "Parameters are valid"
+
+
+def validate_egarch_params(omega: float, alpha: float, beta: float, gamma: float) -> Tuple[bool, str]:
+    """
+    Validate EGARCH parameters.
+
+    Stationarity condition: |beta| < 1
+
+    Returns
+    -------
+    Tuple[bool, str]
+        (is_valid, message)
+    """
+    # omega can be any real value in EGARCH (log-space)
+    if alpha < 0:
+        return False, "alpha must be non-negative"
+
+    if abs(beta) >= 1:
+        return False, f"|beta| = {abs(beta):.4f} >= 1: process is not stationary"
+    return True, "Parameters are valid"
+
+
 def estimate_garch_params_from_volatility(
     target_long_run_vol: float,
     half_life_days: int = 20,
@@ -972,6 +1031,11 @@ def simulate_volatility_paths(
         # Estimate omega to match initial volatility as long-run vol
         omega = kwargs.get('omega', sigma0**2 * (1 - alpha - beta))
 
+        # Validate parameters
+        is_valid, msg = validate_garch_params(omega, alpha, beta)
+        if not is_valid:
+            raise ValueError(f"Invalid GARCH parameters: {msg}")
+
         parameters = {'omega': omega, 'alpha': alpha, 'beta': beta}
 
         variance_paths, return_paths = simulate_garch_paths(
@@ -987,6 +1051,11 @@ def simulate_volatility_paths(
         persistence = alpha * (1 + theta**2) + beta
         omega = kwargs.get('omega', sigma0**2 * (1 - persistence))
 
+        # Validate parameters
+        is_valid, msg = validate_ngarch_params(omega, alpha, beta, theta)
+        if not is_valid:
+            raise ValueError(f"Invalid NGARCH parameters: {msg}")
+
         parameters = {'omega': omega, 'alpha': alpha, 'beta': beta, 'theta': theta}
 
         variance_paths, return_paths = simulate_ngarch_paths(
@@ -999,6 +1068,11 @@ def simulate_volatility_paths(
         beta = kwargs.get('beta', 0.90)
         gamma = kwargs.get('gamma', 0.05)
         omega = kwargs.get('omega', sigma0**2 * (1 - alpha - 0.5*gamma - beta))
+
+        # Validate parameters
+        is_valid, msg = validate_gjr_garch_params(omega, alpha, beta, gamma)
+        if not is_valid:
+            raise ValueError(f"Invalid GJR-GARCH parameters: {msg}")
 
         parameters = {'omega': omega, 'alpha': alpha, 'beta': beta, 'gamma': gamma}
 
@@ -1013,6 +1087,11 @@ def simulate_volatility_paths(
         gamma = kwargs.get('gamma', -0.1)
         # For EGARCH, omega is in log-space
         omega = kwargs.get('omega', np.log(sigma0**2) * (1 - beta))
+
+        # Validate parameters
+        is_valid, msg = validate_egarch_params(omega, alpha, beta, gamma)
+        if not is_valid:
+            raise ValueError(f"Invalid EGARCH parameters: {msg}")
 
         parameters = {'omega': omega, 'alpha': alpha, 'beta': beta, 'gamma': gamma}
 
@@ -1296,274 +1375,3 @@ def print_volatility_benchmark_results(results: dict) -> None:
         print(f"  Throughput: {stats['throughput_samples_per_sec']/1e6:.2f} M samples/sec")
 
     print("\n" + "=" * 70)
-
-
-# =============================================================================
-# Main Test Block
-# =============================================================================
-
-if __name__ == "__main__":
-    import matplotlib.pyplot as plt
-
-    print("=" * 70)
-    print("VOLATILITY PATH SIMULATION - PERFORMANCE TEST")
-    print("=" * 70)
-
-    np.random.seed(42)
-
-    # Configuration
-    SIGMA0 = 0.20  # 20% initial volatility
-
-    # =========================================================================
-    # Test 1: Basic functionality test
-    # =========================================================================
-    print("\n[TEST 1] Basic Functionality Test")
-    print("-" * 40)
-
-    n_paths_test = 10000
-    n_steps_test = 252
-
-    for model in ['garch', 'ngarch', 'gjr_garch', 'egarch']:
-        result = simulate_volatility_paths(
-            model=model,
-            sigma0=SIGMA0,
-            n_paths=n_paths_test,
-            n_steps=n_steps_test,
-            seed=42
-        )
-        print(f"  {result.model}:")
-        print(f"    Computation time: {result.computation_time*1000:.2f} ms")
-        print(f"    Terminal vol mean: {result.terminal_volatility.mean()*100:.2f}%")
-        print(f"    Terminal vol std: {result.terminal_volatility.std()*100:.2f}%")
-        print(f"    Parameters: {result.parameters}")
-
-    # =========================================================================
-    # Test 2: GARCH parameter validation
-    # =========================================================================
-    print("\n[TEST 2] Parameter Validation")
-    print("-" * 40)
-
-    test_cases = [
-        (0.0001, 0.05, 0.90, "Valid GARCH"),
-        (0.0001, 0.10, 0.92, "Non-stationary (α+β>1)"),
-        (-0.0001, 0.05, 0.90, "Invalid omega"),
-    ]
-
-    for omega, alpha, beta, description in test_cases:
-        is_valid, msg = validate_garch_params(omega, alpha, beta)
-        status = "PASS" if is_valid else "FAIL"
-        print(f"  {description}: {status} - {msg}")
-
-    # =========================================================================
-    # Test 3: Long-run variance computation
-    # =========================================================================
-    print("\n[TEST 3] Long-Run Variance")
-    print("-" * 40)
-
-    omega, alpha, beta = 0.0001, 0.05, 0.90
-    lr_var = compute_garch_long_run_variance(omega, alpha, beta)
-    print(f"  GARCH long-run variance: {lr_var:.6f}")
-    print(f"  GARCH long-run volatility: {np.sqrt(lr_var)*100:.2f}%")
-
-    omega, alpha, beta, theta = 0.0001, 0.05, 0.90, 0.5
-    lr_var_ngarch = compute_ngarch_long_run_variance(omega, alpha, beta, theta)
-    print(f"  NGARCH long-run variance: {lr_var_ngarch:.6f}")
-    print(f"  NGARCH long-run volatility: {np.sqrt(lr_var_ngarch)*100:.2f}%")
-
-    # =========================================================================
-    # Test 4: Parameter estimation utility
-    # =========================================================================
-    print("\n[TEST 4] Parameter Estimation from Target Volatility")
-    print("-" * 40)
-
-    params = estimate_garch_params_from_volatility(
-        target_long_run_vol=0.20,
-        half_life_days=20,
-        alpha_ratio=0.1
-    )
-    print(f"  Target volatility: 20%")
-    print(f"  Half-life: 20 days")
-    print(f"  Estimated parameters:")
-    for key, value in params.items():
-        print(f"    {key}: {value:.6f}")
-
-    # =========================================================================
-    # Test 5: Joint simulation test
-    # =========================================================================
-    print("\n[TEST 5] Joint Price-Volatility Simulation (P-measure)")
-    print("-" * 40)
-
-    joint_result = simulate_joint_paths(
-        volatility_model='ngarch',
-        s0=100.0,
-        mu=0.08,  # 8% expected return (P-measure)
-        sigma0=0.20,
-        t=1.0,
-        n_paths=10000,
-        n_steps=252,
-        seed=42,
-        theta=0.5
-    )
-
-    print(f"  Price model: {joint_result.price_model}")
-    print(f"  Volatility model: {joint_result.volatility_model}")
-    print(f"  Computation time: {joint_result.computation_time*1000:.2f} ms")
-    print(f"  Terminal price mean: ${joint_result.terminal_prices.mean():.2f}")
-    print(f"  Terminal vol mean: {joint_result.terminal_volatility.mean()*100:.2f}%")
-
-    # =========================================================================
-    # Test 6: Performance benchmark
-    # =========================================================================
-    print("\n[TEST 6] Performance Benchmark")
-    print("-" * 40)
-
-    results = run_volatility_benchmark(n_paths=100000, n_steps=252)
-    print_volatility_benchmark_results(results)
-
-    # =========================================================================
-    # Test 7: Visualization
-    # =========================================================================
-    print("\n[TEST 7] Generating Visualization")
-    print("-" * 40)
-
-    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
-
-    models = ['garch', 'ngarch', 'gjr_garch', 'egarch']
-    titles = ['GARCH(1,1)', 'NGARCH (NAGARCH)', 'GJR-GARCH', 'EGARCH']
-
-    for ax, model, title in zip(axes.flatten(), models, titles):
-        result = simulate_volatility_paths(
-            model=model,
-            sigma0=SIGMA0,
-            n_paths=1000,
-            n_steps=252,
-            seed=42
-        )
-
-        # Plot sample volatility paths
-        for i in range(min(50, 1000)):
-            ax.plot(result.time_grid, result.volatility_paths[i] * 100,
-                   alpha=0.3, linewidth=0.5)
-
-        # Plot mean and percentiles
-        ax.plot(result.time_grid, result.mean_volatility_path * 100,
-               'k-', linewidth=2, label='Mean')
-        percentiles = result.percentile_volatility_paths([5, 95])
-        ax.fill_between(result.time_grid, percentiles[0] * 100, percentiles[1] * 100,
-                       alpha=0.3, color='blue', label='5-95% range')
-
-        ax.axhline(SIGMA0 * 100, color='red', linestyle='--', alpha=0.7, label='Initial σ')
-
-        ax.set_title(f'{title}\n(Time: {result.computation_time*1000:.1f} ms)')
-        ax.set_xlabel('Time (normalized)')
-        ax.set_ylabel('Volatility (%)')
-        ax.legend(loc='upper right')
-        ax.grid(True, alpha=0.3)
-        ax.set_ylim(0, 60)
-
-    plt.tight_layout()
-    plt.savefig('/tmp/volatility_paths.png', dpi=150)
-    print("  Saved volatility paths visualization to /tmp/volatility_paths.png")
-
-    # =========================================================================
-    # Test 8: Leverage effect visualization (NGARCH vs GARCH)
-    # =========================================================================
-    print("\n[TEST 8] Leverage Effect Visualization")
-    print("-" * 40)
-
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
-
-    # News impact curve comparison
-    sigma = 0.20
-    epsilon_range = np.linspace(-0.1, 0.1, 100)
-
-    # GARCH: symmetric response
-    omega, alpha, beta = 0.0001, 0.05, 0.90
-    garch_response = omega + alpha * epsilon_range**2 + beta * sigma**2
-
-    # NGARCH: asymmetric response
-    theta = 0.5
-    ngarch_response = omega + alpha * (epsilon_range - theta * sigma)**2 + beta * sigma**2
-
-    ax1.plot(epsilon_range * 100, np.sqrt(garch_response) * 100, 'b-',
-            linewidth=2, label='GARCH(1,1)')
-    ax1.plot(epsilon_range * 100, np.sqrt(ngarch_response) * 100, 'r-',
-            linewidth=2, label=f'NGARCH (θ={theta})')
-    ax1.axvline(0, color='gray', linestyle='--', alpha=0.5)
-    ax1.set_xlabel('Return shock ε (%)')
-    ax1.set_ylabel('Next period volatility (%)')
-    ax1.set_title('News Impact Curve\n(Leverage Effect)')
-    ax1.legend()
-    ax1.grid(True, alpha=0.3)
-
-    # Simulated paths showing leverage effect
-    np.random.seed(123)
-    n_sim = 5000
-
-    garch_result = simulate_volatility_paths('garch', SIGMA0, n_sim, 252, seed=123)
-    ngarch_result = simulate_volatility_paths('ngarch', SIGMA0, n_sim, 252, seed=123, theta=0.7)
-
-    # Compute correlation between returns and next-period volatility change
-    for result, label, color in [(garch_result, 'GARCH', 'blue'),
-                                   (ngarch_result, 'NGARCH', 'red')]:
-        returns = result.return_paths[:, :-1].flatten()
-        vol_changes = (np.sqrt(result.variance_paths[:, 2:]) -
-                      np.sqrt(result.variance_paths[:, 1:-1])).flatten()
-
-        # Bin returns and compute mean vol change
-        bins = np.percentile(returns, np.linspace(0, 100, 21))
-        bin_centers = (bins[:-1] + bins[1:]) / 2
-        bin_means = []
-        for i in range(len(bins) - 1):
-            mask = (returns >= bins[i]) & (returns < bins[i+1])
-            if mask.sum() > 0:
-                bin_means.append(vol_changes[mask].mean())
-            else:
-                bin_means.append(np.nan)
-
-        ax2.plot(bin_centers * 100, np.array(bin_means) * 100, 'o-',
-                color=color, label=label, markersize=4)
-
-    ax2.axhline(0, color='gray', linestyle='--', alpha=0.5)
-    ax2.axvline(0, color='gray', linestyle='--', alpha=0.5)
-    ax2.set_xlabel('Return (%)')
-    ax2.set_ylabel('Volatility Change (%)')
-    ax2.set_title('Simulated Leverage Effect\n(Volatility response to returns)')
-    ax2.legend()
-    ax2.grid(True, alpha=0.3)
-
-    plt.tight_layout()
-    plt.savefig('/tmp/leverage_effect.png', dpi=150)
-    print("  Saved leverage effect visualization to /tmp/leverage_effect.png")
-
-    # =========================================================================
-    # Summary
-    # =========================================================================
-    print("\n" + "=" * 70)
-    print("SUMMARY")
-    print("=" * 70)
-    print(f"""
-All tests completed successfully!
-
-Models implemented:
-- GARCH(1,1): Standard symmetric volatility model
-- NGARCH (NAGARCH): Asymmetric with leverage effect (Engle & Ng, 1993)
-- GJR-GARCH: Asymmetric with indicator function (GJR, 1993)
-- EGARCH: Exponential GARCH in log-space (Nelson, 1991)
-
-Performance highlights (100K paths, 252 steps):
-- GARCH(1,1):  {results['GARCH']['mean_time']*1000:.0f} ms ({results['GARCH']['throughput_samples_per_sec']/1e6:.1f} M samples/sec)
-- NGARCH:     {results['NGARCH']['mean_time']*1000:.0f} ms ({results['NGARCH']['throughput_samples_per_sec']/1e6:.1f} M samples/sec)
-- GJR-GARCH:  {results['GJR_GARCH']['mean_time']*1000:.0f} ms ({results['GJR_GARCH']['throughput_samples_per_sec']/1e6:.1f} M samples/sec)
-- EGARCH:     {results['EGARCH']['mean_time']*1000:.0f} ms ({results['EGARCH']['throughput_samples_per_sec']/1e6:.1f} M samples/sec)
-
-Features:
-- Numba JIT compilation for high performance
-- Parallel execution with prange
-- Full path and terminal-only simulations
-- Joint price-volatility simulation (GBM + GARCH/NGARCH)
-- Parameter validation and estimation utilities
-- Comprehensive benchmarking tools
-    """)
-
-    plt.show()

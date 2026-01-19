@@ -121,6 +121,17 @@ def init_session_state() -> None:
     if 'stock_position' not in st.session_state:
         st.session_state.stock_position = None
 
+    # Config versioning for stale result detection
+    init_config_versioning()
+
+    # Strategy builder expanded state
+    if 'strategy_expanded' not in st.session_state:
+        st.session_state.strategy_expanded = True
+
+    # Active main tab
+    if 'active_main_tab' not in st.session_state:
+        st.session_state.active_main_tab = 'config'
+
 
 def get_simulation_params() -> SimulationParams:
     """Get current simulation parameters."""
@@ -237,3 +248,134 @@ def clear_all_positions() -> None:
     """Clear all option and stock positions."""
     st.session_state.option_positions = []
     st.session_state.stock_position = None
+
+
+# =============================================================================
+# CONFIG VERSIONING FOR STALE RESULT DETECTION
+# =============================================================================
+
+def init_config_versioning() -> None:
+    """Initialize config versioning for detecting parameter changes."""
+    if 'config_version' not in st.session_state:
+        st.session_state.config_version = 0
+
+    if 'results_versions' not in st.session_state:
+        st.session_state.results_versions = {
+            'price': -1,
+            'volatility': -1,
+            'pnl': -1
+        }
+
+    # Track last known parameter values for change detection
+    if 'last_params_hash' not in st.session_state:
+        st.session_state.last_params_hash = None
+
+
+def increment_config_version() -> None:
+    """Increment config version when parameters change."""
+    if 'config_version' not in st.session_state:
+        st.session_state.config_version = 0
+    st.session_state.config_version += 1
+
+
+def get_config_version() -> int:
+    """Get current config version."""
+    return st.session_state.get('config_version', 0)
+
+
+def mark_results_current(result_type: str) -> None:
+    """Mark results as current (matching config version)."""
+    if 'results_versions' not in st.session_state:
+        st.session_state.results_versions = {'price': -1, 'volatility': -1, 'pnl': -1}
+    st.session_state.results_versions[result_type] = get_config_version()
+
+
+def are_results_stale(result_type: str) -> bool:
+    """Check if results are stale (config changed since last run)."""
+    if 'results_versions' not in st.session_state:
+        return True
+    return st.session_state.results_versions.get(result_type, -1) != get_config_version()
+
+
+def compute_params_hash(params: dict) -> str:
+    """Compute a hash of relevant parameters for change detection."""
+    import hashlib
+    import json
+
+    # Keys to track for change detection
+    tracked_keys = [
+        'spot_price', 'risk_free_rate', 'volatility', 'time_horizon',
+        'num_paths', 'num_steps', 'seed', 'expected_return',
+        'price_model', 'vol_model',
+        # Heston
+        'heston_v0', 'heston_kappa', 'heston_theta', 'heston_xi', 'heston_rho',
+        # Merton
+        'merton_lambda', 'merton_mu_j', 'merton_sigma_j',
+        # Bates
+        'bates_v0', 'bates_kappa', 'bates_theta', 'bates_xi', 'bates_rho',
+        'bates_lambda', 'bates_mu_j', 'bates_sigma_j',
+        # SABR
+        'sabr_beta', 'sabr_nu', 'sabr_rho',
+        # GARCH
+        'garch_alpha', 'garch_beta', 'garch_omega',
+        'ngarch_theta', 'gjr_gamma', 'egarch_gamma'
+    ]
+
+    tracked_params = {k: params.get(k) for k in tracked_keys if k in params}
+
+    # Also track position arrays for P&L
+    if 'position_arrays' in params:
+        pos = params['position_arrays']
+        tracked_params['strikes'] = list(pos.get('strikes', []))
+        tracked_params['option_types'] = list(pos.get('option_types', []))
+        tracked_params['position_types'] = list(pos.get('position_types', []))
+        tracked_params['quantities'] = list(pos.get('quantities', []))
+
+    hash_str = json.dumps(tracked_params, sort_keys=True, default=str)
+    return hashlib.md5(hash_str.encode()).hexdigest()
+
+
+def check_params_changed(params: dict) -> bool:
+    """Check if parameters changed and update version if so."""
+    current_hash = compute_params_hash(params)
+    last_hash = st.session_state.get('last_params_hash')
+
+    if last_hash != current_hash:
+        st.session_state.last_params_hash = current_hash
+        increment_config_version()
+        return True
+    return False
+
+
+# =============================================================================
+# ACTIVE TAB STATE
+# =============================================================================
+
+def get_active_tab() -> str:
+    """Get the currently active main tab."""
+    return st.session_state.get('active_main_tab', 'config')
+
+
+def set_active_tab(tab: str) -> None:
+    """Set the currently active main tab."""
+    st.session_state.active_main_tab = tab
+
+
+# =============================================================================
+# STRATEGY BUILDER STATE
+# =============================================================================
+
+def get_strategy_expanded() -> bool:
+    """Get whether strategy builder is expanded."""
+    return st.session_state.get('strategy_expanded', True)
+
+
+def set_strategy_expanded(expanded: bool) -> None:
+    """Set strategy builder expanded state."""
+    st.session_state.strategy_expanded = expanded
+
+
+def toggle_strategy_expanded() -> None:
+    """Toggle strategy builder expanded state."""
+    current = get_strategy_expanded()
+    set_strategy_expanded(not current)

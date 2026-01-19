@@ -37,6 +37,7 @@ Author: Derivatives Pricing Project
 import numpy as np
 from numba import njit, prange
 import time
+import warnings
 from typing import Tuple, Optional, Callable
 from dataclasses import dataclass
 from enum import Enum
@@ -51,6 +52,7 @@ class ModelType(Enum):
     GBM = "Geometric Brownian Motion"
     HESTON = "Heston Stochastic Volatility"
     MERTON_JUMP = "Merton Jump Diffusion"
+    BATES = "Bates Model"
     SABR = "SABR Model"
 
 
@@ -548,7 +550,291 @@ def simulate_merton_jump_paths(
 
 
 # =============================================================================
-# Model 4: SABR Model
+# Model 4: Bates Model (Heston + Jumps)
+# =============================================================================
+
+@njit(parallel=True, cache=True, fastmath=True)
+def simulate_bates_paths(
+    s0: float,
+    mu: float,
+    v0: float,
+    kappa: float,
+    theta: float,
+    xi: float,
+    rho: float,
+    lambda_j: float,
+    mu_j: float,
+    sigma_j: float,
+    t: float,
+    n_paths: int,
+    n_steps: int,
+    antithetic: bool = True
+) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Simulate price paths using the Bates model (Heston + Jump Diffusion).
+
+    The Bates model combines Heston stochastic volatility with Merton-style jumps:
+
+    dS = (μ - λ·k)·S·dt + √V·S·dW_S + (J-1)·S·dN
+    dV = κ(θ - V)dt + ξ·√V·dW_V
+
+    Where:
+    - k = E[J-1] = exp(μ_j + σ_j²/2) - 1 (compensator)
+    - J = exp(μ_j + σ_j·Z) is the log-normal jump size
+    - N is a Poisson process with intensity λ
+    - Corr(dW_S, dW_V) = ρ
+
+    Parameters
+    ----------
+    s0 : float
+        Initial stock price
+    mu : float
+        Expected return (drift under P-measure)
+    v0 : float
+        Initial variance
+    kappa : float
+        Mean reversion speed for variance
+    theta : float
+        Long-term variance level
+    xi : float
+        Volatility of variance (vol of vol)
+    rho : float
+        Correlation between price and variance Brownian motions
+    lambda_j : float
+        Jump intensity (expected number of jumps per year)
+    mu_j : float
+        Mean of log-jump size
+    sigma_j : float
+        Standard deviation of log-jump size
+    t : float
+        Time horizon (in years)
+    n_paths : int
+        Number of simulation paths
+    n_steps : int
+        Number of time steps
+    antithetic : bool
+        Use antithetic variates for variance reduction
+
+    Returns
+    -------
+    Tuple[np.ndarray, np.ndarray]
+        (price_paths, variance_paths) each of shape (n_paths, n_steps + 1)
+    """
+    dt = t / n_steps
+    sqrt_dt = np.sqrt(dt)
+
+    # Jump compensator: k = E[J-1] = exp(mu_j + sigma_j^2/2) - 1
+    k = np.exp(mu_j + 0.5 * sigma_j * sigma_j) - 1.0
+
+    # Adjusted drift for jump compensation
+    drift_adj = mu - lambda_j * k
+
+    sqrt_one_minus_rho2 = np.sqrt(1.0 - rho * rho)
+
+    if antithetic:
+        half_paths = n_paths // 2
+        actual_paths = half_paths * 2
+    else:
+        actual_paths = n_paths
+
+    paths = np.empty((actual_paths, n_steps + 1), dtype=np.float64)
+    var_paths = np.empty((actual_paths, n_steps + 1), dtype=np.float64)
+
+    for i in prange(actual_paths // 2 if antithetic else actual_paths):
+        # Initialize
+        paths[i, 0] = s0
+        var_paths[i, 0] = v0
+
+        if antithetic:
+            paths[i + half_paths, 0] = s0
+            var_paths[i + half_paths, 0] = v0
+
+        for j in range(n_steps):
+            # Generate correlated Brownian increments
+            z1 = np.random.standard_normal()
+            z2 = np.random.standard_normal()
+
+            dw_s = sqrt_dt * z1
+            dw_v = sqrt_dt * (rho * z1 + sqrt_one_minus_rho2 * z2)
+
+            # Current values (truncated scheme for variance)
+            v_curr = max(var_paths[i, j], 0.0)
+            sqrt_v = np.sqrt(v_curr)
+
+            # Variance process (Euler-Maruyama with truncation)
+            v_new = v_curr + kappa * (theta - v_curr) * dt + xi * sqrt_v * dw_v
+            var_paths[i, j + 1] = max(v_new, 0.0)
+
+            # Price process with diffusion
+            log_return = (drift_adj - 0.5 * v_curr) * dt + sqrt_v * dw_s
+
+            # Jump component (Poisson)
+            n_jumps = np.random.poisson(lambda_j * dt)
+            if n_jumps > 0:
+                jump_sum = 0.0
+                for _ in range(n_jumps):
+                    jump_sum += mu_j + sigma_j * np.random.standard_normal()
+                log_return += jump_sum
+
+            paths[i, j + 1] = paths[i, j] * np.exp(log_return)
+
+            # Antithetic path
+            if antithetic:
+                idx_anti = i + half_paths
+
+                dw_s_anti = -dw_s
+                dw_v_anti = -dw_v
+
+                v_curr_anti = max(var_paths[idx_anti, j], 0.0)
+                sqrt_v_anti = np.sqrt(v_curr_anti)
+
+                v_new_anti = v_curr_anti + kappa * (theta - v_curr_anti) * dt + xi * sqrt_v_anti * dw_v_anti
+                var_paths[idx_anti, j + 1] = max(v_new_anti, 0.0)
+
+                log_return_anti = (drift_adj - 0.5 * v_curr_anti) * dt + sqrt_v_anti * dw_s_anti
+
+                # Same jump realization for antithetic (to maintain correlation)
+                if n_jumps > 0:
+                    log_return_anti += jump_sum
+
+                paths[idx_anti, j + 1] = paths[idx_anti, j] * np.exp(log_return_anti)
+
+    return paths, var_paths
+
+
+@njit(parallel=True, cache=True, fastmath=True)
+def simulate_bates_terminal(
+    s0: float,
+    mu: float,
+    v0: float,
+    kappa: float,
+    theta: float,
+    xi: float,
+    rho: float,
+    lambda_j: float,
+    mu_j: float,
+    sigma_j: float,
+    t: float,
+    n_paths: int,
+    n_steps: int,
+    antithetic: bool = True
+) -> np.ndarray:
+    """
+    Simulate terminal prices only using the Bates model.
+
+    This is optimized for P&L calculations where only final prices are needed.
+
+    Parameters
+    ----------
+    s0 : float
+        Initial stock price
+    mu : float
+        Expected return (drift under P-measure)
+    v0 : float
+        Initial variance
+    kappa : float
+        Mean reversion speed for variance
+    theta : float
+        Long-term variance level
+    xi : float
+        Volatility of variance (vol of vol)
+    rho : float
+        Correlation between price and variance Brownian motions
+    lambda_j : float
+        Jump intensity (expected number of jumps per year)
+    mu_j : float
+        Mean of log-jump size
+    sigma_j : float
+        Standard deviation of log-jump size
+    t : float
+        Time horizon (in years)
+    n_paths : int
+        Number of simulation paths
+    n_steps : int
+        Number of time steps
+    antithetic : bool
+        Use antithetic variates for variance reduction
+
+    Returns
+    -------
+    np.ndarray
+        Terminal prices of shape (n_paths,)
+    """
+    dt = t / n_steps
+    sqrt_dt = np.sqrt(dt)
+
+    # Jump compensator
+    k = np.exp(mu_j + 0.5 * sigma_j * sigma_j) - 1.0
+    drift_adj = mu - lambda_j * k
+
+    sqrt_one_minus_rho2 = np.sqrt(1.0 - rho * rho)
+
+    if antithetic:
+        half_paths = n_paths // 2
+        actual_paths = half_paths * 2
+    else:
+        actual_paths = n_paths
+
+    terminal_prices = np.empty(actual_paths, dtype=np.float64)
+
+    for i in prange(actual_paths // 2 if antithetic else actual_paths):
+        # Path 1
+        s = s0
+        v = v0
+
+        # Path 2 (antithetic)
+        if antithetic:
+            s_anti = s0
+            v_anti = v0
+
+        for j in range(n_steps):
+            z1 = np.random.standard_normal()
+            z2 = np.random.standard_normal()
+
+            dw_s = sqrt_dt * z1
+            dw_v = sqrt_dt * (rho * z1 + sqrt_one_minus_rho2 * z2)
+
+            # Path 1
+            v_curr = max(v, 0.0)
+            sqrt_v = np.sqrt(v_curr)
+
+            v = v_curr + kappa * (theta - v_curr) * dt + xi * sqrt_v * dw_v
+            v = max(v, 0.0)
+
+            log_return = (drift_adj - 0.5 * v_curr) * dt + sqrt_v * dw_s
+
+            n_jumps = np.random.poisson(lambda_j * dt)
+            jump_sum = 0.0
+            if n_jumps > 0:
+                for _ in range(n_jumps):
+                    jump_sum += mu_j + sigma_j * np.random.standard_normal()
+                log_return += jump_sum
+
+            s = s * np.exp(log_return)
+
+            # Antithetic path
+            if antithetic:
+                v_curr_anti = max(v_anti, 0.0)
+                sqrt_v_anti = np.sqrt(v_curr_anti)
+
+                v_anti = v_curr_anti + kappa * (theta - v_curr_anti) * dt + xi * sqrt_v_anti * (-dw_v)
+                v_anti = max(v_anti, 0.0)
+
+                log_return_anti = (drift_adj - 0.5 * v_curr_anti) * dt + sqrt_v_anti * (-dw_s)
+                if n_jumps > 0:
+                    log_return_anti += jump_sum
+
+                s_anti = s_anti * np.exp(log_return_anti)
+
+        terminal_prices[i] = s
+        if antithetic:
+            terminal_prices[i + half_paths] = s_anti
+
+    return terminal_prices
+
+
+# =============================================================================
+# Model 5: SABR Model
 # =============================================================================
 
 @njit(parallel=True, cache=True, fastmath=True)
@@ -632,6 +918,72 @@ def simulate_sabr_paths(
 # Multi-Asset Simulation (Correlated GBM)
 # =============================================================================
 
+def validate_correlation_matrix(corr_matrix: np.ndarray) -> None:
+    """
+    Validate that a correlation matrix is valid for Cholesky decomposition.
+
+    A valid correlation matrix must:
+    1. Have diagonal elements equal to 1.0
+    2. Be symmetric
+    3. Be positive semi-definite (all eigenvalues >= 0)
+
+    Parameters
+    ----------
+    corr_matrix : np.ndarray
+        Correlation matrix to validate, shape (n, n)
+
+    Raises
+    ------
+    ValueError
+        If the correlation matrix is invalid
+
+    Notes
+    -----
+    This validation should be called BEFORE using Cholesky decomposition
+    to provide clear error messages instead of numerical failures.
+    """
+    # Check square matrix
+    if corr_matrix.ndim != 2 or corr_matrix.shape[0] != corr_matrix.shape[1]:
+        raise ValueError(
+            f"Correlation matrix must be square, got shape {corr_matrix.shape}"
+        )
+
+    n = corr_matrix.shape[0]
+
+    # Check diagonal elements are 1.0
+    diag = np.diag(corr_matrix)
+    if not np.allclose(diag, 1.0, atol=1e-10):
+        raise ValueError(
+            f"Correlation matrix diagonal must be 1.0, got {diag}"
+        )
+
+    # Check symmetry
+    if not np.allclose(corr_matrix, corr_matrix.T, atol=1e-10):
+        max_diff = np.max(np.abs(corr_matrix - corr_matrix.T))
+        raise ValueError(
+            f"Correlation matrix must be symmetric, max asymmetry: {max_diff:.2e}"
+        )
+
+    # Check positive semi-definite (eigenvalues >= 0)
+    eigenvalues = np.linalg.eigvalsh(corr_matrix)
+    min_eigenvalue = np.min(eigenvalues)
+    if min_eigenvalue < -1e-10:
+        raise ValueError(
+            f"Correlation matrix must be positive semi-definite. "
+            f"Minimum eigenvalue: {min_eigenvalue:.6f}. "
+            f"Consider using nearest correlation matrix approximation."
+        )
+
+    # Check off-diagonal elements in valid range
+    for i in range(n):
+        for j in range(i + 1, n):
+            if corr_matrix[i, j] < -1.0 or corr_matrix[i, j] > 1.0:
+                raise ValueError(
+                    f"Correlation coefficient must be in [-1, 1], "
+                    f"got corr[{i},{j}] = {corr_matrix[i, j]}"
+                )
+
+
 @njit(cache=True, fastmath=True)
 def _cholesky_decomposition(corr_matrix: np.ndarray) -> np.ndarray:
     """
@@ -670,6 +1022,10 @@ def simulate_correlated_gbm_paths(
     """
     Simulate correlated GBM paths for multiple assets under P-measure.
 
+    IMPORTANT: Call validate_correlation_matrix(corr_matrix) before this function
+    to ensure the correlation matrix is valid for Cholesky decomposition.
+    Invalid matrices will cause numerical errors or incorrect results.
+
     Parameters
     ----------
     s0 : np.ndarray
@@ -679,7 +1035,8 @@ def simulate_correlated_gbm_paths(
     sigmas : np.ndarray
         Volatilities for each asset, shape (n_assets,)
     corr_matrix : np.ndarray
-        Correlation matrix, shape (n_assets, n_assets)
+        Correlation matrix, shape (n_assets, n_assets).
+        Must be symmetric, positive semi-definite, with diagonal = 1.0.
     t : float
         Time to maturity
     n_paths : int
@@ -691,6 +1048,10 @@ def simulate_correlated_gbm_paths(
     -------
     np.ndarray
         Array of shape (n_paths, n_steps + 1, n_assets)
+
+    See Also
+    --------
+    validate_correlation_matrix : Validate correlation matrix before simulation
     """
     n_assets = len(s0)
     dt = t / n_steps
@@ -1107,7 +1468,7 @@ def simulate_terminal(
     Parameters
     ----------
     model : str
-        One of 'gbm', 'heston', 'merton', 'sabr'
+        One of 'gbm', 'heston', 'merton', 'bates', 'sabr'
     s0 : float
         Initial price
     mu : float
@@ -1158,6 +1519,23 @@ def simulate_terminal(
         sigma_j = kwargs.get('sigma_j', 0.2)
         return simulate_merton_terminal(s0, mu, sigma, lambda_j, mu_j, sigma_j, t, n_paths, n_steps)
 
+    elif model_lower == 'bates':
+        # Heston parameters
+        v0 = kwargs.get('v0', sigma * sigma)
+        kappa = kwargs.get('kappa', 2.0)
+        theta = kwargs.get('theta', sigma * sigma)
+        xi = kwargs.get('xi', 0.3)
+        rho = kwargs.get('rho', -0.7)
+        # Jump parameters
+        lambda_j = kwargs.get('lambda_j', 0.5)
+        mu_j = kwargs.get('mu_j', -0.1)
+        sigma_j = kwargs.get('sigma_j', 0.2)
+        antithetic = kwargs.get('antithetic', True)
+        return simulate_bates_terminal(
+            s0, mu, v0, kappa, theta, xi, rho,
+            lambda_j, mu_j, sigma_j, t, n_paths, n_steps, antithetic
+        )
+
     elif model_lower == 'sabr':
         alpha0 = kwargs.get('alpha0', sigma)
         beta = kwargs.get('beta', 0.5)
@@ -1166,7 +1544,7 @@ def simulate_terminal(
         return simulate_sabr_terminal(s0, alpha0, beta, rho, nu, t, n_paths, n_steps)
 
     else:
-        raise ValueError(f"Unknown model: {model}. Choose from 'gbm', 'heston', 'merton', 'sabr'")
+        raise ValueError(f"Unknown model: {model}. Choose from 'gbm', 'heston', 'merton', 'bates', 'sabr'")
 
 
 # =============================================================================
@@ -1198,7 +1576,7 @@ def simulate_paths(
     Parameters
     ----------
     model : str
-        One of 'gbm', 'heston', 'merton', 'sabr'
+        One of 'gbm', 'heston', 'merton', 'bates', 'sabr'
     s0 : float
         Initial price
     mu : float
@@ -1232,6 +1610,13 @@ def simulate_paths(
 
     if model_lower == 'gbm':
         antithetic = kwargs.get('antithetic', True)
+        if antithetic and n_paths % 2 != 0:
+            actual_paths = 2 * (n_paths // 2)
+            warnings.warn(
+                f"n_paths={n_paths} is odd; antithetic variates will use {actual_paths} paths. "
+                f"Consider using an even number for exact path count.",
+                UserWarning
+            )
         paths = simulate_gbm_paths(s0, mu, sigma, t, n_paths, n_steps, antithetic)
         model_name = "Geometric Brownian Motion"
 
@@ -1258,6 +1643,25 @@ def simulate_paths(
         )
         model_name = "Merton Jump Diffusion"
 
+    elif model_lower == 'bates':
+        # Heston parameters
+        v0 = kwargs.get('v0', sigma * sigma)
+        kappa = kwargs.get('kappa', 2.0)
+        theta = kwargs.get('theta', sigma * sigma)
+        xi = kwargs.get('xi', 0.3)
+        rho = kwargs.get('rho', -0.7)
+        # Jump parameters
+        lambda_j = kwargs.get('lambda_j', 0.5)
+        mu_j = kwargs.get('mu_j', -0.1)
+        sigma_j = kwargs.get('sigma_j', 0.2)
+        antithetic = kwargs.get('antithetic', True)
+
+        paths, _ = simulate_bates_paths(
+            s0, mu, v0, kappa, theta, xi, rho,
+            lambda_j, mu_j, sigma_j, t, n_paths, n_steps, antithetic
+        )
+        model_name = "Bates Model"
+
     elif model_lower == 'sabr':
         alpha0 = kwargs.get('alpha0', sigma)
         beta = kwargs.get('beta', 0.5)
@@ -1270,7 +1674,7 @@ def simulate_paths(
         model_name = "SABR Model"
 
     else:
-        raise ValueError(f"Unknown model: {model}. Choose from 'gbm', 'heston', 'merton', 'sabr'")
+        raise ValueError(f"Unknown model: {model}. Choose from 'gbm', 'heston', 'merton', 'bates', 'sabr'")
 
     computation_time = time.perf_counter() - start_time
 
@@ -1519,243 +1923,3 @@ def print_benchmark_results(results: dict) -> None:
         print(f"  Throughput: {stats['throughput_samples_per_sec']/1e6:.2f} M samples/sec")
 
     print("\n" + "=" * 80)
-
-
-# =============================================================================
-# Main Test Block
-# =============================================================================
-
-if __name__ == "__main__":
-    import matplotlib.pyplot as plt
-
-    print("=" * 80)
-    print("MONTE CARLO PATH SIMULATION - PERFORMANCE TEST")
-    print("=" * 80)
-
-    # Set random seed for reproducibility
-    np.random.seed(42)
-
-    # Configuration
-    S0 = 100.0      # Initial stock price
-    R = 0.05        # Risk-free rate (5%)
-    SIGMA = 0.2     # Volatility (20%)
-    T = 1.0         # Time to maturity (1 year)
-
-    # =========================================================================
-    # Test 1: Basic functionality test
-    # =========================================================================
-    print("\n[TEST 1] Basic Functionality Test")
-    print("-" * 40)
-
-    n_paths_test = 10000
-    n_steps_test = 252
-
-    # Test each model
-    for model in ['gbm', 'heston', 'merton', 'sabr']:
-        result = simulate_paths(
-            model=model,
-            s0=S0,
-            r=R,
-            sigma=SIGMA,
-            t=T,
-            n_paths=n_paths_test,
-            n_steps=n_steps_test,
-            seed=42
-        )
-        print(f"  {result.model}:")
-        print(f"    Computation time: {result.computation_time*1000:.2f} ms")
-        print(f"    Terminal mean: ${result.terminal_values.mean():.2f}")
-        print(f"    Terminal std: ${result.terminal_values.std():.2f}")
-
-    # =========================================================================
-    # Test 2: Option pricing validation (GBM vs Black-Scholes)
-    # =========================================================================
-    print("\n[TEST 2] Option Pricing Validation (GBM vs Black-Scholes)")
-    print("-" * 40)
-
-    from scipy.stats import norm
-
-    def black_scholes_call(s, k, t, r, sigma):
-        """Analytical Black-Scholes call price."""
-        d1 = (np.log(s / k) + (r + 0.5 * sigma**2) * t) / (sigma * np.sqrt(t))
-        d2 = d1 - sigma * np.sqrt(t)
-        return s * norm.cdf(d1) - k * np.exp(-r * t) * norm.cdf(d2)
-
-    K = 100.0  # Strike price
-
-    # Analytical price
-    bs_price = black_scholes_call(S0, K, T, R, SIGMA)
-
-    # Monte Carlo prices with increasing path counts
-    path_counts = [10000, 50000, 100000, 500000, 1000000]
-
-    print(f"  Black-Scholes analytical price: ${bs_price:.4f}")
-    print(f"\n  Monte Carlo convergence:")
-
-    for n in path_counts:
-        result = simulate_paths('gbm', S0, R, SIGMA, T, n_paths=n, n_steps=252, seed=42)
-        mc_price = price_european_call_mc(result.terminal_values, K, R, T)
-        error = abs(mc_price - bs_price)
-        print(f"    {n:>10,} paths: ${mc_price:.4f} (error: ${error:.4f}, time: {result.computation_time*1000:.1f} ms)")
-
-    # =========================================================================
-    # Test 3: Full performance benchmark
-    # =========================================================================
-    print("\n[TEST 3] Full Performance Benchmark")
-    print("-" * 40)
-
-    # Small benchmark
-    print("\nSmall scale (10,000 paths, 252 steps):")
-    results_small = run_full_benchmark(n_paths=10000, n_steps=252)
-    print_benchmark_results(results_small)
-
-    # Medium benchmark
-    print("\nMedium scale (100,000 paths, 252 steps):")
-    results_medium = run_full_benchmark(n_paths=100000, n_steps=252)
-    print_benchmark_results(results_medium)
-
-    # Large benchmark
-    print("\nLarge scale (1,000,000 paths, 252 steps):")
-    results_large = run_full_benchmark(n_paths=1000000, n_steps=252)
-    print_benchmark_results(results_large)
-
-    # =========================================================================
-    # Test 4: Exotic option pricing
-    # =========================================================================
-    print("\n[TEST 4] Exotic Option Pricing")
-    print("-" * 40)
-
-    result = simulate_paths('gbm', S0, R, SIGMA, T, n_paths=500000, n_steps=252, seed=42)
-
-    print(f"  European Call (K=100): ${price_european_call_mc(result.terminal_values, 100, R, T):.4f}")
-    print(f"  European Put (K=100): ${price_european_put_mc(result.terminal_values, 100, R, T):.4f}")
-    print(f"  Asian Call (K=100): ${price_asian_arithmetic_call_mc(result.paths, 100, R, T):.4f}")
-    print(f"  Lookback Call (floating): ${price_lookback_call_mc(result.paths, R, T):.4f}")
-    print(f"  Down-Out Call (K=100, B=90): ${price_barrier_down_out_call_mc(result.paths, 100, 90, R, T):.4f}")
-
-    # =========================================================================
-    # Test 5: Multi-asset simulation
-    # =========================================================================
-    print("\n[TEST 5] Multi-Asset Correlated Simulation")
-    print("-" * 40)
-
-    # 3 correlated assets
-    s0_multi = np.array([100.0, 50.0, 200.0])
-    sigmas_multi = np.array([0.2, 0.3, 0.15])
-    corr_matrix = np.array([
-        [1.0, 0.5, 0.3],
-        [0.5, 1.0, 0.2],
-        [0.3, 0.2, 1.0]
-    ])
-
-    start = time.perf_counter()
-    multi_paths = simulate_correlated_gbm_paths(
-        s0_multi, R, sigmas_multi, corr_matrix, T, 100000, 252
-    )
-    elapsed = time.perf_counter() - start
-
-    print(f"  3-asset correlated GBM (100,000 paths): {elapsed*1000:.2f} ms")
-    print(f"  Terminal correlations (realized):")
-    terminal_returns = np.log(multi_paths[:, -1, :] / multi_paths[:, 0, :])
-    realized_corr = np.corrcoef(terminal_returns.T)
-    print(f"    Asset 1-2: {realized_corr[0,1]:.3f} (target: 0.500)")
-    print(f"    Asset 1-3: {realized_corr[0,2]:.3f} (target: 0.300)")
-    print(f"    Asset 2-3: {realized_corr[1,2]:.3f} (target: 0.200)")
-
-    # =========================================================================
-    # Test 6: Visualization
-    # =========================================================================
-    print("\n[TEST 6] Generating Visualization")
-    print("-" * 40)
-
-    # Generate sample paths for visualization
-    n_viz_paths = 1000
-
-    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
-
-    models = ['gbm', 'heston', 'merton', 'sabr']
-    titles = [
-        'Geometric Brownian Motion',
-        'Heston Stochastic Volatility',
-        'Merton Jump Diffusion',
-        'SABR Model'
-    ]
-
-    for ax, model, title in zip(axes.flatten(), models, titles):
-        result = simulate_paths(model, S0, R, SIGMA, T, n_paths=n_viz_paths, n_steps=252, seed=42)
-
-        # Plot some sample paths
-        for i in range(min(50, n_viz_paths)):
-            ax.plot(result.time_grid, result.paths[i], alpha=0.3, linewidth=0.5)
-
-        # Plot mean and percentiles
-        ax.plot(result.time_grid, result.mean_path, 'k-', linewidth=2, label='Mean')
-        percentiles = result.percentile_paths([5, 95])
-        ax.fill_between(result.time_grid, percentiles[0], percentiles[1],
-                       alpha=0.3, color='blue', label='5-95% range')
-
-        ax.set_title(f'{title}\n(Time: {result.computation_time*1000:.1f} ms)')
-        ax.set_xlabel('Time (years)')
-        ax.set_ylabel('Price ($)')
-        ax.legend(loc='upper left')
-        ax.grid(True, alpha=0.3)
-
-    plt.tight_layout()
-    plt.show()
-
-    # =========================================================================
-    # Test 7: Heston variance paths
-    # =========================================================================
-    print("\n[TEST 7] Heston Variance Path Visualization")
-    print("-" * 40)
-
-    v0 = 0.04  # Initial variance (20% vol)
-    kappa = 2.0
-    theta = 0.04
-    xi = 0.3
-    rho = -0.7
-
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
-
-    s_paths, v_paths = simulate_heston_paths(
-        S0, v0, R, kappa, theta, xi, rho, T, 100, 252, scheme=1
-    )
-    time_grid = np.linspace(0, T, 253)
-
-    for i in range(100):
-        ax1.plot(time_grid, s_paths[i], alpha=0.5, linewidth=0.5)
-        ax2.plot(time_grid, np.sqrt(v_paths[i]), alpha=0.5, linewidth=0.5)
-
-    ax1.axhline(S0, color='red', linestyle='--', label='S0')
-    ax1.set_title('Heston Price Paths')
-    ax1.set_xlabel('Time (years)')
-    ax1.set_ylabel('Price ($)')
-    ax1.legend()
-    ax1.grid(True, alpha=0.3)
-
-    ax2.axhline(np.sqrt(theta), color='red', linestyle='--', label='Long-term vol')
-    ax2.set_title('Heston Volatility Paths')
-    ax2.set_xlabel('Time (years)')
-    ax2.set_ylabel('Volatility')
-    ax2.legend()
-    ax2.grid(True, alpha=0.3)
-
-    plt.tight_layout()
-    plt.show()
-
-    # =========================================================================
-    # Summary
-    # =========================================================================
-    print("\n" + "=" * 80)
-    print("SUMMARY")
-    print("=" * 80)
-    print(f"""
-    All tests completed successfully!
-
-    Performance highlights (1M paths, 252 steps):
-    - GBM:          {results_large['GBM']['mean_time']*1000:.0f} ms ({results_large['GBM']['throughput_samples_per_sec']/1e6:.1f} M samples/sec)
-    - GBM Vector:   {results_large['GBM_Vectorized']['mean_time']*1000:.0f} ms ({results_large['GBM_Vectorized']['throughput_samples_per_sec']/1e6:.1f} M samples/sec)
-    - Heston:       {results_large['Heston']['mean_time']*1000:.0f} ms ({results_large['Heston']['throughput_samples_per_sec']/1e6:.1f} M samples/sec)
-    - Merton Jump:  {results_large['Merton_Jump']['mean_time']*1000:.0f} ms ({results_large['Merton_Jump']['throughput_samples_per_sec']/1e6:.1f} M samples/sec)
-    - SABR:         {results_large['SABR']['mean_time']*1000:.0f} ms ({results_large['SABR']['throughput_samples_per_sec']/1e6:.1f} M samples/sec)
-    """)

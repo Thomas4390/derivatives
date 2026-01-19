@@ -17,6 +17,7 @@ from config.constants import (
     PNL_COLORS,
     SCENARIO_SCATTER_MAX_POINTS
 )
+from config.styles import render_stats_row, stats_table_html
 from backend.simulation import (
     compute_payoff_curve,
     find_breakeven_points,
@@ -51,7 +52,12 @@ def render_scenario_analysis_tab(
         st.info("Run a P&L simulation to see scenario analysis.")
         return
 
+    # Section header with native help
     st.markdown("### Scenario Analysis")
+    st.caption(
+        "Scenario Analysis shows how your strategy performs across different market conditions. "
+        "It helps identify which price movements are beneficial or detrimental to your position."
+    )
 
     # Create tabs
     tab1, tab2 = st.tabs(["Price vs P&L", "Scenario Breakdown"])
@@ -72,6 +78,13 @@ def _render_scatter_with_payoff(
     params: Dict[str, Any]
 ) -> None:
     """Render scatter plot of terminal price vs P&L with theoretical payoff."""
+    # Toggle for theoretical payoff
+    show_payoff = st.checkbox(
+        "Show Theoretical Payoff Curve",
+        value=False,
+        help="Toggle the theoretical payoff curve overlay. Disable to see simulated outcomes more clearly."
+    )
+
     fig = go.Figure()
 
     # Downsample if too many points
@@ -108,14 +121,18 @@ def _render_scatter_with_payoff(
         200
     )
 
-    if len(position_arrays.get('strikes', [])) > 0:
+    # Show payoff curve if options OR stock position exists
+    has_options = len(position_arrays.get('strikes', [])) > 0
+    has_stock = position_arrays.get('stock_quantity', 0.0) != 0
+
+    if (has_options or has_stock) and show_payoff:
         payoff_curve = compute_payoff_curve(
             spot_range,
-            position_arrays['strikes'],
-            position_arrays['option_types'],
-            position_arrays['position_types'],
-            position_arrays['quantities'],
-            position_arrays['premiums'],
+            position_arrays.get('strikes', np.array([])),
+            position_arrays.get('option_types', np.array([])),
+            position_arrays.get('position_types', np.array([])),
+            position_arrays.get('quantities', np.array([])),
+            position_arrays.get('premiums', np.array([])),
             position_arrays.get('stock_quantity', 0.0),
             position_arrays.get('stock_entry_price', 0.0),
             multiplier=100.0
@@ -170,19 +187,19 @@ def _render_scatter_with_payoff(
         margin=dict(l=60, r=40, t=60, b=60)
     )
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
-    # Summary stats
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.metric("Min Terminal Price", f"${terminal_prices.min():.2f}")
-    with col2:
-        st.metric("Max Terminal Price", f"${terminal_prices.max():.2f}")
-    with col3:
-        st.metric("Initial Spot", f"${spot_price:.2f}")
-    with col4:
-        avg_move = (terminal_prices.mean() - spot_price) / spot_price * 100
-        st.metric("Avg Price Change", f"{avg_move:+.1f}%")
+    # Summary stats with styled cards
+    avg_move = (terminal_prices.mean() - spot_price) / spot_price * 100
+    move_variant = "green" if avg_move > 0 else "red"
+
+    summary_stats = [
+        ("Min Terminal", f"${terminal_prices.min():.2f}", "Lowest simulated price"),
+        ("Max Terminal", f"${terminal_prices.max():.2f}", "Highest simulated price"),
+        ("Initial Spot", f"${spot_price:.2f}", "Starting price"),
+        ("Avg Price Change", f"{avg_move:+.1f}%", "Mean vs initial"),
+    ]
+    render_stats_row(summary_stats, ["slate", "slate", "blue", move_variant])
 
 
 def _render_scenario_breakdown(
@@ -191,6 +208,13 @@ def _render_scenario_breakdown(
     params: Dict[str, Any]
 ) -> None:
     """Render scenario breakdown analysis."""
+    # Help caption for this section
+    st.caption(
+        "Scenario Breakdown divides price movements into categories (Large Down, Small Up, etc.) "
+        "and shows the average P&L and probability for each. Use this to understand which market "
+        "conditions favor your strategy."
+    )
+
     spot_price = params.get('spot_price', 100)
 
     # Define scenarios based on price movement
@@ -222,7 +246,7 @@ def _render_scenario_breakdown(
     fig = make_subplots(
         rows=2, cols=1,
         subplot_titles=("Average P&L by Scenario", "Probability & Win Rate by Scenario"),
-        vertical_spacing=0.15
+        vertical_spacing=0.25
     )
 
     scenario_names = [s['Scenario'] for s in scenario_stats]
@@ -276,12 +300,13 @@ def _render_scenario_breakdown(
     )
 
     fig.update_layout(
-        height=CHART_HEIGHT_LARGE,
+        height=CHART_HEIGHT_LARGE + 80,
         showlegend=True,
         legend=dict(
             yanchor="top", y=0.99,
             xanchor="right", x=0.99
-        )
+        ),
+        margin=dict(t=80, b=60)
     )
 
     # Add zero line on P&L chart
@@ -291,39 +316,40 @@ def _render_scenario_breakdown(
     fig.update_yaxes(title_text="P&L ($)", row=1, col=1)
     fig.update_yaxes(title_text="Percentage (%)", row=2, col=1)
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
     # Detailed scenario table
     st.markdown("#### Scenario Details")
 
-    # Format table data
-    table_data = []
-    for s in scenario_stats:
-        pnl_color = PNL_COLORS['profit'] if s['Mean P&L'] > 0 else PNL_COLORS['loss']
-        win_color = '#059669' if s['P(Profit)'] > 50 else '#dc2626'
-        table_data.append({
+    import pandas as pd
+
+    # Build dataframe with formatted data
+    df_scenarios = pd.DataFrame([
+        {
             'Scenario': s['Scenario'],
-            'Count': f"{s['Count']:,} ({s['Probability']:.1f}%)",
+            'Occurrences': f"{s['Count']:,} ({s['Probability']:.1f}%)",
             'Mean P&L': f"${s['Mean P&L']:,.2f}",
-            'Range': f"${s['Min P&L']:,.0f} to ${s['Max P&L']:,.0f}",
-            'Win Rate': f"{s['P(Profit)']:.1f}%"
-        })
+            'P&L Range': f"${s['Min P&L']:,.0f} to ${s['Max P&L']:,.0f}",
+            'Win Rate': f"{s['P(Profit)']:.1f}%",
+            '_mean_pnl': s['Mean P&L'],  # Hidden column for styling
+            '_win_rate': s['P(Profit)']  # Hidden column for styling
+        }
+        for s in scenario_stats
+    ])
 
-    # Display as columns
-    col_headers = st.columns([2, 2, 1.5, 2, 1])
-    col_headers[0].markdown("**Scenario**")
-    col_headers[1].markdown("**Occurrences**")
-    col_headers[2].markdown("**Avg P&L**")
-    col_headers[3].markdown("**P&L Range**")
-    col_headers[4].markdown("**Win %**")
-
-    for row in table_data:
-        cols = st.columns([2, 2, 1.5, 2, 1])
-        cols[0].markdown(row['Scenario'])
-        cols[1].markdown(row['Count'])
-        cols[2].markdown(row['Mean P&L'])
-        cols[3].markdown(row['Range'])
-        cols[4].markdown(row['Win Rate'])
+    # Display with st.dataframe
+    st.dataframe(
+        df_scenarios[['Scenario', 'Occurrences', 'Mean P&L', 'P&L Range', 'Win Rate']],
+        width="stretch",
+        hide_index=True,
+        column_config={
+            "Scenario": st.column_config.TextColumn("Scenario", width="medium"),
+            "Occurrences": st.column_config.TextColumn("Occurrences", width="small"),
+            "Mean P&L": st.column_config.TextColumn("Avg P&L", width="small"),
+            "P&L Range": st.column_config.TextColumn("P&L Range", width="medium"),
+            "Win Rate": st.column_config.TextColumn("Win %", width="small")
+        }
+    )
 
 
 def render_beneficial_scenarios(

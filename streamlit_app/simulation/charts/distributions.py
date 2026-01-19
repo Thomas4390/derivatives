@@ -19,6 +19,13 @@ from config.constants import (
     PRICE_MODELS,
     VOLATILITY_MODELS
 )
+from config.styles import (
+    render_stats_row,
+    stats_card_html,
+    comparison_table_html,
+    var_table_html,
+    stats_table_html
+)
 
 
 def render_distributions_tab(
@@ -88,7 +95,8 @@ def _render_distribution_analysis(
             [{"type": "xy"}, {"type": "xy"}],
             [{"type": "xy"}, {"type": "xy"}]
         ],
-        vertical_spacing=0.12
+        vertical_spacing=0.18,  # Increased spacing between rows
+        horizontal_spacing=0.1
     )
 
     # 1. Histogram with KDE
@@ -205,26 +213,33 @@ def _render_distribution_analysis(
 
     st.plotly_chart(fig, width="stretch")
 
-    # Distribution statistics table
+    # Distribution statistics with styled cards
     st.markdown("#### Distribution Statistics")
 
-    col1, col2, col3, col4 = st.columns(4)
+    # First row: Central tendency and dispersion
+    stats_row1 = [
+        ("Mean", f"{values.mean():.4f}{unit}", "Central tendency"),
+        ("Median", f"{np.median(values):.4f}{unit}", "50th percentile"),
+        ("Std Dev", f"{values.std():.4f}{unit}", "Dispersion"),
+        ("IQR", f"{np.percentile(values, 75) - np.percentile(values, 25):.4f}{unit}", "P75 - P25"),
+    ]
+    render_stats_row(stats_row1, ["teal", "blue", "amber", "purple"])
 
-    with col1:
-        st.metric("Mean", f"{values.mean():.4f}{unit}")
-        st.metric("Std Dev", f"{values.std():.4f}{unit}")
+    st.markdown("")  # Spacer
 
-    with col2:
-        st.metric("Median", f"{np.median(values):.4f}{unit}")
-        st.metric("IQR", f"{np.percentile(values, 75) - np.percentile(values, 25):.4f}{unit}")
+    # Second row: Shape and range
+    skewness = stats.skew(values)
+    kurtosis = stats.kurtosis(values)
+    skew_variant = "green" if abs(skewness) < 0.5 else "amber" if abs(skewness) < 1 else "red"
+    kurt_variant = "green" if abs(kurtosis) < 1 else "amber" if abs(kurtosis) < 3 else "red"
 
-    with col3:
-        st.metric("Skewness", f"{stats.skew(values):.4f}")
-        st.metric("Kurtosis", f"{stats.kurtosis(values):.4f}")
-
-    with col4:
-        st.metric("Min", f"{values.min():.4f}{unit}")
-        st.metric("Max", f"{values.max():.4f}{unit}")
+    stats_row2 = [
+        ("Skewness", f"{skewness:.4f}", "Right-skew" if skewness > 0 else "Left-skew" if skewness < 0 else "Symmetric"),
+        ("Excess Kurtosis", f"{kurtosis:.4f}", "Fat tails" if kurtosis > 0 else "Thin tails"),
+        ("Minimum", f"{values.min():.4f}{unit}", "Lowest value"),
+        ("Maximum", f"{values.max():.4f}{unit}", "Highest value"),
+    ]
+    render_stats_row(stats_row2, [skew_variant, kurt_variant, "slate", "slate"])
 
 
 def _render_theoretical_comparison(values: np.ndarray, params: Dict[str, Any]) -> None:
@@ -269,27 +284,26 @@ def _render_theoretical_comparison(values: np.ndarray, params: Dict[str, Any]) -
 
         st.markdown("#### GBM Theoretical vs Simulated")
 
-        col1, col2, col3 = st.columns(3)
+        # Calculate errors
+        mean_error = abs(values.mean() - theoretical_mean) / theoretical_mean * 100
+        std_error = abs(values.std() - theoretical_std) / theoretical_std * 100
+        mc_error = values.std() / np.sqrt(len(values))
 
-        with col1:
-            st.markdown("**Mean**")
-            st.write(f"Theoretical: ${theoretical_mean:.2f}")
-            st.write(f"Simulated: ${values.mean():.2f}")
-            error = abs(values.mean() - theoretical_mean) / theoretical_mean * 100
-            st.write(f"Error: {error:.2f}%")
+        # Use styled comparison table
+        comparison_rows = [
+            ("Mean (E[S_T])", f"${theoretical_mean:.2f}", f"${values.mean():.2f}", f"{mean_error:.2f}%"),
+            ("Std Dev", f"${theoretical_std:.2f}", f"${values.std():.2f}", f"{std_error:.2f}%"),
+        ]
+        st.markdown(comparison_table_html("", comparison_rows), unsafe_allow_html=True)
 
-        with col2:
-            st.markdown("**Std Dev**")
-            st.write(f"Theoretical: ${theoretical_std:.2f}")
-            st.write(f"Simulated: ${values.std():.2f}")
-            error = abs(values.std() - theoretical_std) / theoretical_std * 100
-            st.write(f"Error: {error:.2f}%")
-
-        with col3:
-            st.markdown("**Monte Carlo Error**")
-            mc_error = values.std() / np.sqrt(len(values))
-            st.write(f"Standard Error: ${mc_error:.4f}")
-            st.write(f"95% CI: +/- ${1.96 * mc_error:.4f}")
+        # Monte Carlo error statistics
+        st.markdown("")
+        mc_stats = [
+            ("MC Standard Error", f"${mc_error:.4f}", "σ / √n"),
+            ("95% CI Width", f"±${1.96 * mc_error:.4f}", "1.96 × SE"),
+            ("Sample Size", f"{len(values):,}", "paths"),
+        ]
+        render_stats_row(mc_stats, ["teal", "blue", "purple"])
 
     else:
         st.info(f"Theoretical comparison not available for {PRICE_MODELS.get(model, model)}. "
@@ -355,28 +369,38 @@ def _render_risk_metrics(
     # VaR at different confidence levels
     confidence_levels = [0.90, 0.95, 0.99]
 
-    col1, col2 = st.columns(2)
-
-    with col1:
-        st.markdown("##### Value at Risk (VaR)")
-        for cl in confidence_levels:
-            var = np.percentile(returns, (1 - cl) * 100)
-            if result_type == "price":
-                var_dollar = var * S0
-                st.write(f"VaR {int(cl*100)}%: {var*100:.2f}% (${var_dollar:.2f})")
-            else:
-                st.write(f"VaR {int(cl*100)}%: {var*100:.2f}%")
-
-    with col2:
-        st.markdown("##### Conditional VaR (CVaR/ES)")
+    # Build VaR and CVaR data for styled table
+    if result_type == "price":
+        var_cvar_rows = []
         for cl in confidence_levels:
             var = np.percentile(returns, (1 - cl) * 100)
             cvar = returns[returns <= var].mean()
-            if result_type == "price":
-                cvar_dollar = cvar * S0
-                st.write(f"CVaR {int(cl*100)}%: {cvar*100:.2f}% (${cvar_dollar:.2f})")
-            else:
-                st.write(f"CVaR {int(cl*100)}%: {cvar*100:.2f}%")
+            var_dollar = var * S0
+            cvar_dollar = cvar * S0
+            var_cvar_rows.append((
+                f"{int(cl*100)}%",
+                f"{var*100:.2f}% (${var_dollar:.2f})",
+                f"{cvar*100:.2f}% (${cvar_dollar:.2f})"
+            ))
+    else:
+        var_cvar_rows = []
+        for cl in confidence_levels:
+            var = np.percentile(returns, (1 - cl) * 100)
+            cvar = returns[returns <= var].mean()
+            var_cvar_rows.append((
+                f"{int(cl*100)}%",
+                f"{var*100:.2f}%",
+                f"{cvar*100:.2f}%"
+            ))
+
+    # Render styled table
+    st.markdown(
+        stats_table_html(
+            ["Confidence Level", "VaR (Value at Risk)", "CVaR (Expected Shortfall)"],
+            var_cvar_rows
+        ),
+        unsafe_allow_html=True
+    )
 
     # Visualization of VaR/CVaR
     fig = go.Figure()
@@ -409,24 +433,26 @@ def _render_risk_metrics(
 
     st.plotly_chart(fig, width="stretch")
 
-    # Additional risk statistics
+    # Additional risk statistics with styled cards
     st.markdown("#### Additional Risk Statistics")
 
-    col1, col2, col3 = st.columns(3)
+    prob_loss = (returns < 0).mean() * 100
+    prob_variant = "red" if prob_loss > 50 else "green"
 
-    with col1:
-        # Probability of loss
-        prob_loss = (returns < 0).mean() * 100
-        st.metric("Probability of Loss", f"{prob_loss:.1f}%")
+    additional_stats = [
+        ("Probability of Loss", f"{prob_loss:.1f}%", "P(Return < 0)"),
+    ]
+    variants = [prob_variant]
 
-    with col2:
-        # Maximum drawdown (simplified)
-        if result_type == "price":
-            max_dd = (values.max() - values.min()) / values.max() * 100
-            st.metric("Range/Max", f"{max_dd:.1f}%")
+    if result_type == "price":
+        max_dd = (values.max() - values.min()) / values.max() * 100
+        additional_stats.append(("Range / Max", f"{max_dd:.1f}%", "Dispersion measure"))
+        variants.append("amber")
 
-    with col3:
-        # Sharpe-like ratio
-        if returns.std() > 0:
-            sharpe = returns.mean() / returns.std() * np.sqrt(252 / params['num_steps'])
-            st.metric("Return/Risk Ratio", f"{sharpe:.3f}")
+    if returns.std() > 0:
+        sharpe = returns.mean() / returns.std() * np.sqrt(252 / params['num_steps'])
+        sharpe_variant = "green" if sharpe > 0 else "red"
+        additional_stats.append(("Return/Risk Ratio", f"{sharpe:.3f}", "Annualized"))
+        variants.append(sharpe_variant)
+
+    render_stats_row(additional_stats, variants)

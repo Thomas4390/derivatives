@@ -17,6 +17,7 @@ from config.constants import (
     MODEL_COLORS,
     PRICE_MODELS
 )
+from config.styles import render_stats_row
 
 
 def render_price_paths_tab(
@@ -36,7 +37,12 @@ def render_price_paths_tab(
         st.info("Run a simulation to see price paths visualization.")
         return
 
+    # Section header with native help
     st.markdown("### Simulated Price Paths")
+    st.caption(
+        "Monte Carlo simulated price trajectories showing possible future scenarios. "
+        "Use this to visualize uncertainty and the range of outcomes based on model parameters."
+    )
 
     # Create tabs for different views
     tab1, tab2, tab3 = st.tabs(["Sample Paths", "Statistics View", "Log Returns"])
@@ -153,29 +159,14 @@ def _render_sample_paths(result, params: Dict[str, Any]) -> None:
 
     st.plotly_chart(fig, width="stretch")
 
-    # Path statistics summary
-    col1, col2, col3, col4 = st.columns(4)
-
-    with col1:
-        st.metric(
-            "Mean Terminal Price",
-            f"${result.terminal_values.mean():.2f}"
-        )
-    with col2:
-        st.metric(
-            "Std Dev",
-            f"${result.terminal_values.std():.2f}"
-        )
-    with col3:
-        st.metric(
-            "Min Terminal",
-            f"${result.terminal_values.min():.2f}"
-        )
-    with col4:
-        st.metric(
-            "Max Terminal",
-            f"${result.terminal_values.max():.2f}"
-        )
+    # Path statistics summary with styled cards
+    path_stats = [
+        ("Mean Terminal", f"${result.terminal_values.mean():.2f}", "Average ending price"),
+        ("Std Dev", f"${result.terminal_values.std():.2f}", "Dispersion measure"),
+        ("Min Terminal", f"${result.terminal_values.min():.2f}", "Lowest ending price"),
+        ("Max Terminal", f"${result.terminal_values.max():.2f}", "Highest ending price"),
+    ]
+    render_stats_row(path_stats, ["teal", "amber", "slate", "slate"])
 
 
 def _render_statistics_view(result, params: Dict[str, Any]) -> None:
@@ -342,12 +333,13 @@ def _render_log_returns(result, params: Dict[str, Any]) -> None:
         row=2, col=2
     )
 
-    # Add reference line for Q-Q
+    # Add reference line for Q-Q (using actual data range)
+    q_min, q_max = theoretical_quantiles.min(), theoretical_quantiles.max()
+    mean_ret, std_ret = terminal_returns.mean(), terminal_returns.std()
     fig.add_trace(
         go.Scatter(
-            x=[-3, 3],
-            y=[-3 * terminal_returns.std() + terminal_returns.mean(),
-               3 * terminal_returns.std() + terminal_returns.mean()],
+            x=[q_min, q_max],
+            y=[q_min * std_ret + mean_ret, q_max * std_ret + mean_ret],
             mode='lines',
             name='Normal Reference',
             line=dict(color='red', dash='dash')
@@ -362,28 +354,26 @@ def _render_log_returns(result, params: Dict[str, Any]) -> None:
 
     st.plotly_chart(fig, width="stretch")
 
-    # Return statistics
+    # Return statistics with styled cards
     st.markdown("#### Return Statistics")
 
-    col1, col2, col3, col4 = st.columns(4)
+    from scipy.stats import skew, kurtosis as scipy_kurtosis
+    annualized_return = np.mean(log_returns) * 252
+    annualized_vol = np.std(log_returns) * np.sqrt(252)
+    skewness = skew(terminal_returns)
+    kurt = scipy_kurtosis(terminal_returns)
 
-    with col1:
-        annualized_return = np.mean(log_returns) * 252
-        st.metric("Annualized Return", f"{annualized_return*100:.2f}%")
+    return_variant = "green" if annualized_return > 0 else "red"
+    skew_variant = "green" if abs(skewness) < 0.5 else "amber" if abs(skewness) < 1 else "red"
+    kurt_variant = "green" if abs(kurt) < 1 else "amber" if abs(kurt) < 3 else "red"
 
-    with col2:
-        annualized_vol = np.std(log_returns) * np.sqrt(252)
-        st.metric("Annualized Volatility", f"{annualized_vol*100:.2f}%")
-
-    with col3:
-        from scipy.stats import skew
-        skewness = skew(terminal_returns)
-        st.metric("Skewness", f"{skewness:.3f}")
-
-    with col4:
-        from scipy.stats import kurtosis
-        kurt = kurtosis(terminal_returns)
-        st.metric("Excess Kurtosis", f"{kurt:.3f}")
+    return_stats = [
+        ("Annualized Return", f"{annualized_return*100:.2f}%", "Mean × 252"),
+        ("Annualized Vol", f"{annualized_vol*100:.2f}%", "Std × √252"),
+        ("Skewness", f"{skewness:.3f}", "Right-skew" if skewness > 0 else "Left-skew" if skewness < 0 else "Symmetric"),
+        ("Excess Kurtosis", f"{kurt:.3f}", "Fat tails" if kurt > 0 else "Thin tails"),
+    ]
+    render_stats_row(return_stats, [return_variant, "amber", skew_variant, kurt_variant])
 
 
 def _render_variance_paths(result, params: Dict[str, Any]) -> None:

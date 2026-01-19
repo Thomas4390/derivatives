@@ -18,6 +18,7 @@ from config.constants import (
     VOLATILITY_MODELS,
     MODEL_COLORS
 )
+from config.styles import render_stats_row, stats_table_html
 
 
 def render_statistics_tab(
@@ -59,26 +60,36 @@ def _render_summary_statistics(result, params: Dict[str, Any], result_type: str)
     """Render comprehensive summary statistics."""
     st.markdown("#### Simulation Summary")
 
-    # Simulation parameters summary
-    col1, col2, col3 = st.columns(3)
+    # Simulation parameters with styled cards
+    st.markdown("##### ⚡ Simulation Parameters")
+    sim_stats = [
+        ("Paths", f"{result.num_paths:,}", "Number of simulations"),
+        ("Steps", f"{result.num_steps:,}", "Time discretization"),
+        ("Total Samples", f"{result.num_paths * result.num_steps:,}", "paths × steps"),
+    ]
+    render_stats_row(sim_stats, ["teal", "blue", "purple"])
 
-    with col1:
-        st.markdown("**Simulation Parameters**")
-        st.write(f"- Paths: {result.num_paths:,}")
-        st.write(f"- Steps: {result.num_steps:,}")
-        st.write(f"- Total samples: {result.num_paths * result.num_steps:,}")
+    st.markdown("")  # Spacer
 
-    with col2:
-        st.markdown("**Model Parameters**")
-        st.write(f"- S0: ${params['spot_price']:.2f}")
-        st.write(f"- r: {params['risk_free_rate']*100:.2f}%")
-        st.write(f"- sigma: {params['volatility']*100:.1f}%")
+    # Market parameters with styled cards
+    st.markdown("##### 📊 Market Parameters")
+    market_stats = [
+        ("S₀ (Spot)", f"${params['spot_price']:.2f}", "Initial price"),
+        ("r (Risk-free)", f"{params['risk_free_rate']*100:.2f}%", "Annual rate"),
+        ("σ (Volatility)", f"{params['volatility']*100:.1f}%", "Annual vol"),
+    ]
+    render_stats_row(market_stats, ["green", "blue", "amber"])
 
-    with col3:
-        st.markdown("**Time Parameters**")
-        st.write(f"- T: {params['time_horizon']:.2f} years")
-        st.write(f"- dt: {params['time_horizon']/params['num_steps']:.6f}")
-        st.write(f"- Seed: {params.get('seed', 'Random')}")
+    st.markdown("")  # Spacer
+
+    # Time parameters with styled cards
+    st.markdown("##### ⏱️ Time Parameters")
+    time_stats = [
+        ("T (Horizon)", f"{params['time_horizon']:.2f} yr", "Simulation period"),
+        ("dt (Step size)", f"{params['time_horizon']/params['num_steps']:.6f}", "Time increment"),
+        ("Seed", f"{params.get('seed', 'Random')}", "Random state"),
+    ]
+    render_stats_row(time_stats, ["slate", "purple", "teal"])
 
     st.markdown("---")
 
@@ -94,39 +105,34 @@ def _render_summary_statistics(result, params: Dict[str, Any], result_type: str)
 
     st.markdown(f"#### {name} Statistics")
 
-    # Create statistics table
-    stats_data = {
-        'Statistic': [
-            'Count', 'Mean', 'Std Dev', 'Min', '5th Percentile',
-            '25th Percentile', 'Median', '75th Percentile',
-            '95th Percentile', 'Max', 'Skewness', 'Kurtosis'
-        ],
-        'Value': [
-            f"{len(terminal):,}",
-            f"{terminal.mean():.4f}",
-            f"{terminal.std():.4f}",
-            f"{terminal.min():.4f}",
-            f"{np.percentile(terminal, 5):.4f}",
-            f"{np.percentile(terminal, 25):.4f}",
-            f"{np.median(terminal):.4f}",
-            f"{np.percentile(terminal, 75):.4f}",
-            f"{np.percentile(terminal, 95):.4f}",
-            f"{terminal.max():.4f}",
-            f"{stats.skew(terminal):.4f}",
-            f"{stats.kurtosis(terminal):.4f}"
-        ]
-    }
+    # Create statistics using pandas DataFrame
+    import pandas as pd
 
-    # Display as columns
-    col1, col2 = st.columns(2)
+    stats_data = [
+        {'Statistic': 'Count', 'Value': f"{len(terminal):,}"},
+        {'Statistic': 'Mean', 'Value': f"{terminal.mean():.4f}{unit}"},
+        {'Statistic': 'Std Dev', 'Value': f"{terminal.std():.4f}{unit}"},
+        {'Statistic': 'Min', 'Value': f"{terminal.min():.4f}{unit}"},
+        {'Statistic': '5th Percentile', 'Value': f"{np.percentile(terminal, 5):.4f}{unit}"},
+        {'Statistic': '25th Percentile', 'Value': f"{np.percentile(terminal, 25):.4f}{unit}"},
+        {'Statistic': 'Median', 'Value': f"{np.median(terminal):.4f}{unit}"},
+        {'Statistic': '75th Percentile', 'Value': f"{np.percentile(terminal, 75):.4f}{unit}"},
+        {'Statistic': '95th Percentile', 'Value': f"{np.percentile(terminal, 95):.4f}{unit}"},
+        {'Statistic': 'Max', 'Value': f"{terminal.max():.4f}{unit}"},
+        {'Statistic': 'Skewness', 'Value': f"{stats.skew(terminal):.4f}"},
+        {'Statistic': 'Kurtosis', 'Value': f"{stats.kurtosis(terminal):.4f}"},
+    ]
 
-    with col1:
-        for i in range(len(stats_data['Statistic']) // 2):
-            st.write(f"**{stats_data['Statistic'][i]}**: {stats_data['Value'][i]}{unit if i > 0 and i < 10 else ''}")
-
-    with col2:
-        for i in range(len(stats_data['Statistic']) // 2, len(stats_data['Statistic'])):
-            st.write(f"**{stats_data['Statistic'][i]}**: {stats_data['Value'][i]}{unit if i < 10 else ''}")
+    df_stats = pd.DataFrame(stats_data)
+    st.dataframe(
+        df_stats,
+        width="stretch",
+        hide_index=True,
+        column_config={
+            "Statistic": st.column_config.TextColumn("Statistic", width="medium"),
+            "Value": st.column_config.TextColumn("Value", width="medium")
+        }
+    )
 
     # Path statistics over time
     st.markdown("#### Path Evolution Statistics")
@@ -287,21 +293,27 @@ def _render_convergence_analysis(result, params: Dict[str, Any], result_type: st
 
     st.plotly_chart(fig, width="stretch")
 
-    # Convergence statistics
-    col1, col2, col3 = st.columns(3)
+    # Convergence statistics with styled cards
+    final_se = terminal.std() / np.sqrt(n_paths)
+    ci_width = 2 * 1.96 * final_se
 
-    with col1:
-        final_se = terminal.std() / np.sqrt(n_paths)
-        st.metric("Final Standard Error", f"{final_se:.6f}")
+    conv_stats = [
+        ("Final Std Error", f"{final_se:.6f}", "σ / √n"),
+        ("95% CI Width", f"±{ci_width:.6f}", "1.96 × SE"),
+    ]
+    conv_variants = ["teal", "blue"]
 
-    with col2:
-        ci_width = 2 * 1.96 * final_se
-        st.metric("95% CI Width", f"{ci_width:.6f}")
+    if true_mean is not None:
+        error = abs(terminal.mean() - true_mean)
+        error_pct = error / true_mean * 100 if true_mean > 0 else 0
+        error_variant = "green" if error_pct < 1 else "amber" if error_pct < 5 else "red"
+        conv_stats.append(("Absolute Error", f"{error:.6f}", f"{error_pct:.2f}% of theoretical"))
+        conv_variants.append(error_variant)
+    else:
+        conv_stats.append(("Absolute Error", "N/A", "No closed-form solution"))
+        conv_variants.append("slate")
 
-    with col3:
-        if true_mean is not None:
-            error = abs(terminal.mean() - true_mean)
-            st.metric("Absolute Error", f"{error:.6f}")
+    render_stats_row(conv_stats, conv_variants)
 
 
 def _render_performance_metrics(result, params: Dict[str, Any]) -> None:
@@ -313,18 +325,16 @@ def _render_performance_metrics(result, params: Dict[str, Any]) -> None:
     n_steps = result.num_steps
     total_samples = n_paths * n_steps
 
-    col1, col2, col3 = st.columns(3)
+    paths_per_sec = n_paths / comp_time
+    samples_per_sec = total_samples / comp_time
 
-    with col1:
-        st.metric("Computation Time", f"{comp_time*1000:.2f} ms")
-
-    with col2:
-        paths_per_sec = n_paths / comp_time
-        st.metric("Paths/Second", f"{paths_per_sec:,.0f}")
-
-    with col3:
-        samples_per_sec = total_samples / comp_time
-        st.metric("Samples/Second", f"{samples_per_sec/1e6:.2f}M")
+    # Performance metrics with styled cards
+    perf_stats = [
+        ("Computation Time", f"{comp_time*1000:.1f} ms", "Total generation time"),
+        ("Paths/Second", f"{paths_per_sec:,.0f}", "Throughput"),
+        ("Samples/Second", f"{samples_per_sec/1e6:.1f}M", "Million samples/sec"),
+    ]
+    render_stats_row(perf_stats, ["teal", "green", "blue"])
 
     # Performance comparison chart
     st.markdown("##### Scaling Analysis")
@@ -361,19 +371,17 @@ def _render_performance_metrics(result, params: Dict[str, Any]) -> None:
 
     st.plotly_chart(fig, width="stretch")
 
-    # Memory usage estimate
+    # Memory usage estimate with styled cards
     st.markdown("##### Memory Usage Estimate")
 
     bytes_per_float = 8
     path_memory = n_paths * (n_steps + 1) * bytes_per_float
     path_memory_mb = path_memory / (1024 * 1024)
 
-    col1, col2 = st.columns(2)
-
-    with col1:
-        st.write(f"**Path Array Size**: {path_memory_mb:.2f} MB")
-        st.write(f"**Dimensions**: ({n_paths:,} x {n_steps + 1:,})")
-
-    with col2:
-        st.write(f"**Data Type**: float64 (8 bytes)")
-        st.write(f"**Total Elements**: {n_paths * (n_steps + 1):,}")
+    memory_stats = [
+        ("Memory", f"{path_memory_mb:.2f} MB", "Array storage"),
+        ("Dimensions", f"{n_paths:,} × {n_steps + 1:,}", "paths × steps"),
+        ("Total Elements", f"{n_paths * (n_steps + 1):,}", "Float values"),
+        ("Data Type", "float64", "8 bytes/element"),
+    ]
+    render_stats_row(memory_stats, ["purple", "blue", "teal", "slate"])

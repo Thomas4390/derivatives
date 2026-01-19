@@ -246,4 +246,70 @@ __all__ = [
     'warm_up_jit',
 ]
 
-__version__ = '2.0.0'  # Breaking change: r -> mu (P-measure)
+# =============================================================================
+# Constants, Types and Utilities
+# =============================================================================
+
+from .constants import (
+    MIN_VARIANCE_FLOOR,
+    EXPECTED_ABS_NORMAL,
+    VAR_95_ALPHA,
+    VAR_99_ALPHA,
+    HESTON_DEFAULTS,
+    GARCH_DEFAULTS,
+    MERTON_DEFAULTS,
+    SABR_DEFAULTS,
+    NGARCH_DEFAULTS,
+    GJR_GARCH_DEFAULTS,
+    EGARCH_DEFAULTS,
+    floor_variance,
+    compute_correlation_decomposition,
+)
+
+from .enums import (
+    HestonScheme,
+    OptionType,
+    PositionType,
+    PriceModel,
+    VolatilityModel,
+    SimulationMode,
+    RiskMetricType,
+)
+
+from .exceptions import (
+    SimulationError,
+    ParameterValidationError,
+    NumericalInstabilityError,
+    ModelNotFoundError,
+    StationarityViolationError,
+    CorrelationMatrixError,
+)
+
+# Update __all__ with new exports
+__all__ += [
+    # Constants
+    'MIN_VARIANCE_FLOOR',
+    'HESTON_DEFAULTS',
+    'GARCH_DEFAULTS',
+    'floor_variance',
+    'compute_correlation_decomposition',
+
+    # Enums
+    'HestonScheme',
+    'OptionType',
+    'PositionType',
+    'PriceModel',
+    'VolatilityModel',
+    'SimulationMode',
+    'RiskMetricType',
+
+    # Exceptions
+    'SimulationError',
+    'ParameterValidationError',
+    'NumericalInstabilityError',
+    'ModelNotFoundError',
+    'StationarityViolationError',
+    'CorrelationMatrixError',
+]
+
+__version__ = '2.1.0'  # Added constants, enums, types, exceptions

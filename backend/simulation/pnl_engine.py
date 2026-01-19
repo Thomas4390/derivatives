@@ -6,6 +6,16 @@ Numba-optimized functions for computing portfolio P&L distributions
 from simulated terminal prices. Designed for maximum performance with
 parallel execution across all CPU cores.
 
+IMPORTANT: Expiration-Only P&L Calculation
+------------------------------------------
+This engine calculates P&L at EXPIRATION only, using the intrinsic value
+(payoff) of options. It does NOT include time value (theta, vega effects).
+This is intentional for Monte Carlo terminal distribution analysis where
+we want to understand the P&L distribution at option expiration.
+
+For mid-life option valuation with time value, use Black-Scholes or other
+pricing models from `backend.option_pricing.options_calculator`.
+
 Key Optimizations:
 -----------------
 - @njit(parallel=True): Automatic parallelization
@@ -235,9 +245,9 @@ def compute_risk_metrics_core(pnl: np.ndarray) -> Tuple[float, ...]:
     var_95 = sorted_pnl[var_95_idx]
     var_99 = sorted_pnl[var_99_idx]
 
-    # CVaR (Expected Shortfall) - mean of worst cases
-    cvar_95 = np.mean(sorted_pnl[:var_95_idx + 1]) if var_95_idx > 0 else sorted_pnl[0]
-    cvar_99 = np.mean(sorted_pnl[:var_99_idx + 1]) if var_99_idx > 0 else sorted_pnl[0]
+    # CVaR (Expected Shortfall) - mean of worst α% outcomes (excluding VaR boundary)
+    cvar_95 = np.mean(sorted_pnl[:var_95_idx]) if var_95_idx > 0 else sorted_pnl[0]
+    cvar_99 = np.mean(sorted_pnl[:var_99_idx]) if var_99_idx > 0 else sorted_pnl[0]
 
     # Probability of profit
     n_profit = 0

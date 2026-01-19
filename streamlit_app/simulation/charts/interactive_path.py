@@ -16,6 +16,7 @@ from config.constants import (
     PRICE_MODELS,
     VOLATILITY_MODELS
 )
+from config.styles import stats_card_html, render_stats_row
 
 
 # =============================================================================
@@ -208,12 +209,13 @@ def compute_unconditional_variance_gjr(
 # MAIN RENDERING FUNCTIONS
 # =============================================================================
 
-def render_interactive_path_tab(params: Dict[str, Any]) -> None:
+def render_interactive_path_tab(params: Dict[str, Any], key_prefix: str = "price") -> None:
     """
     Render the interactive single path analysis tab.
 
     Args:
         params: Dictionary of simulation parameters
+        key_prefix: Unique prefix for widget keys to avoid duplicates
     """
     simulation_mode = params.get('simulation_mode', 'price')
 
@@ -221,12 +223,12 @@ def render_interactive_path_tab(params: Dict[str, Any]) -> None:
     st.markdown("*Adjust parameters using the sliders below for real-time visualization*")
 
     if simulation_mode == 'price':
-        _render_interactive_price_path(params)
+        _render_interactive_price_path(params, key_prefix)
     else:
-        _render_interactive_volatility_path(params)
+        _render_interactive_volatility_path(params, key_prefix)
 
 
-def _render_interactive_price_path(params: Dict[str, Any]) -> None:
+def _render_interactive_price_path(params: Dict[str, Any], key_prefix: str = "price") -> None:
     """Render interactive price path visualization."""
     model = params.get('price_model', 'gbm')
 
@@ -238,19 +240,19 @@ def _render_interactive_price_path(params: Dict[str, Any]) -> None:
     with col1:
         s0 = st.slider("Initial Price (S₀)", 50.0, 200.0,
                        float(params.get('spot_price', 100.0)), 1.0,
-                       key="interactive_s0")
+                       key=f"{key_prefix}_interactive_s0")
     with col2:
         sigma = st.slider("Volatility (σ)", 0.05, 0.80,
                          float(params.get('volatility', 0.20)), 0.01,
-                         key="interactive_sigma")
+                         key=f"{key_prefix}_interactive_sigma")
     with col3:
         r = st.slider("Risk-free Rate (r)", 0.0, 0.15,
                      float(params.get('risk_free_rate', 0.05)), 0.005,
-                     key="interactive_r")
+                     key=f"{key_prefix}_interactive_r")
     with col4:
         seed = st.slider("Random Seed", 0, 1000,
                         int(params.get('seed', 42)), 1,
-                        key="interactive_seed")
+                        key=f"{key_prefix}_interactive_seed")
 
     n_steps = params.get('num_steps', 252)
     t = params.get('time_horizon', 1.0)
@@ -263,23 +265,23 @@ def _render_interactive_price_path(params: Dict[str, Any]) -> None:
         with col1:
             v0 = st.slider("V₀", 0.01, 0.25,
                           float(params.get('heston_v0', 0.04)), 0.01,
-                          key="interactive_v0")
+                          key=f"{key_prefix}_interactive_v0")
         with col2:
             kappa = st.slider("κ (mean rev.)", 0.5, 10.0,
                              float(params.get('heston_kappa', 2.0)), 0.1,
-                             key="interactive_kappa")
+                             key=f"{key_prefix}_interactive_kappa")
         with col3:
             theta = st.slider("θ (long-run)", 0.01, 0.25,
                              float(params.get('heston_theta', 0.04)), 0.01,
-                             key="interactive_theta")
+                             key=f"{key_prefix}_interactive_theta")
         with col4:
             xi = st.slider("ξ (vol of vol)", 0.1, 1.0,
                           float(params.get('heston_xi', 0.3)), 0.05,
-                          key="interactive_xi")
+                          key=f"{key_prefix}_interactive_xi")
         with col5:
             rho = st.slider("ρ (correlation)", -0.95, 0.0,
                            float(params.get('heston_rho', -0.7)), 0.05,
-                           key="interactive_rho")
+                           key=f"{key_prefix}_interactive_rho")
 
         # Simulate Heston
         time_grid, path, variance, returns = simulate_single_heston_path(
@@ -384,13 +386,13 @@ def _render_interactive_price_path(params: Dict[str, Any]) -> None:
         hovermode='x unified'
     )
 
-    st.plotly_chart(fig, width="stretch")
+    st.plotly_chart(fig, width="stretch", key=f"{key_prefix}_price_chart")
 
     # Statistics
     _display_path_statistics(path, returns, s0, "Price")
 
 
-def _render_interactive_volatility_path(params: Dict[str, Any]) -> None:
+def _render_interactive_volatility_path(params: Dict[str, Any], key_prefix: str = "vol") -> None:
     """Render interactive volatility path visualization."""
     model = params.get('vol_model', 'garch')
 
@@ -402,19 +404,19 @@ def _render_interactive_volatility_path(params: Dict[str, Any]) -> None:
     with col1:
         sigma0 = st.slider("Initial Vol (σ₀)", 0.05, 0.50,
                           float(params.get('volatility', 0.20)), 0.01,
-                          key="interactive_sigma0")
+                          key=f"{key_prefix}_interactive_sigma0")
     with col2:
         alpha = st.slider("α (ARCH)", 0.01, 0.30,
                          float(params.get('garch_alpha', 0.05)), 0.01,
-                         key="interactive_alpha")
+                         key=f"{key_prefix}_interactive_alpha")
     with col3:
         beta = st.slider("β (GARCH)", 0.50, 0.98,
                         float(params.get('garch_beta', 0.90)), 0.01,
-                        key="interactive_beta")
+                        key=f"{key_prefix}_interactive_beta")
     with col4:
         seed = st.slider("Random Seed", 0, 1000,
                         int(params.get('seed', 42)), 1,
-                        key="interactive_seed_vol")
+                        key=f"{key_prefix}_interactive_seed_vol")
 
     n_steps = params.get('num_steps', 252)
 
@@ -424,7 +426,7 @@ def _render_interactive_volatility_path(params: Dict[str, Any]) -> None:
         with col1:
             theta_ngarch = st.slider("θ (leverage)", 0.0, 2.0,
                                     float(params.get('ngarch_theta', 0.5)), 0.1,
-                                    key="interactive_theta_ngarch")
+                                    key=f"{key_prefix}_interactive_theta_ngarch")
 
         # Compute omega for target long-run variance
         persistence = alpha * (1 + theta_ngarch**2) + beta
@@ -445,7 +447,7 @@ def _render_interactive_volatility_path(params: Dict[str, Any]) -> None:
         with col1:
             gamma = st.slider("γ (asymmetry)", 0.0, 0.20,
                              float(params.get('gjr_gamma', 0.05)), 0.01,
-                             key="interactive_gamma_gjr")
+                             key=f"{key_prefix}_interactive_gamma_gjr")
 
         persistence = alpha + beta + 0.5 * gamma
         if persistence < 1:
@@ -590,7 +592,7 @@ def _render_interactive_volatility_path(params: Dict[str, Any]) -> None:
         hovermode='x unified'
     )
 
-    st.plotly_chart(fig, width="stretch")
+    st.plotly_chart(fig, width="stretch", key=f"{key_prefix}_vol_chart")
 
     # Statistics
     _display_volatility_statistics(variance, volatility, unconditional_var, model_name)
@@ -602,26 +604,30 @@ def _display_path_statistics(
     initial: float,
     name: str
 ) -> None:
-    """Display statistics for price path."""
+    """Display statistics for price path with styled cards."""
     st.markdown("#### Path Statistics")
 
-    col1, col2, col3, col4, col5 = st.columns(5)
-
     total_return = (path[-1] - initial) / initial * 100
+    return_sign = "+" if total_return >= 0 else ""
 
-    with col1:
-        st.metric("Terminal Value", f"${path[-1]:.2f}")
-    with col2:
-        st.metric("Total Return", f"{total_return:+.2f}%")
-    with col3:
-        st.metric("Max Value", f"${path.max():.2f}")
-    with col4:
-        st.metric("Min Value", f"${path.min():.2f}")
-    with col5:
-        # Realized volatility
-        if len(returns) > 1:
-            realized_vol = np.std(returns[1:]) * np.sqrt(252) * 100
-            st.metric("Realized Vol", f"{realized_vol:.1f}%")
+    # Calculate realized volatility
+    realized_vol = np.std(returns[1:]) * np.sqrt(252) * 100 if len(returns) > 1 else 0
+
+    # Determine color variant based on return
+    return_variant = "green" if total_return >= 0 else "red"
+
+    stats = [
+        ("Terminal Value", f"${path[-1]:.2f}", "Final price"),
+        ("Total Return", f"{return_sign}{total_return:.2f}%", "Since inception"),
+        ("Max Value", f"${path.max():.2f}", "Path maximum"),
+        ("Min Value", f"${path.min():.2f}", "Path minimum"),
+        ("Realized Vol", f"{realized_vol:.1f}%", "Annualized"),
+    ]
+
+    # Use different variants for visual distinction
+    variants = ["teal", return_variant, "blue", "amber", "purple"]
+
+    render_stats_row(stats, variants)
 
 
 def _display_volatility_statistics(
@@ -630,21 +636,21 @@ def _display_volatility_statistics(
     unconditional_var: float,
     model_name: str
 ) -> None:
-    """Display statistics for volatility path."""
+    """Display statistics for volatility path with styled cards."""
     st.markdown("#### Volatility Statistics")
 
-    col1, col2, col3, col4, col5 = st.columns(5)
+    # Calculate unconditional volatility
+    uncond_vol = f"{np.sqrt(unconditional_var)*100:.2f}%" if not np.isnan(unconditional_var) else "N/A"
+    uncond_subtitle = "Long-run level" if not np.isnan(unconditional_var) else "Non-stationary"
 
-    with col1:
-        st.metric("Mean Vol", f"{volatility.mean()*100:.2f}%")
-    with col2:
-        st.metric("Terminal Vol", f"{volatility[-1]*100:.2f}%")
-    with col3:
-        st.metric("Max Vol", f"{volatility.max()*100:.2f}%")
-    with col4:
-        st.metric("Min Vol", f"{volatility.min()*100:.2f}%")
-    with col5:
-        if not np.isnan(unconditional_var):
-            st.metric("Unconditional", f"{np.sqrt(unconditional_var)*100:.2f}%")
-        else:
-            st.metric("Unconditional", "N/A (non-stat)")
+    stats = [
+        ("Mean Vol", f"{volatility.mean()*100:.2f}%", "Path average"),
+        ("Terminal Vol", f"{volatility[-1]*100:.2f}%", "Final value"),
+        ("Max Vol", f"{volatility.max()*100:.2f}%", "Peak volatility"),
+        ("Min Vol", f"{volatility.min()*100:.2f}%", "Minimum level"),
+        ("Unconditional", uncond_vol, uncond_subtitle),
+    ]
+
+    variants = ["teal", "blue", "red", "green", "purple"]
+
+    render_stats_row(stats, variants)
