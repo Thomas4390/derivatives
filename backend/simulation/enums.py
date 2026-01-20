@@ -1,200 +1,89 @@
 """
-Enumeration Types for Simulation Module
-=======================================
+Enumerations for Simulation Models
+==================================
 
-Centralized enums for type-safe model and parameter selection.
-Using enums instead of strings/integers improves code clarity,
-enables IDE autocomplete, and catches errors at development time.
+This module defines enumerations for model types used throughout
+the simulation framework.
 
-Usage:
-------
-    from backend.simulation.enums import (
-        HestonScheme,
-        OptionType,
-        PositionType,
-        PriceModel,
-        VolatilityModel,
-    )
-
-    # Use in function calls
-    scheme = HestonScheme.QE
-    option = OptionType.CALL
-    position = PositionType.LONG
+Author: Derivatives Pricing Project
 """
 
-from enum import Enum, IntEnum
+from enum import Enum, auto
 
 
-# =============================================================================
-# DISCRETIZATION SCHEMES
-# =============================================================================
-
-class HestonScheme(IntEnum):
+class ModelType(Enum):
     """
-    Heston model variance discretization schemes.
+    Enumeration of available simulation models.
 
-    Different schemes handle the potential negative variance issue:
-
-    - EULER: Simple Euler-Maruyama, can produce negative variance
-    - FULL_TRUNCATION: Floor variance at 0, most common choice
-    - REFLECTION: Reflect negative variance to positive
-    - QE: Quadratic-Exponential, most accurate but complex
-
-    Reference:
-        Andersen, L. (2008). "Simple and efficient simulation of the
-        Heston stochastic volatility model"
+    Categories:
+    - Diffusion: GBM (constant volatility)
+    - Stochastic Volatility: Heston, Bates
+    - Jump Diffusion: Merton
+    - GARCH Family: GARCH, NGARCH, GJR_GARCH
     """
-    EULER = 0
-    FULL_TRUNCATION = 1
-    REFLECTION = 2
-    QE = 3  # Quadratic-Exponential
+
+    # Diffusion models
+    GBM = "Geometric Brownian Motion"
+
+    # Stochastic volatility models
+    HESTON = "Heston Stochastic Volatility"
+    BATES = "Bates (Heston + Jumps)"
+
+    # Jump diffusion models
+    MERTON = "Merton Jump Diffusion"
+
+    # GARCH family models
+    GARCH = "GARCH(1,1)"
+    NGARCH = "NGARCH (Nonlinear Asymmetric)"
+    GJR_GARCH = "GJR-GARCH"
+
+    @classmethod
+    def continuous_time_models(cls) -> list:
+        """Returns list of continuous-time models."""
+        return [cls.GBM, cls.HESTON, cls.BATES, cls.MERTON]
+
+    @classmethod
+    def discrete_time_models(cls) -> list:
+        """Returns list of discrete-time (GARCH) models."""
+        return [cls.GARCH, cls.NGARCH, cls.GJR_GARCH]
+
+    @classmethod
+    def stochastic_vol_models(cls) -> list:
+        """Returns list of models with stochastic volatility output."""
+        return [cls.HESTON, cls.BATES, cls.GARCH, cls.NGARCH, cls.GJR_GARCH]
+
+    @classmethod
+    def jump_models(cls) -> list:
+        """Returns list of models with jump components."""
+        return [cls.MERTON, cls.BATES]
 
 
-# =============================================================================
-# OPTION TYPES
-# =============================================================================
-
-class OptionType(Enum):
+class DiscretizationScheme(Enum):
     """
-    Option contract types.
+    Discretization schemes for stochastic volatility models.
 
-    Used in P&L calculations and strategy building.
+    Used primarily for Heston and Bates models where variance
+    can become negative under naive Euler discretization.
     """
-    CALL = "call"
-    PUT = "put"
 
-    @property
-    def numeric_value(self) -> int:
-        """Return numeric value for Numba functions (1 = call, -1 = put)."""
-        return 1 if self == OptionType.CALL else -1
+    EULER = auto()           # Simple Euler (can have negative variance)
+    FULL_TRUNCATION = auto()  # Variance floored at 0
+    REFLECTION = auto()       # Negative variance reflected
+    QE = auto()              # Quadratic Exponential (most accurate)
+
+    @classmethod
+    def default(cls) -> "DiscretizationScheme":
+        """Returns the recommended default scheme."""
+        return cls.FULL_TRUNCATION
 
 
-class PositionType(Enum):
+class Measure(Enum):
     """
-    Trading position types.
+    Probability measure for simulation.
 
-    - LONG: Bought the option (pay premium, receive payoff)
-    - SHORT: Sold the option (receive premium, pay payoff)
+    P-measure (physical/real-world) uses expected return mu as drift.
+    Q-measure (risk-neutral) uses risk-free rate r as drift.
     """
-    LONG = "long"
-    SHORT = "short"
 
-    @property
-    def numeric_value(self) -> int:
-        """Return numeric value for Numba functions (1 = long, -1 = short)."""
-        return 1 if self == PositionType.LONG else -1
-
-
-# =============================================================================
-# PRICE MODELS
-# =============================================================================
-
-class PriceModel(Enum):
-    """
-    Available price path simulation models.
-
-    Each model captures different market dynamics:
-
-    - GBM: Constant volatility, log-normal prices (Black-Scholes assumption)
-    - HESTON: Stochastic volatility with mean reversion
-    - MERTON: Jump diffusion for sudden price movements
-    - BATES: Combines Heston (stochastic vol) + Merton (jumps)
-    - SABR: Popular for interest rate derivatives
-    """
-    GBM = "gbm"
-    HESTON = "heston"
-    MERTON = "merton"
-    BATES = "bates"
-    SABR = "sabr"
-
-    @property
-    def display_name(self) -> str:
-        """Human-readable model name."""
-        names = {
-            PriceModel.GBM: "Geometric Brownian Motion (GBM)",
-            PriceModel.HESTON: "Heston Stochastic Volatility",
-            PriceModel.MERTON: "Merton Jump Diffusion",
-            PriceModel.BATES: "Bates Model (Heston + Jumps)",
-            PriceModel.SABR: "SABR Model",
-        }
-        return names[self]
-
-
-# =============================================================================
-# VOLATILITY MODELS
-# =============================================================================
-
-class VolatilityModel(Enum):
-    """
-    Available volatility simulation models (GARCH family).
-
-    All models capture volatility clustering and persistence:
-
-    - GARCH: Symmetric response to shocks
-    - NGARCH: Asymmetric response via shifted term (Engle & Ng)
-    - GJR_GARCH: Asymmetric via indicator function (GJR)
-    - EGARCH: Log-space model, no positivity constraints
-    """
-    GARCH = "garch"
-    NGARCH = "ngarch"
-    GJR_GARCH = "gjr_garch"
-    EGARCH = "egarch"
-
-    @property
-    def display_name(self) -> str:
-        """Human-readable model name."""
-        names = {
-            VolatilityModel.GARCH: "GARCH(1,1)",
-            VolatilityModel.NGARCH: "NGARCH (NAGARCH)",
-            VolatilityModel.GJR_GARCH: "GJR-GARCH",
-            VolatilityModel.EGARCH: "EGARCH",
-        }
-        return names[self]
-
-
-# =============================================================================
-# SIMULATION MODES
-# =============================================================================
-
-class SimulationMode(Enum):
-    """
-    Application simulation modes.
-
-    - PRICE: Simulate price paths only
-    - VOLATILITY: Simulate volatility paths (GARCH models)
-    - OPTION_PNL: Full option P&L analysis with risk metrics
-    """
-    PRICE = "price"
-    VOLATILITY = "volatility"
-    OPTION_PNL = "option_pnl"
-
-    @property
-    def display_name(self) -> str:
-        """Human-readable mode name."""
-        names = {
-            SimulationMode.PRICE: "Price Path Simulation",
-            SimulationMode.VOLATILITY: "Volatility Simulation",
-            SimulationMode.OPTION_PNL: "Option P&L Analysis",
-        }
-        return names[self]
-
-
-# =============================================================================
-# RISK METRICS
-# =============================================================================
-
-class RiskMetricType(Enum):
-    """
-    Types of risk metrics computed from P&L distributions.
-    """
-    MEAN_PNL = "mean_pnl"
-    STD_PNL = "std_pnl"
-    VAR_95 = "var_95"
-    VAR_99 = "var_99"
-    CVAR_95 = "cvar_95"
-    CVAR_99 = "cvar_99"
-    PROB_PROFIT = "prob_profit"
-    MAX_PROFIT = "max_profit"
-    MAX_LOSS = "max_loss"
-    SKEWNESS = "skewness"
-    KURTOSIS = "kurtosis"
+    P_MEASURE = "Physical (Real-World)"
+    Q_MEASURE = "Risk-Neutral"
