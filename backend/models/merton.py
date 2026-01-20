@@ -31,10 +31,10 @@ except ImportError:
 
 try:
     from backend.simulation.models.merton import MertonSimulator
-    from backend.option_pricing.garch_mc import GARCHMCPricer
+    from backend.option_pricing.garch import GARCHMCPricer
 except ImportError:
     from backend.simulation.models.merton import MertonSimulator
-    from backend.option_pricing.garch_mc import GARCHMCPricer
+    from backend.option_pricing.garch import GARCHMCPricer
 
 
 class MertonModel(BaseModel[MertonParams]):

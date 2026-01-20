@@ -110,7 +110,7 @@ from .merton import (
 # GARCH Monte Carlo
 # =============================================================================
 
-from .garch_mc import (
+from .garch import (
     GARCHMCPricer,
     GARCHType,
     create_garch_pricer,

@@ -20,17 +20,17 @@ import streamlit as st
 import numpy as np
 import json
 
-# Backend imports
-from backend.option_pricing.options_calculator import (
+# Backend imports (new architecture)
+from backend.portfolio import (
     OptionsPortfolio,
     OptionPosition,
     StockPosition,
     calculate_all_greeks,
-    calculate_portfolio_pnl_at_expiry,
+    calculate_pnl_at_expiry_arrays as calculate_portfolio_pnl_at_expiry,  # Array-based interface
+    find_breakeven_points,
     calculate_portfolio_greeks_3d_dte,
     calculate_portfolio_greeks_3d_iv,
     calculate_greeks_3d_strike,
-    find_breakeven_points
 )
 
 # Local imports
@@ -109,7 +109,7 @@ def get_default_premium() -> float:
     """Calculate default premium for a long call ATM."""
     default_portfolio = OptionsPortfolio(spot_price, risk_free_rate)
     default_position = OptionPosition('call', 'long', spot_price, 1)
-    default_portfolio.add_option_position(default_position)
+    default_portfolio.add_option(default_position)
     return default_position.premium_paid
 
 

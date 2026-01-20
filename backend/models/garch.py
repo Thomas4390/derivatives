@@ -31,12 +31,12 @@ try:
     from backend.simulation.models.garch import GARCHSimulator
     from backend.simulation.models.ngarch import NGARCHSimulator
     from backend.simulation.models.gjr_garch import GJRGARCHSimulator
-    from backend.option_pricing.garch_mc import GARCHMCPricer, GARCHType
+    from backend.option_pricing.garch import GARCHMCPricer, GARCHType
 except ImportError:
     from backend.simulation.models.garch import GARCHSimulator
     from backend.simulation.models.ngarch import NGARCHSimulator
     from backend.simulation.models.gjr_garch import GJRGARCHSimulator
-    from backend.option_pricing.garch_mc import GARCHMCPricer, GARCHType
+    from backend.option_pricing.garch import GARCHMCPricer, GARCHType
 
 
 class GARCHModel(BaseModel[GARCHParams]):

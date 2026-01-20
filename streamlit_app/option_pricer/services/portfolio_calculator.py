@@ -60,8 +60,8 @@ def prepare_portfolio_data(
     if positions:
         portfolio_data['options'] = [
             {
-                'option_type': pos.option_type,
-                'position_type': pos.position_type,
+                'option_type': str(pos.option_type),
+                'position_type': str(pos.position_type),
                 'strike': pos.strike,
                 'quantity': pos.quantity,
                 'premium_paid': pos.premium_paid
@@ -72,7 +72,7 @@ def prepare_portfolio_data(
     # Add stock position
     if stock_position:
         portfolio_data['stock'] = {
-            'position_type': stock_position.position_type,
+            'position_type': str(stock_position.position_type),
             'quantity': stock_position.quantity,
             'entry_price': stock_position.entry_price
         }
