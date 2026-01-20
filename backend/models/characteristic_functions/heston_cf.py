@@ -5,7 +5,7 @@ Heston Characteristic Function
 Numba-optimized characteristic function for Heston (1993) model.
 
 This is the SINGLE implementation used by:
-    - HestonFFTPricer (FFT pricing)
+    - HestonPricer (FFT pricing)
     - HestonModel.characteristic_function() (calibration)
 
 Uses the Gatheral (2006) formulation for numerical stability.

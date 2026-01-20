@@ -6,7 +6,7 @@ Numba-optimized characteristic function for Bates (1996) model
 (Heston stochastic volatility + Merton-style jumps).
 
 This is the SINGLE implementation used by:
-    - BatesFFTPricer (FFT pricing)
+    - BatesPricer (FFT pricing)
     - BatesModel.characteristic_function() (calibration)
 
 Author: Derivatives Pricing Project

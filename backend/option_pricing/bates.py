@@ -607,10 +607,6 @@ class BatesPricer(BasePricer):
 # Backward Compatibility Alias
 # =============================================================================
 
-# Alias for backward compatibility with existing code
-BatesFFTPricer = BatesPricer
-
-
 # =============================================================================
 # Convenience Functions
 # =============================================================================

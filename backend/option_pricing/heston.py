@@ -548,10 +548,6 @@ class HestonPricer(BasePricer):
 # Backward Compatibility Alias
 # =============================================================================
 
-# Alias for backward compatibility with existing code
-HestonFFTPricer = HestonPricer
-
-
 # =============================================================================
 # Convenience Functions
 # =============================================================================

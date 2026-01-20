@@ -36,12 +36,7 @@ except ImportError:
         bates_cf_vectorized,
     )
 
-try:
-    from backend.simulation.models.bates import BatesSimulator
-    from backend.option_pricing.bates_fft import BatesFFTPricer
-except ImportError:
-    from backend.simulation.models.bates import BatesSimulator
-    from backend.option_pricing.bates_fft import BatesFFTPricer
+from backend.simulation.models.bates import BatesSimulator
 
 
 class BatesModel(BaseModel[BatesParams]):
@@ -139,7 +134,7 @@ class BatesModel(BaseModel[BatesParams]):
         Returns
         -------
         BasePricer
-            Configured pricer (BatesFFTPricer or BatesMCPricer)
+            Configured pricer (BatesPricer or BatesMCPricer)
 
         Notes
         -----
@@ -148,7 +143,9 @@ class BatesModel(BaseModel[BatesParams]):
         method = method or PricingCapability.FFT
 
         if method == PricingCapability.FFT:
-            return BatesFFTPricer(
+            # Lazy import to avoid circular dependency
+            from backend.option_pricing.bates import BatesPricer
+            return BatesPricer(
                 v0=self.params.v0,
                 kappa=self.params.kappa,
                 theta=self.params.theta,

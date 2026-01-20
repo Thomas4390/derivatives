@@ -86,7 +86,6 @@ from .black_scholes import (
 from .heston import (
     HestonPricer,
     HestonParams,
-    HestonFFTPricer,  # Backward compatibility alias
     heston_call_price,
     heston_put_price,
 )
@@ -95,7 +94,6 @@ from .heston import (
 from .bates import (
     BatesPricer,
     BatesParams,
-    BatesFFTPricer,  # Backward compatibility alias
     bates_call_price,
     bates_put_price,
 )
@@ -178,13 +176,11 @@ __all__ = [
     # Heston
     "HestonPricer",
     "HestonParams",
-    "HestonFFTPricer",  # Backward compatibility
     "heston_call_price",
     "heston_put_price",
     # Bates
     "BatesPricer",
     "BatesParams",
-    "BatesFFTPricer",  # Backward compatibility
     "bates_call_price",
     "bates_put_price",
     # Merton

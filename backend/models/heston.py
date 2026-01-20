@@ -35,14 +35,8 @@ except ImportError:
         heston_cf_vectorized,
     )
 
-try:
-    from backend.simulation.models.heston import HestonSimulator
-    from backend.simulation.enums import DiscretizationScheme
-    from backend.option_pricing.heston_fft import HestonFFTPricer
-except ImportError:
-    from backend.simulation.models.heston import HestonSimulator
-    from backend.simulation.enums import DiscretizationScheme
-    from backend.option_pricing.heston_fft import HestonFFTPricer
+from backend.simulation.models.heston import HestonSimulator
+from backend.simulation.enums import DiscretizationScheme
 
 
 class HestonModel(BaseModel[HestonParams]):
@@ -149,7 +143,7 @@ class HestonModel(BaseModel[HestonParams]):
         Returns
         -------
         BasePricer
-            Configured pricer (HestonFFTPricer or HestonMCPricer)
+            Configured pricer (HestonPricer or HestonMCPricer)
 
         Notes
         -----
@@ -166,7 +160,9 @@ class HestonModel(BaseModel[HestonParams]):
         method = method or PricingCapability.FFT
 
         if method == PricingCapability.FFT:
-            return HestonFFTPricer(
+            # Lazy import to avoid circular dependency
+            from backend.option_pricing.heston import HestonPricer
+            return HestonPricer(
                 v0=self.params.v0,
                 kappa=self.params.kappa,
                 theta=self.params.theta,
