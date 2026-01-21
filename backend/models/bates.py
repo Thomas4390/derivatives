@@ -2,375 +2,402 @@
 Bates Model
 ===========
 
-Unified Bates (1996) model combining Heston stochastic volatility
-with Merton-style jumps.
+Bates (1996) stochastic volatility with jumps model.
 
 Model:
-    dS = (mu - lambda*k) * S * dt + sqrt(V) * S * dW_S + (J - 1) * S * dN
+    dS = (r - q - lambda_j * k) * S * dt + sqrt(V) * S * dW_S + (J - 1) * S * dN
     dV = kappa * (theta - V) * dt + xi * sqrt(V) * dW_V
     Corr(dW_S, dW_V) = rho
 
-Author: Derivatives Pricing Project
+Where:
+    - dN is a Poisson process with intensity lambda_j
+    - J is lognormal: ln(J) ~ N(mu_j, sigma_j^2)
+    - k = E[J - 1] = exp(mu_j + 0.5*sigma_j^2) - 1
+
+The Bates model combines Heston stochastic volatility with Merton-style jumps,
+allowing for both volatility smile AND fat tails in the distribution.
+
+Author: Thomas
+Created: 2025
 """
 
-from typing import Optional, List
-import sys
-from pathlib import Path
+from dataclasses import dataclass
+from typing import List, Dict, Any
+import numpy as np
 
-# Handle imports for both package and direct execution
-try:
-    from .base import BaseModel, PricingCapability
-    from .parameters.bates import BatesParams
-    from .characteristic_functions.bates_cf import (
-        bates_characteristic_function,
-        bates_cf_vectorized,
-    )
-except ImportError:
-    _project_root = Path(__file__).resolve().parents[2]
-    if str(_project_root) not in sys.path:
-        sys.path.insert(0, str(_project_root))
-    from backend.models.base import BaseModel, PricingCapability
-    from backend.models.parameters.bates import BatesParams
-    from backend.models.characteristic_functions.bates_cf import (
-        bates_characteristic_function,
-        bates_cf_vectorized,
-    )
-
-from backend.simulation.models.bates import BatesSimulator
+from backend.core.interfaces import Model
+from backend.core.result_types import PricingCapability
+from backend.models.characteristic_functions.bates_cf import (
+    bates_characteristic_function,
+    bates_cf_vectorized,
+)
 
 
-class BatesModel(BaseModel[BatesParams]):
+# =============================================================================
+# BATES MODEL
+# =============================================================================
+
+@dataclass(frozen=True)
+class BatesModel(Model):
     """
     Bates (1996) Stochastic Volatility with Jumps Model.
 
-    Combines Heston stochastic volatility with Merton-style jumps.
-    Single source of truth for Bates configuration.
+    Combines Heston stochastic volatility with Merton-style lognormal jumps.
+    The most flexible single-asset model for equity options.
 
-    Parameters
-    ----------
-    params : BatesParams
-        Model parameters (v0, kappa, theta, xi, rho, lambda_j, mu_j, sigma_j)
+    Model:
+        dS = (r - q - lambda_j * k) * S * dt + sqrt(V) * S * dW_S + (J - 1) * S * dN
+        dV = kappa * (theta - V) * dt + xi * sqrt(V) * dW_V
+        Corr(dW_S, dW_V) = rho
 
-    Example
-    -------
-    model = BatesModel.from_params(
-        v0=0.04, kappa=2.0, theta=0.04, xi=0.3, rho=-0.7,
-        lambda_j=0.5, mu_j=-0.1, sigma_j=0.2
-    )
-    simulator = model.create_simulator()
-    pricer = model.create_pricer(r=0.05)
-    """
+    Heston Parameters
+    -----------------
+    v0 : float
+        Initial variance (sigma^2), e.g., 0.04 for 20% initial vol
+    kappa : float
+        Mean reversion speed of variance (typical: 1-5)
+    theta : float
+        Long-run variance level
+    xi : float
+        Volatility of volatility (vol-of-vol)
+    rho : float
+        Correlation between price and variance (-1 to 1)
 
-    def __init__(self, params: BatesParams):
-        super().__init__(params)
-
-    @classmethod
-    def from_params(
-        cls,
-        v0: float,
-        kappa: float,
-        theta: float,
-        xi: float,
-        rho: float,
-        lambda_j: float,
-        mu_j: float,
-        sigma_j: float
-    ) -> "BatesModel":
-        """Create model from individual parameters."""
-        return cls(BatesParams(
-            v0=v0, kappa=kappa, theta=theta, xi=xi, rho=rho,
-            lambda_j=lambda_j, mu_j=mu_j, sigma_j=sigma_j
-        ))
-
-    @property
-    def model_name(self) -> str:
-        return "Bates (Heston + Jumps)"
-
-    @property
-    def supported_pricing_methods(self) -> List[PricingCapability]:
-        return [PricingCapability.FFT, PricingCapability.MONTE_CARLO]
-
-    def create_simulator(self, **kwargs) -> BatesSimulator:
-        """
-        Create Bates simulator.
-
-        Returns
-        -------
-        BatesSimulator
-            Configured simulator
-        """
-        return BatesSimulator(
-            v0=self.params.v0,
-            kappa=self.params.kappa,
-            theta=self.params.theta,
-            xi=self.params.xi,
-            rho=self.params.rho,
-            lambda_j=self.params.lambda_j,
-            mu_j=self.params.mu_j,
-            sigma_j=self.params.sigma_j,
-        )
-
-    def create_pricer(
-        self,
-        method: Optional[PricingCapability] = None,
-        n_paths: int = 100000,
-        n_steps: int = 252,
-        **kwargs
-    ):
-        """
-        Create Bates pricer.
-
-        Parameters
-        ----------
-        method : PricingCapability
-            FFT (default, fast) or MONTE_CARLO (slower but more flexible)
-        n_paths : int
-            Number of MC paths (only for MONTE_CARLO method)
-        n_steps : int
-            Number of time steps (only for MONTE_CARLO method)
-        **kwargs
-            Additional pricer options (alpha, n_fft for FFT)
-
-        Returns
-        -------
-        BasePricer
-            Configured pricer (BatesPricer or BatesMCPricer)
-
-        Notes
-        -----
-        The risk-free rate is passed at pricing time, not construction time.
-        """
-        method = method or PricingCapability.FFT
-
-        if method == PricingCapability.FFT:
-            # Lazy import to avoid circular dependency
-            from backend.option_pricing.bates import BatesPricer
-            return BatesPricer(
-                v0=self.params.v0,
-                kappa=self.params.kappa,
-                theta=self.params.theta,
-                xi=self.params.xi,
-                rho=self.params.rho,
-                lambda_j=self.params.lambda_j,
-                mu_j=self.params.mu_j,
-                sigma_j=self.params.sigma_j,
-                **kwargs
-            )
-        elif method == PricingCapability.MONTE_CARLO:
-            return BatesMCPricer(
-                model=self,
-                n_paths=n_paths,
-                n_steps=n_steps,
-            )
-        else:
-            raise ValueError(f"Bates does not support {method}")
-
-    def characteristic_function(self, u, s0: float, t: float, r: float):
-        """
-        Bates characteristic function.
-
-        Uses shared implementation from characteristic_functions module.
-        """
-        return bates_characteristic_function(
-            u, s0, self.params.v0, t, r,
-            self.params.kappa, self.params.theta,
-            self.params.xi, self.params.rho,
-            self.params.lambda_j, self.params.mu_j, self.params.sigma_j
-        )
-
-    def characteristic_function_vectorized(self, u_arr, s0: float, t: float, r: float):
-        """Vectorized characteristic function for FFT."""
-        return bates_cf_vectorized(
-            u_arr, s0, self.params.v0, t, r,
-            self.params.kappa, self.params.theta,
-            self.params.xi, self.params.rho,
-            self.params.lambda_j, self.params.mu_j, self.params.sigma_j
-        )
-
-
-# =============================================================================
-# Bates Monte Carlo Pricer
-# =============================================================================
-
-class BatesMCPricer:
-    """
-    Bates option pricer using Monte Carlo simulation.
-
-    This pricer uses the BatesSimulator to generate paths under
-    the risk-neutral measure and prices options via discounted payoffs.
-
-    Parameters
-    ----------
-    model : BatesModel
-        The Bates model instance
-    n_paths : int
-        Number of Monte Carlo paths
-    n_steps : int
-        Number of time steps per path
-
-    Notes
-    -----
-    Put-call parity (C - P = S - K*e^(-rT)) may not be exactly satisfied when
-    calls and puts are priced with different random seeds due to Monte Carlo
-    sampling error. To enforce parity, price the call and compute the put via:
-    put_price = call_price - s0 + k * exp(-r * t)
+    Jump Parameters
+    ---------------
+    lambda_j : float
+        Jump intensity (expected number of jumps per year)
+    mu_j : float
+        Mean of log-jump size (e.g., -0.1 for 10% negative mean jump)
+    sigma_j : float
+        Volatility of log-jump size
 
     Examples
     --------
-    model = BatesModel.from_params(v0=0.04, kappa=2.0, theta=0.04, xi=0.3, rho=-0.7,
-                                   lambda_j=0.5, mu_j=-0.1, sigma_j=0.2)
-    pricer = model.create_pricer(method=PricingCapability.MONTE_CARLO, n_paths=50000)
-    result = pricer.price(s0=100, k=100, t=0.25, r=0.05)
+    model = BatesModel(
+        v0=0.04, kappa=2.0, theta=0.04, xi=0.3, rho=-0.7,
+        lambda_j=0.5, mu_j=-0.1, sigma_j=0.2
+    )
+
+    # Check Feller condition (same as Heston)
+    model.feller_satisfied
+
+    # Expected jump size
+    model.expected_jump_size  # E[J - 1]
+
+    Notes
+    -----
+    - When lambda_j = 0, reduces to Heston model
+    - Jumps add fat tails to the distribution
+    - mu_j < 0 creates negative skewness (crash risk)
+    - sigma_j controls jump size uncertainty
     """
 
-    def __init__(self, model: BatesModel, n_paths: int = 100000, n_steps: int = 252):
-        self._model = model
-        self._n_paths = n_paths
-        self._n_steps = n_steps
-        self._model_name = "Bates (Monte Carlo)"
+    # Heston parameters
+    v0: float
+    kappa: float
+    theta: float
+    xi: float
+    rho: float
+    # Jump parameters
+    lambda_j: float
+    mu_j: float
+    sigma_j: float
+
+    def __post_init__(self):
+        """Validate parameters."""
+        # Heston validation
+        if self.v0 < 0:
+            raise ValueError(f"v0 must be non-negative, got {self.v0}")
+        if self.kappa <= 0:
+            raise ValueError(f"kappa must be positive, got {self.kappa}")
+        if self.theta < 0:
+            raise ValueError(f"theta must be non-negative, got {self.theta}")
+        if self.xi <= 0:
+            raise ValueError(f"xi must be positive, got {self.xi}")
+        if not -1 <= self.rho <= 1:
+            raise ValueError(f"rho must be in [-1, 1], got {self.rho}")
+        # Jump validation
+        if self.lambda_j < 0:
+            raise ValueError(f"lambda_j must be non-negative, got {self.lambda_j}")
+        if self.sigma_j < 0:
+            raise ValueError(f"sigma_j must be non-negative, got {self.sigma_j}")
 
     @property
-    def model_name(self) -> str:
-        return self._model_name
+    def name(self) -> str:
+        """Human-readable model name."""
+        return "Bates (Heston + Jumps)"
 
-    def get_parameters(self):
-        return self._model.get_parameters()
+    @property
+    def supported_engines(self) -> List[PricingCapability]:
+        """Which pricing methods this model supports."""
+        return [
+            PricingCapability.FFT,
+            PricingCapability.MONTE_CARLO,
+        ]
 
-    def price(self, s0: float, k: float, t: float, r: float, option_type: str = "call", seed=None):
+    def get_parameters(self) -> Dict[str, Any]:
+        """Return model parameters as dictionary."""
+        return {
+            # Heston
+            "v0": self.v0,
+            "kappa": self.kappa,
+            "theta": self.theta,
+            "xi": self.xi,
+            "rho": self.rho,
+            # Jumps
+            "lambda_j": self.lambda_j,
+            "mu_j": self.mu_j,
+            "sigma_j": self.sigma_j,
+        }
+
+    def characteristic_function(
+        self, u: complex, s0: float, t: float, r: float, q: float = 0.0
+    ) -> complex:
         """
-        Price a European option using Monte Carlo simulation.
+        Bates characteristic function phi(u) = E^Q[exp(i*u*ln(S_T))].
+
+        Combines Heston CF with jump contribution.
 
         Parameters
         ----------
+        u : complex
+            Fourier transform variable
         s0 : float
-            Spot price
-        k : float
-            Strike price
+            Initial spot price
         t : float
             Time to maturity
         r : float
             Risk-free rate
-        option_type : str
-            'call' or 'put'
-        seed : int, optional
-            Random seed
+        q : float
+            Dividend yield
 
         Returns
         -------
-        PricingResult
-            Result with price, std_error, computation_time
+        complex
+            Value of characteristic function at u
         """
-        import time
-        import numpy as np
-        from backend.option_pricing.base import PricingResult, PricingMethod
-
-        start_time = time.perf_counter()
-
-        # Create simulator and simulate under risk-neutral measure (r instead of mu)
-        simulator = self._model.create_simulator()
-        terminals = simulator.simulate_terminal(
-            s0=s0, mu=r, t=t,
-            n_paths=self._n_paths, n_steps=self._n_steps, seed=seed
+        s0_adj = s0 * np.exp(-q * t)
+        return bates_characteristic_function(
+            u, s0_adj, self.v0, t, r,
+            self.kappa, self.theta, self.xi, self.rho,
+            self.lambda_j, self.mu_j, self.sigma_j
         )
 
-        # Compute payoffs
-        if option_type.lower() == "call":
-            payoffs = np.maximum(terminals - k, 0.0)
-        else:
-            payoffs = np.maximum(k - terminals, 0.0)
-
-        # Discounted expected value
-        discount = np.exp(-r * t)
-        price = discount * np.mean(payoffs)
-        std_error = discount * np.std(payoffs) / np.sqrt(self._n_paths)
-
-        computation_time = time.perf_counter() - start_time
-
-        return PricingResult(
-            price=price,
-            method=PricingMethod.MONTE_CARLO,
-            computation_time=computation_time,
-            std_error=std_error,
-            n_paths=self._n_paths,
-            parameters=self.get_parameters() | {"s0": s0, "k": k, "t": t, "r": r}
+    def characteristic_function_vectorized(
+        self, u_arr: np.ndarray, s0: float, t: float, r: float, q: float = 0.0
+    ) -> np.ndarray:
+        """Vectorized characteristic function for FFT."""
+        s0_adj = s0 * np.exp(-q * t)
+        return bates_cf_vectorized(
+            u_arr, s0_adj, self.v0, t, r,
+            self.kappa, self.theta, self.xi, self.rho,
+            self.lambda_j, self.mu_j, self.sigma_j
         )
 
+    def drift(self, s: float, v: float, t: float, r: float, q: float) -> float:
+        """
+        Drift coefficient for SDE discretization.
 
-# =============================================================================
-# Benchmark
-# =============================================================================
+        For Bates: drift = (r - q - lambda_j * k) * S
+        where k = E[J - 1] is the expected jump size.
+
+        Parameters
+        ----------
+        s : float
+            Current spot price
+        v : float
+            Current variance
+        t : float
+            Current time
+        r : float
+            Risk-free rate
+        q : float
+            Dividend yield
+
+        Returns
+        -------
+        float
+            Drift value
+        """
+        k = self.expected_jump_size
+        return (r - q - self.lambda_j * k) * s
+
+    def diffusion(self, s: float, v: float, t: float) -> float:
+        """
+        Diffusion coefficient for SDE discretization.
+
+        For Bates (spot process): diffusion = sqrt(V) * S
+
+        Parameters
+        ----------
+        s : float
+            Current spot price
+        v : float
+            Current variance
+        t : float
+            Current time
+
+        Returns
+        -------
+        float
+            Diffusion value
+        """
+        return np.sqrt(max(v, 0.0)) * s
+
+    def variance_drift(self, v: float) -> float:
+        """Drift of the variance process."""
+        return self.kappa * (self.theta - v)
+
+    def variance_diffusion(self, v: float) -> float:
+        """Diffusion of the variance process."""
+        return self.xi * np.sqrt(max(v, 0.0))
+
+    @property
+    def expected_jump_size(self) -> float:
+        """
+        Expected relative jump size k = E[J - 1].
+
+        For lognormal J: k = exp(mu_j + 0.5*sigma_j^2) - 1
+        """
+        return np.exp(self.mu_j + 0.5 * self.sigma_j ** 2) - 1
+
+    @property
+    def expected_jump_return(self) -> float:
+        """
+        Expected jump return as percentage.
+
+        Same as expected_jump_size but expressed as percent.
+        """
+        return self.expected_jump_size * 100
+
+    @property
+    def feller_satisfied(self) -> bool:
+        """Check if Feller condition 2*kappa*theta > xi^2 is satisfied."""
+        return 2 * self.kappa * self.theta > self.xi ** 2
+
+    @property
+    def feller_ratio(self) -> float:
+        """Feller ratio: 2*kappa*theta / xi^2."""
+        return (2 * self.kappa * self.theta) / (self.xi ** 2)
+
+    @property
+    def long_run_volatility(self) -> float:
+        """Long-run volatility sqrt(theta)."""
+        return np.sqrt(self.theta)
+
+    @property
+    def initial_volatility(self) -> float:
+        """Initial volatility sqrt(v0)."""
+        return np.sqrt(self.v0)
+
+    def expected_jumps_per_year(self) -> float:
+        """Expected number of jumps per year."""
+        return self.lambda_j
+
+    def jump_contribution_to_variance(self) -> float:
+        """
+        Variance contribution from jumps.
+
+        For Merton-style jumps: lambda_j * (mu_j^2 + sigma_j^2)
+        """
+        return self.lambda_j * (self.mu_j ** 2 + self.sigma_j ** 2)
+
+    def to_heston(self) -> 'HestonModel':
+        """
+        Convert to Heston model (drop jumps).
+
+        Returns
+        -------
+        HestonModel
+            Equivalent Heston model without jumps
+        """
+        from backend.models.heston import HestonModel
+        return HestonModel(
+            v0=self.v0, kappa=self.kappa, theta=self.theta,
+            xi=self.xi, rho=self.rho
+        )
+
+    def __repr__(self) -> str:
+        return (
+            f"BatesModel(v0={self.v0}, kappa={self.kappa}, theta={self.theta}, "
+            f"xi={self.xi}, rho={self.rho}, lambda_j={self.lambda_j}, "
+            f"mu_j={self.mu_j}, sigma_j={self.sigma_j})"
+        )
+
 
 if __name__ == "__main__":
-    import time
-    import numpy as np
-
-    print("=" * 60)
-    print("Bates Unified Model Benchmark")
-    print("=" * 60)
-
-    # Test parameters (Heston + jumps)
-    v0, kappa, theta, xi, rho = 0.04, 2.0, 0.04, 0.3, -0.7
-    lambda_j, mu_j, sigma_j = 0.5, -0.1, 0.2  # Jump parameters
-    s0, k, t, r = 100.0, 100.0, 0.25, 0.05
+    print("=" * 50)
+    print("Bates Model Smoke Test")
+    print("=" * 50)
 
     # Create model
-    print("\n1. Creating BatesModel")
-    print("-" * 40)
-    model = BatesModel.from_params(
-        v0=v0, kappa=kappa, theta=theta, xi=xi, rho=rho,
-        lambda_j=lambda_j, mu_j=mu_j, sigma_j=sigma_j
+    model = BatesModel(
+        v0=0.04, kappa=2.0, theta=0.04, xi=0.3, rho=-0.7,
+        lambda_j=0.5, mu_j=-0.1, sigma_j=0.2
     )
-    print(f"Model: {model}")
-    print(f"Feller satisfied: {model.params.feller_satisfied}")
-    print(f"Jump intensity: {lambda_j} jumps/year")
-    print(f"Mean jump size: {mu_j} ({(np.exp(mu_j) - 1)*100:.1f}%)")
+    print(f"\nModel: {model}")
+    print(f"Name: {model.name}")
+    print(f"Supported engines: {model.supported_engines}")
 
-    # Test simulator
-    print("\n2. Simulator Test")
-    print("-" * 40)
-    simulator = model.create_simulator()
-    print(f"Simulator: {type(simulator).__name__}")
+    # Parameters
+    print(f"\n--- Parameters ---")
+    for k, v in model.get_parameters().items():
+        print(f"  {k}: {v}")
 
-    start = time.perf_counter()
-    result = simulator.simulate_paths(s0=s0, mu=0.08, t=1.0, n_paths=10000, n_steps=252)
-    elapsed = time.perf_counter() - start
-    print(f"Simulated 10,000 paths in {elapsed*1000:.2f} ms")
-    print(f"Final price mean: ${result.price_paths[:, -1].mean():.2f}")
-    print(f"Final price std: ${result.price_paths[:, -1].std():.2f}")
+    # Feller condition
+    print(f"\n--- Feller Condition ---")
+    print(f"Feller satisfied: {model.feller_satisfied}")
+    print(f"Feller ratio: {model.feller_ratio:.2f}")
 
-    # Test FFT pricer
-    print("\n3. FFT Pricer Test")
-    print("-" * 40)
-    pricer_fft = model.create_pricer(method=PricingCapability.FFT)
-    result_fft = pricer_fft.price(s0=s0, k=k, t=t, r=r)
-    print(f"FFT Call Price: ${result_fft.price:.4f}")
-    print(f"FFT Time: {result_fft.computation_time*1000:.2f} ms")
+    # Jump characteristics
+    print(f"\n--- Jump Characteristics ---")
+    print(f"Expected jumps/year: {model.expected_jumps_per_year()}")
+    print(f"Expected jump size: {model.expected_jump_size:.2%}")
+    print(f"Jump variance contribution: {model.jump_contribution_to_variance():.4f}")
 
-    # Monte Carlo pricer
-    print("\n4. Monte Carlo Pricer Test")
-    print("-" * 40)
-    pricer_mc = model.create_pricer(method=PricingCapability.MONTE_CARLO, n_paths=50000)
-    result_mc = pricer_mc.price(s0=s0, k=k, t=t, r=r, seed=42)
-    print(f"MC Call Price (50,000 paths): ${result_mc.price:.4f} +/- ${result_mc.std_error:.4f}")
-    print(f"MC Time: {result_mc.computation_time*1000:.1f} ms")
-    print(f"FFT vs MC difference: ${abs(result_fft.price - result_mc.price):.4f}")
-
-    # Characteristic function test
-    print("\n5. Characteristic Function Test")
-    print("-" * 40)
+    # Test characteristic function
+    print("\n--- Characteristic Function ---")
+    s0, t, r, q = 100.0, 0.5, 0.05, 0.02
     u = 1.0 + 0.5j
-    cf = model.characteristic_function(u, s0=s0, t=t, r=r)
-    print(f"CF(1+0.5i) = {cf:.6f}")
+    cf = model.characteristic_function(u, s0, t, r, q)
+    print(f"phi({u}) = {cf}")
+    print(f"|phi| = {abs(cf):.6f}")
 
-    # Compare Bates vs Heston (effect of jumps)
-    print("\n6. Jump Impact Analysis")
-    print("-" * 40)
-    from backend.models.heston import HestonModel
-    heston_model = HestonModel.from_params(v0=v0, kappa=kappa, theta=theta, xi=xi, rho=rho)
-    heston_pricer = heston_model.create_pricer()
-    heston_result = heston_pricer.price(s0=s0, k=k, t=t, r=r)
-    print(f"Heston Call Price: ${heston_result.price:.4f}")
-    print(f"Bates Call Price: ${result_fft.price:.4f}")
-    print(f"Jump premium: ${result_fft.price - heston_result.price:.4f}")
+    # Test SDE coefficients
+    print("\n--- SDE Coefficients ---")
+    drift = model.drift(s=100, v=0.04, t=0, r=0.05, q=0.02)
+    diff = model.diffusion(s=100, v=0.04, t=0)
+    print(f"Spot drift at S=100, V=0.04: {drift:.2f}")
+    print(f"Spot diffusion: {diff:.2f}")
 
-    print()
+    # Compare with Heston
+    print("\n--- Comparison with Heston ---")
+    heston = model.to_heston()
+    cf_heston = heston.characteristic_function(u, s0, t, r, q)
+    print(f"Bates CF: {abs(cf):.6f}")
+    print(f"Heston CF: {abs(cf_heston):.6f}")
+    print(f"Difference (jump effect): {abs(abs(cf) - abs(cf_heston)):.6f}")
+
+    # Test immutability
+    print("\n--- Immutability Test ---")
+    try:
+        model.lambda_j = 1.0  # type: ignore
+        print("ERROR: Mutation should have failed!")
+    except Exception as e:
+        print(f"Correctly prevented mutation: {type(e).__name__}")
+
+    # Test validation
+    print("\n--- Validation Test ---")
+    try:
+        bad_model = BatesModel(
+            v0=0.04, kappa=2.0, theta=0.04, xi=0.3, rho=-0.7,
+            lambda_j=-0.5, mu_j=-0.1, sigma_j=0.2
+        )
+        print("ERROR: Should have raised ValueError!")
+    except ValueError as e:
+        print(f"Correctly rejected invalid lambda_j: {e}")
+
+    print("\n" + "=" * 50)
+    print("Bates smoke test passed")
+    print("=" * 50)

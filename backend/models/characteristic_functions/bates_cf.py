@@ -9,7 +9,8 @@ This is the SINGLE implementation used by:
     - BatesPricer (FFT pricing)
     - BatesModel.characteristic_function() (calibration)
 
-Author: Derivatives Pricing Project
+Author: Thomas
+Created: 2025
 """
 
 import numpy as np

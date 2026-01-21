@@ -10,7 +10,8 @@ This is the SINGLE implementation used by:
 
 Uses the Gatheral (2006) formulation for numerical stability.
 
-Author: Derivatives Pricing Project
+Author: Thomas
+Created: 2025
 """
 
 import numpy as np

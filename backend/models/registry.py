@@ -17,7 +17,8 @@ Usage:
     # List available models
     print(registry.list_models())
 
-Author: Derivatives Pricing Project
+Author: Thomas
+Created: 2025
 """
 
 from typing import Dict, Type, Optional, List, Any, TYPE_CHECKING
@@ -26,7 +27,6 @@ from .base import BaseModel, PricingCapability
 
 if TYPE_CHECKING:
     from backend.simulation.base import BaseSimulator
-    from backend.option_pricing.base import BasePricer
 
 
 class ModelRegistry:

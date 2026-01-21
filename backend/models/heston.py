@@ -2,379 +2,401 @@
 Heston Model
 ============
 
-Unified Heston (1993) stochastic volatility model.
+Heston (1993) stochastic volatility model.
 
 Model:
-    dS = mu * S * dt + sqrt(V) * S * dW_S
+    dS = (r - q) * S * dt + sqrt(V) * S * dW_S
     dV = kappa * (theta - V) * dt + xi * sqrt(V) * dW_V
     Corr(dW_S, dW_V) = rho
 
-Author: Derivatives Pricing Project
+The Heston model captures the volatility smile through stochastic variance.
+The correlation parameter rho captures the leverage effect (typically negative
+for equities - stock drops -> volatility increases).
+
+Author: Thomas
+Created: 2025
 """
 
-from typing import Optional, List
-import sys
-from pathlib import Path
+from dataclasses import dataclass
+from typing import List, Dict, Any
+import numpy as np
 
-# Handle imports for both package and direct execution
-try:
-    from .base import BaseModel, PricingCapability
-    from .parameters.heston import HestonParams
-    from .characteristic_functions.heston_cf import (
-        heston_characteristic_function,
-        heston_cf_vectorized,
-    )
-except ImportError:
-    _project_root = Path(__file__).resolve().parents[2]
-    if str(_project_root) not in sys.path:
-        sys.path.insert(0, str(_project_root))
-    from backend.models.base import BaseModel, PricingCapability
-    from backend.models.parameters.heston import HestonParams
-    from backend.models.characteristic_functions.heston_cf import (
-        heston_characteristic_function,
-        heston_cf_vectorized,
-    )
-
-from backend.simulation.models.heston import HestonSimulator
-from backend.simulation.enums import DiscretizationScheme
+from backend.core.interfaces import Model
+from backend.core.result_types import PricingCapability
+from backend.models.characteristic_functions.heston_cf import (
+    heston_characteristic_function,
+    heston_cf_vectorized,
+)
 
 
-class HestonModel(BaseModel[HestonParams]):
+# =============================================================================
+# HESTON MODEL
+# =============================================================================
+
+@dataclass(frozen=True)
+class HestonModel(Model):
     """
     Heston (1993) Stochastic Volatility Model.
 
-    Single source of truth for Heston configuration.
-    Can create both simulators and pricers.
+    The most popular stochastic volatility model in practice.
+    Captures the volatility smile and term structure effects.
+
+    Model:
+        dS = (r - q) * S * dt + sqrt(V) * S * dW_S
+        dV = kappa * (theta - V) * dt + xi * sqrt(V) * dW_V
+        Corr(dW_S, dW_V) = rho
 
     Parameters
     ----------
-    params : HestonParams
-        Model parameters (v0, kappa, theta, xi, rho)
-
-    Example
-    -------
-    model = HestonModel.from_params(v0=0.04, kappa=2.0, theta=0.04, xi=0.3, rho=-0.7)
-    simulator = model.create_simulator(scheme="qe")
-    pricer = model.create_pricer()
-
-    # Same parameters used for both
-    result = simulator.simulate_paths(s0=100, mu=0.08, t=1.0, n_paths=10000, n_steps=252)
-    price = pricer.price(s0=100, k=105, t=1.0, r=0.05, option_type="call")
-    """
-
-    def __init__(self, params: HestonParams):
-        super().__init__(params)
-
-    @classmethod
-    def from_params(
-        cls,
-        v0: float,
-        kappa: float,
-        theta: float,
-        xi: float,
-        rho: float
-    ) -> "HestonModel":
-        """Create model from individual parameters."""
-        return cls(HestonParams(v0=v0, kappa=kappa, theta=theta, xi=xi, rho=rho))
-
-    @property
-    def model_name(self) -> str:
-        return "Heston Stochastic Volatility"
-
-    @property
-    def supported_pricing_methods(self) -> List[PricingCapability]:
-        return [PricingCapability.FFT, PricingCapability.MONTE_CARLO]
-
-    def create_simulator(
-        self,
-        scheme: str = "full_truncation",
-        **kwargs
-    ) -> HestonSimulator:
-        """
-        Create Heston simulator.
-
-        Parameters
-        ----------
-        scheme : str
-            Discretization scheme: 'euler', 'full_truncation', 'reflection', 'qe'
-
-        Returns
-        -------
-        HestonSimulator
-            Configured simulator
-        """
-        scheme_map = {
-            "euler": DiscretizationScheme.EULER,
-            "full_truncation": DiscretizationScheme.FULL_TRUNCATION,
-            "reflection": DiscretizationScheme.REFLECTION,
-            "qe": DiscretizationScheme.QE,
-        }
-
-        return HestonSimulator(
-            v0=self.params.v0,
-            kappa=self.params.kappa,
-            theta=self.params.theta,
-            xi=self.params.xi,
-            rho=self.params.rho,
-            scheme=scheme_map.get(scheme.lower(), DiscretizationScheme.FULL_TRUNCATION),
-        )
-
-    def create_pricer(
-        self,
-        method: Optional[PricingCapability] = None,
-        n_paths: int = 100000,
-        n_steps: int = 252,
-        **kwargs
-    ):
-        """
-        Create Heston pricer.
-
-        Parameters
-        ----------
-        method : PricingCapability
-            FFT (default, fast) or MONTE_CARLO (slower but more flexible)
-        n_paths : int
-            Number of MC paths (only for MONTE_CARLO method)
-        n_steps : int
-            Number of time steps (only for MONTE_CARLO method)
-        **kwargs
-            Additional pricer options (alpha, n_fft for FFT)
-
-        Returns
-        -------
-        BasePricer
-            Configured pricer (HestonPricer or HestonMCPricer)
-
-        Notes
-        -----
-        The risk-free rate is passed at pricing time, not construction time.
-
-        Examples
-        --------
-        # FFT pricer (fast, default)
-        pricer = model.create_pricer()  # or method=PricingCapability.FFT
-
-        # Monte Carlo pricer (flexible)
-        pricer = model.create_pricer(method=PricingCapability.MONTE_CARLO, n_paths=50000)
-        """
-        method = method or PricingCapability.FFT
-
-        if method == PricingCapability.FFT:
-            # Lazy import to avoid circular dependency
-            from backend.option_pricing.heston import HestonPricer
-            return HestonPricer(
-                v0=self.params.v0,
-                kappa=self.params.kappa,
-                theta=self.params.theta,
-                xi=self.params.xi,
-                rho=self.params.rho,
-                **kwargs
-            )
-        elif method == PricingCapability.MONTE_CARLO:
-            # Monte Carlo pricer using simulator
-            scheme = kwargs.pop("scheme", "full_truncation")
-            return HestonMCPricer(
-                model=self,
-                n_paths=n_paths,
-                n_steps=n_steps,
-                scheme=scheme,
-            )
-        else:
-            raise ValueError(f"Heston does not support {method}")
-
-    def characteristic_function(self, u, s0: float, t: float, r: float):
-        """
-        Heston characteristic function.
-
-        Uses shared implementation from characteristic_functions module.
-        """
-        return heston_characteristic_function(
-            u, s0, self.params.v0, t, r,
-            self.params.kappa, self.params.theta,
-            self.params.xi, self.params.rho
-        )
-
-    def characteristic_function_vectorized(self, u_arr, s0: float, t: float, r: float):
-        """Vectorized characteristic function for FFT."""
-        return heston_cf_vectorized(
-            u_arr, s0, self.params.v0, t, r,
-            self.params.kappa, self.params.theta,
-            self.params.xi, self.params.rho
-        )
-
-
-# =============================================================================
-# Heston Monte Carlo Pricer
-# =============================================================================
-
-class HestonMCPricer:
-    """
-    Heston option pricer using Monte Carlo simulation.
-
-    This pricer uses the HestonSimulator to generate paths under
-    the risk-neutral measure and prices options via discounted payoffs.
-
-    Parameters
-    ----------
-    model : HestonModel
-        The Heston model instance
-    n_paths : int
-        Number of Monte Carlo paths
-    n_steps : int
-        Number of time steps per path
-    scheme : str
-        Discretization scheme: 'euler', 'full_truncation', 'reflection', 'qe'
-
-    Notes
-    -----
-    Put-call parity (C - P = S - K*e^(-rT)) may not be exactly satisfied when
-    calls and puts are priced with different random seeds due to Monte Carlo
-    sampling error. To enforce parity, price the call and compute the put via:
-    put_price = call_price - s0 + k * exp(-r * t)
+    v0 : float
+        Initial variance (sigma^2), e.g., 0.04 for 20% initial vol
+    kappa : float
+        Mean reversion speed of variance (typical: 1-5)
+    theta : float
+        Long-run variance level (e.g., 0.04 for 20% long-run vol)
+    xi : float
+        Volatility of volatility (vol-of-vol)
+    rho : float
+        Correlation between price and variance (-1 to 1)
 
     Examples
     --------
-    model = HestonModel.from_params(v0=0.04, kappa=2.0, theta=0.04, xi=0.3, rho=-0.7)
-    pricer = model.create_pricer(method=PricingCapability.MONTE_CARLO, n_paths=50000, scheme="qe")
-    result = pricer.price(s0=100, k=100, t=0.25, r=0.05)
+    model = HestonModel(v0=0.04, kappa=2.0, theta=0.04, xi=0.3, rho=-0.7)
+
+    # Check Feller condition
+    model.feller_satisfied  # True if 2*kappa*theta > xi^2
+
+    # Characteristic function for FFT pricing
+    cf = model.characteristic_function(u=1+0.5j, s0=100, t=0.5, r=0.05)
+
+    # SDE coefficients for Monte Carlo
+    drift = model.drift(s=100, v=0.04, t=0, r=0.05, q=0)
+
+    Notes
+    -----
+    - Feller condition: 2*kappa*theta > xi^2 ensures V stays strictly positive
+    - Typical equity: rho < 0 (leverage effect: stock drops -> vol increases)
+    - kappa controls how fast variance reverts to theta
+    - xi controls the "volatility of volatility"
     """
 
-    def __init__(self, model: HestonModel, n_paths: int = 100000, n_steps: int = 252, scheme: str = "full_truncation"):
-        self._model = model
-        self._n_paths = n_paths
-        self._n_steps = n_steps
-        self._scheme = scheme
-        self._model_name = "Heston (Monte Carlo)"
+    v0: float
+    kappa: float
+    theta: float
+    xi: float
+    rho: float
+
+    def __post_init__(self):
+        """Validate parameters."""
+        if self.v0 < 0:
+            raise ValueError(f"v0 must be non-negative, got {self.v0}")
+        if self.kappa <= 0:
+            raise ValueError(f"kappa must be positive, got {self.kappa}")
+        if self.theta < 0:
+            raise ValueError(f"theta must be non-negative, got {self.theta}")
+        if self.xi <= 0:
+            raise ValueError(f"xi must be positive, got {self.xi}")
+        if not -1 <= self.rho <= 1:
+            raise ValueError(f"rho must be in [-1, 1], got {self.rho}")
 
     @property
-    def model_name(self) -> str:
-        return self._model_name
+    def name(self) -> str:
+        """Human-readable model name."""
+        return "Heston Stochastic Volatility"
 
-    def get_parameters(self):
-        return self._model.get_parameters()
+    @property
+    def supported_engines(self) -> List[PricingCapability]:
+        """Which pricing methods this model supports."""
+        return [
+            PricingCapability.FFT,
+            PricingCapability.PDE,
+            PricingCapability.MONTE_CARLO,
+        ]
 
-    def price(self, s0: float, k: float, t: float, r: float, option_type: str = "call", seed=None):
+    def get_parameters(self) -> Dict[str, Any]:
+        """Return model parameters as dictionary."""
+        return {
+            "v0": self.v0,
+            "kappa": self.kappa,
+            "theta": self.theta,
+            "xi": self.xi,
+            "rho": self.rho,
+        }
+
+    def characteristic_function(
+        self, u: complex, s0: float, t: float, r: float, q: float = 0.0
+    ) -> complex:
         """
-        Price a European option using Monte Carlo simulation.
+        Heston characteristic function phi(u) = E^Q[exp(i*u*ln(S_T))].
+
+        Uses the Gatheral (2006) formulation for numerical stability.
 
         Parameters
         ----------
+        u : complex
+            Fourier transform variable
         s0 : float
-            Spot price
-        k : float
-            Strike price
+            Initial spot price
         t : float
             Time to maturity
         r : float
             Risk-free rate
-        option_type : str
-            'call' or 'put'
-        seed : int, optional
-            Random seed
+        q : float
+            Dividend yield (adjusts forward price)
 
         Returns
         -------
-        PricingResult
-            Result with price, std_error, computation_time
+        complex
+            Value of characteristic function at u
         """
-        import time
-        import numpy as np
-        from backend.option_pricing.base import PricingResult, PricingMethod
-
-        start_time = time.perf_counter()
-
-        # Create simulator and simulate under risk-neutral measure (r instead of mu)
-        simulator = self._model.create_simulator(scheme=self._scheme)
-        terminals = simulator.simulate_terminal(
-            s0=s0, mu=r, t=t,
-            n_paths=self._n_paths, n_steps=self._n_steps, seed=seed
+        # Adjust for dividend yield via forward price
+        s0_adj = s0 * np.exp(-q * t)
+        return heston_characteristic_function(
+            u, s0_adj, self.v0, t, r,
+            self.kappa, self.theta, self.xi, self.rho
         )
 
-        # Compute payoffs
-        if option_type.lower() == "call":
-            payoffs = np.maximum(terminals - k, 0.0)
-        else:
-            payoffs = np.maximum(k - terminals, 0.0)
+    def characteristic_function_vectorized(
+        self, u_arr: np.ndarray, s0: float, t: float, r: float, q: float = 0.0
+    ) -> np.ndarray:
+        """
+        Vectorized characteristic function for FFT.
 
-        # Discounted expected value
-        discount = np.exp(-r * t)
-        price = discount * np.mean(payoffs)
-        std_error = discount * np.std(payoffs) / np.sqrt(self._n_paths)
+        Parameters
+        ----------
+        u_arr : np.ndarray
+            Array of frequency arguments
+        s0 : float
+            Initial spot price
+        t : float
+            Time to maturity
+        r : float
+            Risk-free rate
+        q : float
+            Dividend yield
 
-        computation_time = time.perf_counter() - start_time
-
-        return PricingResult(
-            price=price,
-            method=PricingMethod.MONTE_CARLO,
-            computation_time=computation_time,
-            std_error=std_error,
-            n_paths=self._n_paths,
-            parameters=self.get_parameters() | {"s0": s0, "k": k, "t": t, "r": r}
+        Returns
+        -------
+        np.ndarray
+            Array of characteristic function values
+        """
+        s0_adj = s0 * np.exp(-q * t)
+        return heston_cf_vectorized(
+            u_arr, s0_adj, self.v0, t, r,
+            self.kappa, self.theta, self.xi, self.rho
         )
 
+    def drift(self, s: float, v: float, t: float, r: float, q: float) -> float:
+        """
+        Drift coefficient for SDE discretization.
 
-# =============================================================================
-# Benchmark
-# =============================================================================
+        For Heston (spot process): drift = (r - q) * S
+
+        Parameters
+        ----------
+        s : float
+            Current spot price
+        v : float
+            Current variance
+        t : float
+            Current time
+        r : float
+            Risk-free rate
+        q : float
+            Dividend yield
+
+        Returns
+        -------
+        float
+            Drift value
+        """
+        return (r - q) * s
+
+    def diffusion(self, s: float, v: float, t: float) -> float:
+        """
+        Diffusion coefficient for SDE discretization.
+
+        For Heston (spot process): diffusion = sqrt(V) * S
+
+        Parameters
+        ----------
+        s : float
+            Current spot price
+        v : float
+            Current variance
+        t : float
+            Current time
+
+        Returns
+        -------
+        float
+            Diffusion value
+        """
+        return np.sqrt(max(v, 0.0)) * s
+
+    def variance_drift(self, v: float) -> float:
+        """
+        Drift of the variance process.
+
+        dV = kappa * (theta - V) * dt + ...
+
+        Parameters
+        ----------
+        v : float
+            Current variance
+
+        Returns
+        -------
+        float
+            Variance drift
+        """
+        return self.kappa * (self.theta - v)
+
+    def variance_diffusion(self, v: float) -> float:
+        """
+        Diffusion of the variance process.
+
+        dV = ... + xi * sqrt(V) * dW_V
+
+        Parameters
+        ----------
+        v : float
+            Current variance
+
+        Returns
+        -------
+        float
+            Variance diffusion
+        """
+        return self.xi * np.sqrt(max(v, 0.0))
+
+    @property
+    def feller_satisfied(self) -> bool:
+        """
+        Check if Feller condition 2*kappa*theta > xi^2 is satisfied.
+
+        When satisfied, variance process stays strictly positive.
+        If violated, variance can touch zero (need boundary handling).
+        """
+        return 2 * self.kappa * self.theta > self.xi ** 2
+
+    @property
+    def feller_ratio(self) -> float:
+        """
+        Feller ratio: 2*kappa*theta / xi^2.
+
+        > 1: Feller satisfied (variance stays positive)
+        < 1: Feller violated (variance can touch zero)
+        """
+        return (2 * self.kappa * self.theta) / (self.xi ** 2)
+
+    @property
+    def long_run_volatility(self) -> float:
+        """Long-run volatility sqrt(theta)."""
+        return np.sqrt(self.theta)
+
+    @property
+    def initial_volatility(self) -> float:
+        """Initial volatility sqrt(v0)."""
+        return np.sqrt(self.v0)
+
+    def mean_variance(self, t: float) -> float:
+        """
+        Expected variance at time t: E[V_t].
+
+        V_t converges to theta as t -> infinity.
+
+        Parameters
+        ----------
+        t : float
+            Time
+
+        Returns
+        -------
+        float
+            Expected variance
+        """
+        decay = np.exp(-self.kappa * t)
+        return self.theta + (self.v0 - self.theta) * decay
+
+    def __repr__(self) -> str:
+        return (
+            f"HestonModel(v0={self.v0}, kappa={self.kappa}, "
+            f"theta={self.theta}, xi={self.xi}, rho={self.rho})"
+        )
+
 
 if __name__ == "__main__":
-    import time
-    import numpy as np
-
-    print("=" * 60)
-    print("Heston Unified Model Benchmark")
-    print("=" * 60)
-
-    # Test parameters
-    v0, kappa, theta, xi, rho = 0.04, 2.0, 0.04, 0.3, -0.7
-    s0, k, t, r = 100.0, 100.0, 0.25, 0.05
+    print("=" * 50)
+    print("Heston Model Smoke Test")
+    print("=" * 50)
 
     # Create model
-    print("\n1. Creating HestonModel")
-    print("-" * 40)
-    model = HestonModel.from_params(v0=v0, kappa=kappa, theta=theta, xi=xi, rho=rho)
-    print(f"Model: {model}")
-    print(f"Feller satisfied: {model.params.feller_satisfied}")
+    model = HestonModel(v0=0.04, kappa=2.0, theta=0.04, xi=0.3, rho=-0.7)
+    print(f"\nModel: {model}")
+    print(f"Name: {model.name}")
+    print(f"Parameters: {model.get_parameters()}")
+    print(f"Supported engines: {model.supported_engines}")
 
-    # Test simulator
-    print("\n2. Simulator Test")
-    print("-" * 40)
-    simulator = model.create_simulator(scheme="qe")
-    print(f"Simulator: {type(simulator).__name__}")
+    # Feller condition
+    print(f"\n--- Feller Condition ---")
+    print(f"Feller satisfied: {model.feller_satisfied}")
+    print(f"Feller ratio: {model.feller_ratio:.2f}")
+    print(f"Initial vol: {model.initial_volatility:.1%}")
+    print(f"Long-run vol: {model.long_run_volatility:.1%}")
 
-    start = time.perf_counter()
-    result = simulator.simulate_paths(s0=s0, mu=0.08, t=1.0, n_paths=10000, n_steps=252)
-    elapsed = time.perf_counter() - start
-    print(f"Simulated 10,000 paths in {elapsed*1000:.2f} ms")
-    print(f"Final price mean: ${result.price_paths[:, -1].mean():.2f}")
-
-    # Test FFT pricer
-    print("\n3. FFT Pricer Test")
-    print("-" * 40)
-    pricer_fft = model.create_pricer(method=PricingCapability.FFT)
-    result_fft = pricer_fft.price(s0=s0, k=k, t=t, r=r)
-    print(f"FFT Call Price: ${result_fft.price:.4f}")
-    print(f"FFT Time: {result_fft.computation_time*1000:.2f} ms")
-
-    # Test Monte Carlo pricer
-    print("\n4. Monte Carlo Pricer Test")
-    print("-" * 40)
-    pricer_mc = model.create_pricer(method=PricingCapability.MONTE_CARLO, n_paths=50000)
-    result_mc = pricer_mc.price(s0=s0, k=k, t=t, r=r)
-    print(f"MC Call Price: ${result_mc.price:.4f} +/- ${result_mc.std_error:.4f}")
-    print(f"MC Time: {result_mc.computation_time*1000:.1f} ms")
-
-    # Compare methods
-    print("\n5. Method Comparison")
-    print("-" * 40)
-    print(f"FFT vs MC difference: ${abs(result_fft.price - result_mc.price):.4f}")
-    print(f"FFT is ~{result_mc.computation_time/result_fft.computation_time:.0f}x faster")
-
-    # Characteristic function test
-    print("\n6. Characteristic Function Test")
-    print("-" * 40)
+    # Test characteristic function
+    print("\n--- Characteristic Function ---")
+    s0, t, r, q = 100.0, 0.5, 0.05, 0.02
     u = 1.0 + 0.5j
-    cf = model.characteristic_function(u, s0=s0, t=t, r=r)
-    print(f"CF(1+0.5i) = {cf:.6f}")
+    cf = model.characteristic_function(u, s0, t, r, q)
+    print(f"phi({u}) = {cf}")
+    print(f"|phi| = {abs(cf):.6f}")
 
-    print()
+    # Test vectorized CF
+    u_arr = np.array([0.5, 1.0, 1.5]) + 0.5j
+    cf_vec = model.characteristic_function_vectorized(u_arr, s0, t, r, q)
+    print(f"Vectorized CF: {np.abs(cf_vec)}")
+
+    # Test SDE coefficients
+    print("\n--- SDE Coefficients ---")
+    v_current = 0.04
+    drift = model.drift(s=100, v=v_current, t=0, r=0.05, q=0.02)
+    diff = model.diffusion(s=100, v=v_current, t=0)
+    var_drift = model.variance_drift(v=v_current)
+    var_diff = model.variance_diffusion(v=v_current)
+    print(f"Spot drift at S=100, V=0.04: {drift:.2f}")
+    print(f"Spot diffusion at S=100, V=0.04: {diff:.2f}")
+    print(f"Variance drift at V=0.04: {var_drift:.4f}")
+    print(f"Variance diffusion at V=0.04: {var_diff:.4f}")
+
+    # Expected variance
+    print(f"\n--- Variance Evolution ---")
+    for t in [0.0, 0.5, 1.0, 5.0]:
+        print(f"E[V_{t}] = {model.mean_variance(t):.4f} (vol = {np.sqrt(model.mean_variance(t)):.1%})")
+
+    # Test immutability
+    print("\n--- Immutability Test ---")
+    try:
+        model.v0 = 0.09  # type: ignore
+        print("ERROR: Mutation should have failed!")
+    except Exception as e:
+        print(f"Correctly prevented mutation: {type(e).__name__}")
+
+    # Test validation
+    print("\n--- Validation Test ---")
+    try:
+        bad_model = HestonModel(v0=0.04, kappa=-1.0, theta=0.04, xi=0.3, rho=-0.7)
+        print("ERROR: Should have raised ValueError!")
+    except ValueError as e:
+        print(f"Correctly rejected invalid kappa: {e}")
+
+    try:
+        bad_model = HestonModel(v0=0.04, kappa=2.0, theta=0.04, xi=0.3, rho=-1.5)
+        print("ERROR: Should have raised ValueError!")
+    except ValueError as e:
+        print(f"Correctly rejected invalid rho: {e}")
+
+    print("\n" + "=" * 50)
+    print("Heston smoke test passed")
+    print("=" * 50)

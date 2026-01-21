@@ -21,7 +21,8 @@ References:
     Merton, R.C. (1976). "Option Pricing When Underlying Stock Returns
     Are Discontinuous." Journal of Financial Economics, 3(1-2), 125-144.
 
-Author: Derivatives Pricing Project
+Author: Thomas
+Created: 2025
 """
 
 import numpy as np

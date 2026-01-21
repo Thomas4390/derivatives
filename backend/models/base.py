@@ -4,27 +4,21 @@ Base Model Classes
 
 Abstract base class for unified financial models.
 
-A Model owns its parameters and can create both:
-    - Simulators (for path generation under P or Q measure)
-    - Pricers (for option valuation)
+Provides:
+- BaseModel: Abstract base class for financial models
+- PricingCapability: Enum for supported pricing methods
+- Measure: Enum for probability measure (P/Q)
 
-This is the single source of truth for model configuration.
-
-Author: Derivatives Pricing Project
+Author: Thomas
+Created: 2025
 """
 
 from abc import ABC, abstractmethod
 from enum import Enum
-from typing import Optional, List, Dict, Any, TYPE_CHECKING, TypeVar, Generic
-
-from .parameters.base import BaseParams
-
-# Type variable for parameter classes
-P = TypeVar('P', bound=BaseParams)
+from typing import Optional, List, Dict, Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from backend.simulation.base import BaseSimulator
-    from backend.option_pricing.base import BasePricer
 
 
 class Measure(Enum):
@@ -51,41 +45,14 @@ class PricingCapability(Enum):
     MONTE_CARLO = "monte_carlo"
 
 
-class BaseModel(ABC, Generic[P]):
+class BaseModel(ABC):
     """
-    Abstract base class for unified financial models.
+    Abstract base class for financial models.
 
-    A Model is the single source of truth for a financial model:
-        - Owns the model parameters (immutable)
-        - Can create simulators for path generation
-        - Can create pricers for option valuation
-        - Provides characteristic function if available
-
-    This design ensures consistency between simulation and pricing,
-    as both share the same underlying parameters.
-
-    Example
-    -------
-    model = HestonModel.from_params(v0=0.04, kappa=2.0, theta=0.04, xi=0.3, rho=-0.7)
-    simulator = model.create_simulator()
-    pricer = model.create_pricer()  # Uses same parameters
+    Defines the interface for financial models used in pricing.
+    Models should implement model_name, supported_pricing_methods,
+    create_simulator, create_pricer, and get_parameters.
     """
-
-    def __init__(self, params: P):
-        """
-        Initialize model with parameters.
-
-        Parameters
-        ----------
-        params : P
-            Immutable parameter object for this model
-        """
-        self._params: P = params
-
-    @property
-    def params(self) -> P:
-        """Immutable model parameters."""
-        return self._params
 
     @property
     @abstractmethod
@@ -99,29 +66,15 @@ class BaseModel(ABC, Generic[P]):
         """List of pricing methods this model supports."""
         pass
 
-    @classmethod
-    @abstractmethod
-    def from_params(cls, **kwargs) -> "BaseModel":
-        """
-        Create model from individual parameters.
-
-        This is a convenience method that creates the appropriate
-        parameter object and model instance.
-        """
-        pass
-
     @abstractmethod
     def create_simulator(self, **kwargs) -> "BaseSimulator":
         """
         Create a simulator for this model.
 
-        The simulator uses the model's parameters and can simulate
-        paths for price and (if applicable) volatility.
-
         Parameters
         ----------
         **kwargs
-            Simulator-specific options (e.g., discretization scheme)
+            Simulator-specific options
 
         Returns
         -------
@@ -135,22 +88,20 @@ class BaseModel(ABC, Generic[P]):
         self,
         method: Optional[PricingCapability] = None,
         **kwargs
-    ) -> "BasePricer":
+    ):
         """
         Create an option pricer for this model.
 
         Parameters
         ----------
         method : PricingCapability, optional
-            Preferred pricing method. If not specified, uses the
-            most efficient available method.
+            Preferred pricing method
         **kwargs
             Pricer-specific options
 
         Returns
         -------
-        BasePricer
-            Configured pricer instance
+        Configured pricer instance
         """
         pass
 
@@ -180,9 +131,10 @@ class BaseModel(ABC, Generic[P]):
             f"{self.model_name} does not have a characteristic function"
         )
 
+    @abstractmethod
     def get_parameters(self) -> Dict[str, Any]:
         """Return parameters as dictionary."""
-        return self._params.to_dict()
+        pass
 
     def __repr__(self) -> str:
-        return f"{self.__class__.__name__}({self._params})"
+        return f"{self.__class__.__name__}({self.get_parameters()})"

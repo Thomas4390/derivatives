@@ -2,321 +2,346 @@
 Merton Jump-Diffusion Model
 ===========================
 
-Unified Merton (1976) jump-diffusion model.
+Merton (1976) jump-diffusion model.
 
 Model:
-    dS = (mu - lambda*k) * S * dt + sigma * S * dW + (J - 1) * S * dN
+    dS = (r - q - lambda_j * k) * S * dt + sigma * S * dW + (J - 1) * S * dN
 
 Where:
-    - dN is Poisson with intensity lambda
+    - dN is a Poisson process with intensity lambda_j
     - J is lognormal: ln(J) ~ N(mu_j, sigma_j^2)
+    - k = E[J - 1] = exp(mu_j + 0.5*sigma_j^2) - 1
 
-Author: Derivatives Pricing Project
+The Merton model extends GBM with jumps, capturing fat tails and
+crash risk better than pure diffusion models.
+
+Author: Thomas
+Created: 2025
 """
 
-from typing import Optional, List
-import sys
-from pathlib import Path
+from dataclasses import dataclass
+from typing import List, Dict, Any
+import numpy as np
+from numba import njit
 
-# Handle imports for both package and direct execution
-try:
-    from .base import BaseModel, PricingCapability
-    from .parameters.merton import MertonParams
-except ImportError:
-    _project_root = Path(__file__).resolve().parents[2]
-    if str(_project_root) not in sys.path:
-        sys.path.insert(0, str(_project_root))
-    from backend.models.base import BaseModel, PricingCapability
-    from backend.models.parameters.merton import MertonParams
-
-try:
-    from backend.simulation.models.merton import MertonSimulator
-    from backend.option_pricing.garch import GARCHMCPricer
-except ImportError:
-    from backend.simulation.models.merton import MertonSimulator
-    from backend.option_pricing.garch import GARCHMCPricer
+from backend.core.interfaces import Model
+from backend.core.result_types import PricingCapability
+from backend.models.characteristic_functions.merton_cf import (
+    merton_characteristic_function,
+    merton_cf_vectorized,
+)
 
 
-class MertonModel(BaseModel[MertonParams]):
+# =============================================================================
+# MERTON MODEL
+# =============================================================================
+
+@dataclass(frozen=True)
+class MertonModel(Model):
     """
     Merton (1976) Jump-Diffusion Model.
 
-    Single source of truth for Merton configuration.
-    Combines GBM with Poisson-driven lognormal jumps.
+    Extends GBM with Poisson-driven lognormal jumps.
+    Captures crash risk and fat tails.
 
-    Parameters
-    ----------
-    params : MertonParams
-        Model parameters (sigma, lambda_j, mu_j, sigma_j)
+    Model:
+        dS = (r - q - lambda_j * k) * S * dt + sigma * S * dW + (J - 1) * S * dN
 
-    Example
-    -------
-    model = MertonModel.from_params(sigma=0.20, lambda_j=0.5, mu_j=-0.1, sigma_j=0.2)
-    simulator = model.create_simulator()
-    pricer = model.create_pricer(r=0.05)  # MC pricing
-    """
+    Diffusion Parameters
+    --------------------
+    sigma : float
+        Volatility (annualized), e.g., 0.20 for 20%
 
-    def __init__(self, params: MertonParams):
-        super().__init__(params)
-
-    @classmethod
-    def from_params(
-        cls,
-        sigma: float,
-        lambda_j: float,
-        mu_j: float,
-        sigma_j: float
-    ) -> "MertonModel":
-        """Create model from individual parameters."""
-        return cls(MertonParams(
-            sigma=sigma,
-            lambda_j=lambda_j,
-            mu_j=mu_j,
-            sigma_j=sigma_j
-        ))
-
-    @property
-    def model_name(self) -> str:
-        return "Merton Jump-Diffusion"
-
-    @property
-    def supported_pricing_methods(self) -> List[PricingCapability]:
-        return [PricingCapability.MONTE_CARLO]
-
-    def create_simulator(self, **kwargs) -> MertonSimulator:
-        """
-        Create Merton simulator.
-
-        Returns
-        -------
-        MertonSimulator
-            Configured simulator
-        """
-        return MertonSimulator(
-            sigma=self.params.sigma,
-            lambda_j=self.params.lambda_j,
-            mu_j=self.params.mu_j,
-            sigma_j=self.params.sigma_j,
-        )
-
-    def create_pricer(
-        self,
-        method: Optional[PricingCapability] = None,
-        n_paths: int = 100000,
-        n_steps: int = 252,
-        **kwargs
-    ):
-        """
-        Create Merton pricer (Monte Carlo).
-
-        Parameters
-        ----------
-        method : PricingCapability
-            Only MONTE_CARLO supported
-        n_paths : int
-            Number of MC paths
-        n_steps : int
-            Number of time steps
-
-        Returns
-        -------
-        MertonMCPricer
-            MC-based pricer using simulation
-
-        Notes
-        -----
-        The risk-free rate is passed at pricing time, not construction time.
-        """
-        method = method or PricingCapability.MONTE_CARLO
-
-        if method != PricingCapability.MONTE_CARLO:
-            raise ValueError(f"Merton only supports MONTE_CARLO pricing, got {method}")
-
-        return MertonMCPricer(
-            model=self,
-            n_paths=n_paths,
-            n_steps=n_steps,
-        )
-
-
-# =============================================================================
-# Merton Monte Carlo Pricer
-# =============================================================================
-
-class MertonMCPricer:
-    """
-    Merton option pricer using Monte Carlo simulation.
-
-    This pricer uses the MertonSimulator to generate paths under
-    the risk-neutral measure and prices options via discounted payoffs.
-
-    Parameters
-    ----------
-    model : MertonModel
-        The Merton model instance
-    n_paths : int
-        Number of Monte Carlo paths
-    n_steps : int
-        Number of time steps per path
-
-    Notes
-    -----
-    Put-call parity (C - P = S - K*e^(-rT)) may not be exactly satisfied when
-    calls and puts are priced with different random seeds due to Monte Carlo
-    sampling error. To enforce parity, price the call and compute the put via:
-    put_price = call_price - s0 + k * exp(-r * t)
+    Jump Parameters
+    ---------------
+    lambda_j : float
+        Jump intensity (expected number of jumps per year)
+    mu_j : float
+        Mean of log-jump size (e.g., -0.1 for 10% negative mean jump)
+    sigma_j : float
+        Volatility of log-jump size
 
     Examples
     --------
-    model = MertonModel.from_params(sigma=0.20, lambda_j=0.5, mu_j=-0.1, sigma_j=0.2)
-    pricer = model.create_pricer(n_paths=50000)
-    result = pricer.price(s0=100, k=100, t=0.25, r=0.05)
+    model = MertonModel(sigma=0.20, lambda_j=0.5, mu_j=-0.1, sigma_j=0.2)
+
+    # Expected jump size
+    model.expected_jump_size  # E[J - 1]
+
+    # Characteristic function for FFT pricing
+    cf = model.characteristic_function(u=1+0.5j, s0=100, t=0.5, r=0.05)
+
+    Notes
+    -----
+    - When lambda_j = 0, reduces to GBM
+    - Jumps add fat tails and negative skewness
+    - The Merton formula has a semi-closed form solution as a
+      weighted sum of Black-Scholes prices (but FFT is faster)
     """
 
-    def __init__(self, model: "MertonModel", n_paths: int = 100000, n_steps: int = 252):
-        self._model = model
-        self._n_paths = n_paths
-        self._n_steps = n_steps
-        self._model_name = "Merton (Monte Carlo)"
+    sigma: float
+    lambda_j: float
+    mu_j: float
+    sigma_j: float
+
+    def __post_init__(self):
+        """Validate parameters."""
+        if self.sigma <= 0:
+            raise ValueError(f"sigma must be positive, got {self.sigma}")
+        if self.lambda_j < 0:
+            raise ValueError(f"lambda_j must be non-negative, got {self.lambda_j}")
+        if self.sigma_j < 0:
+            raise ValueError(f"sigma_j must be non-negative, got {self.sigma_j}")
 
     @property
-    def model_name(self) -> str:
-        return self._model_name
+    def name(self) -> str:
+        """Human-readable model name."""
+        return "Merton Jump-Diffusion"
 
-    def get_parameters(self):
-        return self._model.get_parameters()
+    @property
+    def supported_engines(self) -> List[PricingCapability]:
+        """Which pricing methods this model supports."""
+        return [
+            PricingCapability.FFT,
+            PricingCapability.MONTE_CARLO,
+        ]
 
-    def price(self, s0: float, k: float, t: float, r: float, option_type: str = "call", seed=None):
+    def get_parameters(self) -> Dict[str, Any]:
+        """Return model parameters as dictionary."""
+        return {
+            "sigma": self.sigma,
+            "lambda_j": self.lambda_j,
+            "mu_j": self.mu_j,
+            "sigma_j": self.sigma_j,
+        }
+
+    def characteristic_function(
+        self, u: complex, s0: float, t: float, r: float, q: float = 0.0
+    ) -> complex:
         """
-        Price a European option using Monte Carlo simulation.
+        Merton characteristic function phi(u) = E^Q[exp(i*u*ln(S_T))].
 
         Parameters
         ----------
+        u : complex
+            Fourier transform variable
         s0 : float
-            Spot price
-        k : float
-            Strike price
+            Initial spot price
         t : float
             Time to maturity
         r : float
             Risk-free rate
-        option_type : str
-            'call' or 'put'
-        seed : int, optional
-            Random seed
+        q : float
+            Dividend yield
 
         Returns
         -------
-        PricingResult
-            Result with price, std_error, computation_time
+        complex
+            Value of characteristic function at u
         """
-        import time
-        import numpy as np
-        from backend.option_pricing.base import PricingResult, PricingMethod
-
-        start_time = time.perf_counter()
-
-        # Create simulator and simulate under risk-neutral measure (r instead of mu)
-        simulator = self._model.create_simulator()
-        terminals = simulator.simulate_terminal(
-            s0=s0, mu=r, t=t,
-            n_paths=self._n_paths, n_steps=self._n_steps, seed=seed
+        s0_adj = s0 * np.exp(-q * t)
+        return merton_characteristic_function(
+            u, s0_adj, t, r,
+            self.sigma, self.lambda_j, self.mu_j, self.sigma_j
         )
 
-        # Compute payoffs
-        if option_type.lower() == "call":
-            payoffs = np.maximum(terminals - k, 0.0)
-        else:
-            payoffs = np.maximum(k - terminals, 0.0)
-
-        # Discounted expected value
-        discount = np.exp(-r * t)
-        price = discount * np.mean(payoffs)
-        std_error = discount * np.std(payoffs) / np.sqrt(self._n_paths)
-
-        computation_time = time.perf_counter() - start_time
-
-        return PricingResult(
-            price=price,
-            method=PricingMethod.MONTE_CARLO,
-            computation_time=computation_time,
-            std_error=std_error,
-            n_paths=self._n_paths,
-            parameters=self.get_parameters() | {"s0": s0, "k": k, "t": t, "r": r}
+    def characteristic_function_vectorized(
+        self, u_arr: np.ndarray, s0: float, t: float, r: float, q: float = 0.0
+    ) -> np.ndarray:
+        """Vectorized characteristic function for FFT."""
+        s0_adj = s0 * np.exp(-q * t)
+        return merton_cf_vectorized(
+            u_arr, s0_adj, t, r,
+            self.sigma, self.lambda_j, self.mu_j, self.sigma_j
         )
 
+    def drift(self, s: float, v: float, t: float, r: float, q: float) -> float:
+        """
+        Drift coefficient for SDE discretization.
 
-# =============================================================================
-# Benchmark
-# =============================================================================
+        For Merton: drift = (r - q - lambda_j * k) * S
+        where k = E[J - 1] is the expected jump size.
+
+        Parameters
+        ----------
+        s : float
+            Current spot price
+        v : float
+            Current variance (unused)
+        t : float
+            Current time (unused)
+        r : float
+            Risk-free rate
+        q : float
+            Dividend yield
+
+        Returns
+        -------
+        float
+            Drift value
+        """
+        k = self.expected_jump_size
+        return (r - q - self.lambda_j * k) * s
+
+    def diffusion(self, s: float, v: float, t: float) -> float:
+        """
+        Diffusion coefficient for SDE discretization.
+
+        For Merton: diffusion = sigma * S
+
+        Parameters
+        ----------
+        s : float
+            Current spot price
+        v : float
+            Current variance (unused)
+        t : float
+            Current time (unused)
+
+        Returns
+        -------
+        float
+            Diffusion value
+        """
+        return self.sigma * s
+
+    @property
+    def expected_jump_size(self) -> float:
+        """
+        Expected relative jump size k = E[J - 1].
+
+        For lognormal J: k = exp(mu_j + 0.5*sigma_j^2) - 1
+        """
+        return np.exp(self.mu_j + 0.5 * self.sigma_j ** 2) - 1
+
+    @property
+    def expected_jump_return(self) -> float:
+        """Expected jump return as percentage."""
+        return self.expected_jump_size * 100
+
+    def expected_jumps_per_year(self) -> float:
+        """Expected number of jumps per year."""
+        return self.lambda_j
+
+    @property
+    def variance(self) -> float:
+        """Annualized variance sigma^2."""
+        return self.sigma ** 2
+
+    def total_variance(self, t: float = 1.0) -> float:
+        """
+        Total variance over period t, including jump contribution.
+
+        Var[ln(S_T/S_0)] = sigma^2 * t + lambda_j * t * (mu_j^2 + sigma_j^2)
+        """
+        diffusion_var = self.variance * t
+        jump_var = self.lambda_j * t * (self.mu_j ** 2 + self.sigma_j ** 2)
+        return diffusion_var + jump_var
+
+    def total_volatility(self, t: float = 1.0) -> float:
+        """Total annualized volatility including jumps."""
+        return np.sqrt(self.total_variance(t) / t)
+
+    def jump_contribution_to_variance(self) -> float:
+        """
+        Variance contribution from jumps (annualized).
+
+        For Merton: lambda_j * (mu_j^2 + sigma_j^2)
+        """
+        return self.lambda_j * (self.mu_j ** 2 + self.sigma_j ** 2)
+
+    def to_gbm(self) -> 'GBMModel':
+        """
+        Convert to GBM model (drop jumps).
+
+        Returns
+        -------
+        GBMModel
+            Equivalent GBM model without jumps
+        """
+        from backend.models.gbm import GBMModel
+        return GBMModel(sigma=self.sigma)
+
+    def __repr__(self) -> str:
+        return (
+            f"MertonModel(sigma={self.sigma}, lambda_j={self.lambda_j}, "
+            f"mu_j={self.mu_j}, sigma_j={self.sigma_j})"
+        )
+
 
 if __name__ == "__main__":
-    import time
-    import numpy as np
-
-    print("=" * 60)
-    print("Merton Jump-Diffusion Unified Model Benchmark")
-    print("=" * 60)
-
-    # Test parameters
-    sigma = 0.20
-    lambda_j, mu_j, sigma_j = 0.5, -0.1, 0.2  # Jump parameters
-    s0, k, t, r = 100.0, 100.0, 0.25, 0.05
+    print("=" * 50)
+    print("Merton Model Smoke Test")
+    print("=" * 50)
 
     # Create model
-    print("\n1. Creating MertonModel")
-    print("-" * 40)
-    model = MertonModel.from_params(
-        sigma=sigma, lambda_j=lambda_j, mu_j=mu_j, sigma_j=sigma_j
-    )
-    print(f"Model: {model}")
-    print(f"Parameters: {model.get_parameters()}")
-    print(f"Jump intensity: {lambda_j} jumps/year")
-    print(f"Mean jump size: {mu_j} ({(np.exp(mu_j) - 1)*100:.1f}%)")
+    model = MertonModel(sigma=0.20, lambda_j=0.5, mu_j=-0.1, sigma_j=0.2)
+    print(f"\nModel: {model}")
+    print(f"Name: {model.name}")
+    print(f"Supported engines: {model.supported_engines}")
 
-    # Test simulator
-    print("\n2. Simulator Test")
-    print("-" * 40)
-    simulator = model.create_simulator()
-    print(f"Simulator: {type(simulator).__name__}")
+    # Parameters
+    print(f"\n--- Parameters ---")
+    for k, v in model.get_parameters().items():
+        print(f"  {k}: {v}")
 
-    start = time.perf_counter()
-    result = simulator.simulate_paths(s0=s0, mu=0.08, t=1.0, n_paths=10000, n_steps=252)
-    elapsed = time.perf_counter() - start
-    print(f"Simulated 10,000 paths in {elapsed*1000:.2f} ms")
-    print(f"Final price mean: ${result.price_paths[:, -1].mean():.2f}")
-    print(f"Final price std: ${result.price_paths[:, -1].std():.2f}")
+    # Jump characteristics
+    print(f"\n--- Jump Characteristics ---")
+    print(f"Expected jumps/year: {model.expected_jumps_per_year()}")
+    print(f"Expected jump size: {model.expected_jump_size:.2%}")
+    print(f"Jump variance contribution: {model.jump_contribution_to_variance():.4f}")
 
-    # Test Monte Carlo pricer
-    print("\n3. Monte Carlo Pricer Test")
-    print("-" * 40)
-    pricer = model.create_pricer(n_paths=50000)
-    result_call = pricer.price(s0=s0, k=k, t=t, r=r, option_type="call", seed=42)
-    result_put = pricer.price(s0=s0, k=k, t=t, r=r, option_type="put", seed=42)
+    # Variance decomposition
+    print(f"\n--- Variance Decomposition ---")
+    print(f"Diffusion variance: {model.variance:.4f}")
+    print(f"Jump variance: {model.jump_contribution_to_variance():.4f}")
+    print(f"Total variance: {model.total_variance():.4f}")
+    print(f"Total volatility: {model.total_volatility():.1%}")
 
-    print(f"MC Call Price (50,000 paths): ${result_call.price:.4f} +/- ${result_call.std_error:.4f}")
-    print(f"MC Put Price: ${result_put.price:.4f} +/- ${result_put.std_error:.4f}")
-    print(f"MC Time (call): {result_call.computation_time*1000:.1f} ms")
+    # Test characteristic function
+    print("\n--- Characteristic Function ---")
+    s0, t, r, q = 100.0, 0.5, 0.05, 0.02
+    u = 1.0 + 0.5j
+    cf = model.characteristic_function(u, s0, t, r, q)
+    print(f"phi({u}) = {cf}")
+    print(f"|phi| = {abs(cf):.6f}")
 
-    # Compare Merton vs GBM (effect of jumps)
-    print("\n4. Jump Impact Analysis")
-    print("-" * 40)
-    from backend.models.gbm import GBMModel
-    gbm_model = GBMModel.from_params(sigma=sigma)
-    gbm_pricer = gbm_model.create_pricer()
-    gbm_call = gbm_pricer.price(s0=s0, k=k, t=t, r=r, option_type="call").price
+    # Test vectorized CF
+    u_arr = np.array([0.5, 1.0, 1.5]) + 0.5j
+    cf_vec = model.characteristic_function_vectorized(u_arr, s0, t, r, q)
+    print(f"Vectorized CF: {np.abs(cf_vec)}")
 
-    print(f"GBM Call Price (BS): ${gbm_call:.4f}")
-    print(f"Merton MC Call Price: ${result_call.price:.4f}")
-    print(f"Difference (jump impact): ${result_call.price - gbm_call:.4f}")
+    # Test SDE coefficients
+    print("\n--- SDE Coefficients ---")
+    drift = model.drift(s=100, v=0, t=0, r=0.05, q=0.02)
+    diff = model.diffusion(s=100, v=0, t=0)
+    print(f"Drift at S=100: {drift:.2f}")
+    print(f"Diffusion at S=100: {diff:.2f}")
 
-    # Put-call parity check for MC
-    print("\n5. Put-Call Parity Check (MC)")
-    print("-" * 40)
-    parity_lhs = result_call.price - result_put.price
-    parity_rhs = s0 - k * np.exp(-r * t)
-    print(f"C - P (MC) = ${parity_lhs:.4f}")
-    print(f"S - K*e^(-rT) = ${parity_rhs:.4f}")
-    print(f"Parity error: ${abs(parity_lhs - parity_rhs):.4f}")
+    # Compare with GBM
+    print("\n--- Comparison with GBM ---")
+    gbm = model.to_gbm()
+    cf_gbm = gbm.characteristic_function(u, s0, t, r, q)
+    print(f"Merton CF: {abs(cf):.6f}")
+    print(f"GBM CF: {abs(cf_gbm):.6f}")
+    print(f"Difference (jump effect): {abs(abs(cf) - abs(cf_gbm)):.6f}")
 
-    print()
+    # Test immutability
+    print("\n--- Immutability Test ---")
+    try:
+        model.sigma = 0.30  # type: ignore
+        print("ERROR: Mutation should have failed!")
+    except Exception as e:
+        print(f"Correctly prevented mutation: {type(e).__name__}")
+
+    # Test validation
+    print("\n--- Validation Test ---")
+    try:
+        bad_model = MertonModel(sigma=-0.1, lambda_j=0.5, mu_j=-0.1, sigma_j=0.2)
+        print("ERROR: Should have raised ValueError!")
+    except ValueError as e:
+        print(f"Correctly rejected invalid sigma: {e}")
+
+    print("\n" + "=" * 50)
+    print("Merton smoke test passed")
+    print("=" * 50)

@@ -11,7 +11,8 @@ used by both:
 
 All implementations are Numba-optimized for performance.
 
-Author: Derivatives Pricing Project
+Author: Thomas
+Created: 2025
 """
 
 from .heston_cf import (

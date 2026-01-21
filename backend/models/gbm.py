@@ -2,322 +2,306 @@
 GBM Model
 =========
 
-Unified Geometric Brownian Motion model.
+Geometric Brownian Motion (Black-Scholes) model.
 
 Model:
-    dS = mu * S * dt + sigma * S * dW
+    dS = (r - q) * S * dt + sigma * S * dW
 
-Author: Derivatives Pricing Project
+The most fundamental model in option pricing. Under risk-neutral measure,
+drift equals r - q (risk-free rate minus dividend yield).
+
+Author: Thomas
+Created: 2025
 """
 
-from typing import Optional, List
-import sys
-from pathlib import Path
+from dataclasses import dataclass
+from typing import List, Dict, Any
+import numpy as np
+from numba import njit
 
-# Handle imports for both package and direct execution
-try:
-    from .base import BaseModel, PricingCapability
-    from .parameters.gbm import GBMParams
-except ImportError:
-    _project_root = Path(__file__).resolve().parents[2]
-    if str(_project_root) not in sys.path:
-        sys.path.insert(0, str(_project_root))
-    from backend.models.base import BaseModel, PricingCapability
-    from backend.models.parameters.gbm import GBMParams
-
-try:
-    from backend.simulation.models.gbm import GBMSimulator
-    from backend.option_pricing.black_scholes import BlackScholesPricer
-except ImportError:
-    from backend.simulation.models.gbm import GBMSimulator
-    from backend.option_pricing.black_scholes import BlackScholesPricer
+from backend.core.interfaces import Model
+from backend.core.result_types import PricingCapability
 
 
-class GBMModel(BaseModel[GBMParams]):
+# =============================================================================
+# NUMBA KERNELS (Hot Path)
+# =============================================================================
+
+@njit(cache=True, fastmath=True)
+def _gbm_characteristic_function(
+    u: complex,
+    s0: float,
+    t: float,
+    r: float,
+    q: float,
+    sigma: float,
+) -> complex:
+    """
+    GBM characteristic function phi(u) = E^Q[exp(i*u*ln(S_T))].
+
+    For GBM under risk-neutral measure:
+        phi(u) = exp(i*u*(ln(s0) + (r - q - 0.5*sigma^2)*t) - 0.5*sigma^2*t*u^2)
+
+    Parameters
+    ----------
+    u : complex
+        Fourier transform variable
+    s0 : float
+        Initial spot price
+    t : float
+        Time to maturity
+    r : float
+        Risk-free rate
+    q : float
+        Dividend yield
+    sigma : float
+        Volatility
+
+    Returns
+    -------
+    complex
+        Characteristic function value
+    """
+    i = 1j
+    log_s0 = np.log(s0)
+    drift = r - q - 0.5 * sigma ** 2
+    variance = sigma ** 2 * t
+
+    return np.exp(
+        i * u * (log_s0 + drift * t) - 0.5 * variance * u ** 2
+    )
+
+
+@njit(cache=True, fastmath=True)
+def _gbm_drift(s: float, r: float, q: float) -> float:
+    """Risk-neutral drift: (r - q) * S."""
+    return (r - q) * s
+
+
+@njit(cache=True, fastmath=True)
+def _gbm_diffusion(s: float, sigma: float) -> float:
+    """Diffusion coefficient: sigma * S."""
+    return sigma * s
+
+
+# =============================================================================
+# GBM MODEL
+# =============================================================================
+
+@dataclass(frozen=True)
+class GBMModel(Model):
     """
     Geometric Brownian Motion (Black-Scholes) Model.
 
-    Single source of truth for GBM configuration.
-    Can create both simulators (for path generation) and
-    pricers (Black-Scholes analytical formulas).
+    The simplest and most widely used model for option pricing.
+    Assumes constant volatility and log-normal stock price distribution.
+
+    Model:
+        dS = (r - q) * S * dt + sigma * S * dW
 
     Parameters
     ----------
-    params : GBMParams
-        Model parameters (sigma)
-
-    Example
-    -------
-    model = GBMModel.from_params(sigma=0.20)
-    simulator = model.create_simulator()
-    pricer = model.create_pricer()
-
-    # Simulate paths
-    result = simulator.simulate_paths(s0=100, mu=0.08, t=1.0, n_paths=10000, n_steps=252)
-
-    # Price option
-    price = pricer.price(s0=100, k=105, t=1.0, r=0.05, option_type="call")
-    """
-
-    def __init__(self, params: GBMParams):
-        super().__init__(params)
-
-    @classmethod
-    def from_params(cls, sigma: float) -> "GBMModel":
-        """Create model from volatility."""
-        return cls(GBMParams(sigma=sigma))
-
-    @property
-    def model_name(self) -> str:
-        return "Geometric Brownian Motion"
-
-    @property
-    def supported_pricing_methods(self) -> List[PricingCapability]:
-        return [PricingCapability.ANALYTICAL, PricingCapability.MONTE_CARLO]
-
-    def create_simulator(self, **kwargs) -> GBMSimulator:
-        """
-        Create GBM simulator.
-
-        Parameters
-        ----------
-        **kwargs
-            Additional simulator options
-
-        Returns
-        -------
-        GBMSimulator
-            Configured simulator
-        """
-        return GBMSimulator(sigma=self.params.sigma)
-
-    def create_pricer(
-        self,
-        method: Optional[PricingCapability] = None,
-        n_paths: int = 100000,
-        n_steps: int = 252,
-        **kwargs
-    ):
-        """
-        Create GBM pricer.
-
-        Parameters
-        ----------
-        method : PricingCapability, optional
-            ANALYTICAL (default, Black-Scholes) or MONTE_CARLO
-        n_paths : int
-            Number of MC paths (only for MONTE_CARLO)
-        n_steps : int
-            Number of time steps (only for MONTE_CARLO)
-        **kwargs
-            Additional options
-
-        Returns
-        -------
-        BasePricer
-            BlackScholesPricer (analytical) or GBMMCPricer (Monte Carlo)
-
-        Notes
-        -----
-        The risk-free rate is passed at pricing time, not construction time.
-        """
-        method = method or PricingCapability.ANALYTICAL
-
-        if method == PricingCapability.ANALYTICAL:
-            return BlackScholesPricer(sigma=self.params.sigma)
-        elif method == PricingCapability.MONTE_CARLO:
-            return GBMMCPricer(
-                model=self,
-                n_paths=n_paths,
-                n_steps=n_steps,
-            )
-        else:
-            raise ValueError(f"GBM does not support {method}")
-
-
-# =============================================================================
-# GBM Monte Carlo Pricer
-# =============================================================================
-
-class GBMMCPricer:
-    """
-    GBM option pricer using Monte Carlo simulation.
-
-    This pricer uses the GBMSimulator to generate paths under
-    the risk-neutral measure and prices options via discounted payoffs.
-
-    Parameters
-    ----------
-    model : GBMModel
-        The GBM model instance
-    n_paths : int
-        Number of Monte Carlo paths
-    n_steps : int
-        Number of time steps per path
-
-    Notes
-    -----
-    Put-call parity (C - P = S - K*e^(-rT)) may not be exactly satisfied when
-    calls and puts are priced with different random seeds due to Monte Carlo
-    sampling error. To enforce parity, price the call and compute the put via:
-    put_price = call_price - s0 + k * exp(-r * t)
+    sigma : float
+        Volatility (annualized), e.g., 0.20 for 20%
 
     Examples
     --------
-    model = GBMModel.from_params(sigma=0.20)
-    pricer = model.create_pricer(method=PricingCapability.MONTE_CARLO, n_paths=50000)
-    result = pricer.price(s0=100, k=100, t=0.25, r=0.05)
+    model = GBMModel(sigma=0.20)
+
+    # Check supported engines
+    model.supported_engines  # [ANALYTICAL, FFT, MONTE_CARLO]
+
+    # Characteristic function for FFT pricing
+    cf = model.characteristic_function(u=1+0.5j, s0=100, t=0.5, r=0.05)
+
+    # SDE coefficients for Monte Carlo
+    drift = model.drift(s=100, v=0, t=0, r=0.05, q=0)
+    diff = model.diffusion(s=100, v=0, t=0)
     """
 
-    def __init__(self, model: GBMModel, n_paths: int = 100000, n_steps: int = 252):
-        self._model = model
-        self._n_paths = n_paths
-        self._n_steps = n_steps
-        self._model_name = "GBM (Monte Carlo)"
+    sigma: float
+
+    def __post_init__(self):
+        """Validate parameters."""
+        if self.sigma <= 0:
+            raise ValueError(f"sigma must be positive, got {self.sigma}")
 
     @property
-    def model_name(self) -> str:
-        return self._model_name
+    def name(self) -> str:
+        """Human-readable model name."""
+        return "Geometric Brownian Motion"
 
-    def get_parameters(self):
-        return self._model.get_parameters()
+    @property
+    def supported_engines(self) -> List[PricingCapability]:
+        """Which pricing methods this model supports."""
+        return [
+            PricingCapability.ANALYTICAL,
+            PricingCapability.FFT,
+            PricingCapability.MONTE_CARLO,
+        ]
 
-    def price(self, s0: float, k: float, t: float, r: float, option_type: str = "call", seed=None):
+    def get_parameters(self) -> Dict[str, Any]:
+        """Return model parameters as dictionary."""
+        return {"sigma": self.sigma}
+
+    def characteristic_function(
+        self, u: complex, s0: float, t: float, r: float, q: float = 0.0
+    ) -> complex:
         """
-        Price a European option using Monte Carlo simulation.
+        Characteristic function phi(u) = E^Q[exp(i*u*ln(S_T))].
 
         Parameters
         ----------
+        u : complex
+            Fourier transform variable
         s0 : float
-            Spot price
-        k : float
-            Strike price
+            Initial spot price
         t : float
             Time to maturity
         r : float
             Risk-free rate
-        option_type : str
-            'call' or 'put'
-        seed : int, optional
-            Random seed
+        q : float
+            Dividend yield
 
         Returns
         -------
-        PricingResult
-            Result with price, std_error, computation_time
+        complex
+            Value of characteristic function at u
         """
-        import time
-        import numpy as np
-        from backend.option_pricing.base import PricingResult, PricingMethod
+        return _gbm_characteristic_function(u, s0, t, r, q, self.sigma)
 
-        start_time = time.perf_counter()
+    def characteristic_function_vectorized(
+        self, u_arr: np.ndarray, s0: float, t: float, r: float, q: float = 0.0
+    ) -> np.ndarray:
+        """
+        Vectorized characteristic function for FFT pricing.
 
-        # Create simulator and simulate under risk-neutral measure (r instead of mu)
-        simulator = self._model.create_simulator()
-        terminals = simulator.simulate_terminal(
-            s0=s0, mu=r, t=t,
-            n_paths=self._n_paths, n_steps=self._n_steps, seed=seed
+        Parameters
+        ----------
+        u_arr : np.ndarray
+            Array of Fourier transform variables (complex)
+        s0 : float
+            Initial spot price
+        t : float
+            Time to maturity
+        r : float
+            Risk-free rate
+        q : float
+            Dividend yield
+
+        Returns
+        -------
+        np.ndarray
+            Array of characteristic function values
+        """
+        log_s0 = np.log(s0)
+        drift = r - q - 0.5 * self.sigma ** 2
+        variance = self.sigma ** 2 * t
+
+        return np.exp(
+            1j * u_arr * (log_s0 + drift * t) - 0.5 * variance * u_arr ** 2
         )
 
-        # Compute payoffs
-        if option_type.lower() == "call":
-            payoffs = np.maximum(terminals - k, 0.0)
-        else:
-            payoffs = np.maximum(k - terminals, 0.0)
+    def drift(self, s: float, v: float, t: float, r: float, q: float) -> float:
+        """
+        Drift coefficient for SDE discretization.
 
-        # Discounted expected value
-        discount = np.exp(-r * t)
-        price = discount * np.mean(payoffs)
-        std_error = discount * np.std(payoffs) / np.sqrt(self._n_paths)
+        For GBM: drift = (r - q) * S
 
-        computation_time = time.perf_counter() - start_time
+        Parameters
+        ----------
+        s : float
+            Current spot price
+        v : float
+            Current variance (unused in GBM)
+        t : float
+            Current time (unused in GBM)
+        r : float
+            Risk-free rate
+        q : float
+            Dividend yield
 
-        return PricingResult(
-            price=price,
-            method=PricingMethod.MONTE_CARLO,
-            computation_time=computation_time,
-            std_error=std_error,
-            n_paths=self._n_paths,
-            parameters=self.get_parameters() | {"s0": s0, "k": k, "t": t, "r": r}
-        )
+        Returns
+        -------
+        float
+            Drift value
+        """
+        return _gbm_drift(s, r, q)
 
+    def diffusion(self, s: float, v: float, t: float) -> float:
+        """
+        Diffusion coefficient for SDE discretization.
 
-# =============================================================================
-# Benchmark
-# =============================================================================
+        For GBM: diffusion = sigma * S
+
+        Parameters
+        ----------
+        s : float
+            Current spot price
+        v : float
+            Current variance (unused in GBM)
+        t : float
+            Current time (unused in GBM)
+
+        Returns
+        -------
+        float
+            Diffusion value
+        """
+        return _gbm_diffusion(s, self.sigma)
+
+    @property
+    def variance(self) -> float:
+        """Annualized variance sigma^2."""
+        return self.sigma ** 2
+
+    def __repr__(self) -> str:
+        return f"GBMModel(sigma={self.sigma})"
+
 
 if __name__ == "__main__":
-    import time
-    import numpy as np
-
-    print("=" * 60)
-    print("GBM Unified Model Benchmark")
-    print("=" * 60)
-
-    # Test parameters
-    sigma = 0.20
-    s0, k, t, r = 100.0, 100.0, 0.25, 0.05
+    print("=" * 50)
+    print("GBM Model Smoke Test")
+    print("=" * 50)
 
     # Create model
-    print("\n1. Creating GBMModel")
-    print("-" * 40)
-    model = GBMModel.from_params(sigma=sigma)
-    print(f"Model: {model}")
+    model = GBMModel(sigma=0.20)
+    print(f"\nModel: {model}")
+    print(f"Name: {model.name}")
     print(f"Parameters: {model.get_parameters()}")
+    print(f"Supported engines: {model.supported_engines}")
 
-    # Test simulator
-    print("\n2. Simulator Test")
-    print("-" * 40)
-    simulator = model.create_simulator()
-    print(f"Simulator: {type(simulator).__name__}")
+    # Test characteristic function
+    print("\n--- Characteristic Function ---")
+    s0, t, r, q = 100.0, 0.5, 0.05, 0.02
+    u = 1.0 + 0.5j
+    cf = model.characteristic_function(u, s0, t, r, q)
+    print(f"phi({u}) = {cf}")
+    print(f"|phi| = {abs(cf):.6f}")
 
-    start = time.perf_counter()
-    result = simulator.simulate_paths(s0=s0, mu=0.08, t=1.0, n_paths=10000, n_steps=252)
-    elapsed = time.perf_counter() - start
-    print(f"Simulated 10,000 paths in {elapsed*1000:.2f} ms")
-    print(f"Final price mean: ${result.price_paths[:, -1].mean():.2f}")
-    print(f"Final price std: ${result.price_paths[:, -1].std():.2f}")
+    # Test SDE coefficients
+    print("\n--- SDE Coefficients ---")
+    drift = model.drift(s=100, v=0, t=0, r=0.05, q=0.02)
+    diff = model.diffusion(s=100, v=0, t=0)
+    print(f"Drift at S=100: {drift:.2f}")
+    print(f"Diffusion at S=100: {diff:.2f}")
 
-    # Test Black-Scholes pricer
-    print("\n3. Black-Scholes Pricer Test")
-    print("-" * 40)
-    pricer = model.create_pricer()
+    # Test immutability
+    print("\n--- Immutability Test ---")
+    try:
+        model.sigma = 0.30  # type: ignore
+        print("ERROR: Mutation should have failed!")
+    except Exception as e:
+        print(f"Correctly prevented mutation: {type(e).__name__}")
 
-    start = time.perf_counter()
-    call_result = pricer.price(s0=s0, k=k, t=t, r=r, option_type="call")
-    put_result = pricer.price(s0=s0, k=k, t=t, r=r, option_type="put")
-    elapsed = time.perf_counter() - start
+    # Test validation
+    print("\n--- Validation Test ---")
+    try:
+        bad_model = GBMModel(sigma=-0.1)
+        print("ERROR: Should have raised ValueError!")
+    except ValueError as e:
+        print(f"Correctly rejected invalid params: {e}")
 
-    call_price = call_result.price
-    put_price = put_result.price
-    print(f"Call Price: ${call_price:.4f}")
-    print(f"Put Price: ${put_price:.4f}")
-    print(f"Computation Time: {elapsed*1000:.4f} ms")
-    print(f"Greeks (call): delta={call_result.delta:.4f}, gamma={call_result.gamma:.4f}, vega={call_result.vega:.4f}")
-
-    # Verify put-call parity
-    print("\n4. Put-Call Parity Check")
-    print("-" * 40)
-    parity_lhs = call_price - put_price
-    parity_rhs = s0 - k * np.exp(-r * t)
-    print(f"C - P = ${parity_lhs:.4f}")
-    print(f"S - K*e^(-rT) = ${parity_rhs:.4f}")
-    print(f"Difference: ${abs(parity_lhs - parity_rhs):.8f}")
-
-    # Monte Carlo pricer
-    print("\n5. Monte Carlo Pricer Test")
-    print("-" * 40)
-    pricer_mc = model.create_pricer(method=PricingCapability.MONTE_CARLO, n_paths=100000)
-    result_mc = pricer_mc.price(s0=s0, k=k, t=t, r=r)
-    print(f"MC Call Price (100,000 paths): ${result_mc.price:.4f} +/- ${result_mc.std_error:.4f}")
-    print(f"MC Time: {result_mc.computation_time*1000:.1f} ms")
-
-    # Method comparison
-    print("\n6. Method Comparison")
-    print("-" * 40)
-    print(f"Black-Scholes (analytical): ${call_price:.4f}")
-    print(f"Monte Carlo (simulated):    ${result_mc.price:.4f}")
-    print(f"Difference: ${abs(call_price - result_mc.price):.4f}")
-    print(f"BS is ~{result_mc.computation_time/elapsed:.0f}x faster")
-
-    print()
+    print("\n" + "=" * 50)
+    print("GBM smoke test passed")
+    print("=" * 50)

@@ -9,83 +9,135 @@ Models:
     NGARCH:       sigma^2_t = omega + alpha * sigma^2_{t-1} * (z_{t-1} - theta)^2 + beta * sigma^2_{t-1}
     GJR-GARCH:    sigma^2_t = omega + (alpha + gamma * I_{t-1}) * sigma^2_{t-1} * z^2_{t-1} + beta * sigma^2_{t-1}
 
-Author: Derivatives Pricing Project
+Used with specialized MC pricing (LRNVR - Locally Risk-Neutral Valuation Relationship).
+
+Author: Thomas
+Created: 2025
 """
 
-from typing import Optional, List, Union
-import sys
-from pathlib import Path
+from dataclasses import dataclass
+from typing import List, Dict, Any
+import numpy as np
 
-# Handle imports for both package and direct execution
-try:
-    from .base import BaseModel, PricingCapability
-    from .parameters.garch import GARCHParams, NGARCHParams, GJRGARCHParams
-except ImportError:
-    _project_root = Path(__file__).resolve().parents[2]
-    if str(_project_root) not in sys.path:
-        sys.path.insert(0, str(_project_root))
-    from backend.models.base import BaseModel, PricingCapability
-    from backend.models.parameters.garch import GARCHParams, NGARCHParams, GJRGARCHParams
-
-try:
-    from backend.simulation.models.garch import GARCHSimulator
-    from backend.simulation.models.ngarch import NGARCHSimulator
-    from backend.simulation.models.gjr_garch import GJRGARCHSimulator
-    from backend.option_pricing.garch import GARCHMCPricer, GARCHType
-except ImportError:
-    from backend.simulation.models.garch import GARCHSimulator
-    from backend.simulation.models.ngarch import NGARCHSimulator
-    from backend.simulation.models.gjr_garch import GJRGARCHSimulator
-    from backend.option_pricing.garch import GARCHMCPricer, GARCHType
+from backend.core.result_types import PricingCapability
+from backend.simulation.models.garch import GARCHSimulator
+from backend.simulation.models.ngarch import NGARCHSimulator
+from backend.simulation.models.gjr_garch import GJRGARCHSimulator
+from backend.engines.monte_carlo.garch_pricer import GARCHMCPricer, GARCHType
 
 
-class GARCHModel(BaseModel[GARCHParams]):
+# =============================================================================
+# GARCH(1,1) MODEL
+# =============================================================================
+
+@dataclass(frozen=True)
+class GARCHModel:
     """
     GARCH(1,1) Model.
 
-    Variance follows: sigma^2_t = omega + alpha * sigma^2_{t-1} * z^2_{t-1} + beta * sigma^2_{t-1}
+    Variance dynamics:
+        sigma^2_t = omega + alpha * sigma^2_{t-1} * z^2_{t-1} + beta * sigma^2_{t-1}
 
-    Example
-    -------
-    model = GARCHModel.from_params(sigma0=0.20, omega=0.000002, alpha=0.05, beta=0.90)
+    Parameters
+    ----------
+    sigma0 : float
+        Initial volatility (annualized), e.g., 0.20 for 20%
+    omega : float
+        Constant term in variance equation (omega > 0)
+    alpha : float
+        ARCH coefficient - reaction to past shocks (alpha >= 0)
+    beta : float
+        GARCH coefficient - persistence (beta >= 0)
+
+    Notes
+    -----
+    - Stationarity requires: alpha + beta < 1
+    - Long-run variance: omega / (1 - alpha - beta)
+    - Typical values: alpha ~ 0.05-0.10, beta ~ 0.85-0.95
+
+    Examples
+    --------
+    model = GARCHModel(sigma0=0.20, omega=0.000002, alpha=0.05, beta=0.90)
     simulator = model.create_simulator()
-    pricer = model.create_pricer(r=0.05)
+    pricer = model.create_pricer()
+    price = pricer.price(s0=100, k=100, t=0.25, r=0.05)
     """
 
-    def __init__(self, params: GARCHParams):
-        super().__init__(params)
+    sigma0: float
+    omega: float
+    alpha: float
+    beta: float
 
-    @classmethod
-    def from_params(
-        cls,
-        sigma0: float,
-        omega: float,
-        alpha: float,
-        beta: float
-    ) -> "GARCHModel":
-        """Create model from individual parameters."""
-        return cls(GARCHParams(sigma0=sigma0, omega=omega, alpha=alpha, beta=beta))
+    def __post_init__(self):
+        """Validate parameters."""
+        if self.sigma0 <= 0:
+            raise ValueError(f"sigma0 must be positive, got {self.sigma0}")
+        if self.omega <= 0:
+            raise ValueError(f"omega must be positive, got {self.omega}")
+        if self.alpha < 0:
+            raise ValueError(f"alpha must be non-negative, got {self.alpha}")
+        if self.beta < 0:
+            raise ValueError(f"beta must be non-negative, got {self.beta}")
+
+        persistence = self.alpha + self.beta
+        if persistence >= 1:
+            raise ValueError(
+                f"Process is not stationary: alpha + beta = {persistence:.4f} >= 1. "
+                f"Reduce alpha or beta."
+            )
 
     @property
-    def model_name(self) -> str:
+    def name(self) -> str:
+        """Human-readable model name."""
         return "GARCH(1,1)"
 
     @property
-    def supported_pricing_methods(self) -> List[PricingCapability]:
+    def supported_engines(self) -> List[PricingCapability]:
+        """GARCH only supports Monte Carlo pricing."""
         return [PricingCapability.MONTE_CARLO]
+
+    def get_parameters(self) -> Dict[str, Any]:
+        """Return model parameters as dictionary."""
+        return {
+            "sigma0": self.sigma0,
+            "omega": self.omega,
+            "alpha": self.alpha,
+            "beta": self.beta,
+        }
+
+    @property
+    def persistence(self) -> float:
+        """Returns alpha + beta, the persistence of shocks."""
+        return self.alpha + self.beta
+
+    @property
+    def long_run_variance(self) -> float:
+        """Returns omega / (1 - alpha - beta)."""
+        return self.omega / (1 - self.persistence)
+
+    @property
+    def long_run_volatility(self) -> float:
+        """Returns sqrt of long-run variance."""
+        return np.sqrt(self.long_run_variance)
+
+    @property
+    def half_life(self) -> float:
+        """Half-life of variance shocks in time steps."""
+        if self.persistence <= 0 or self.persistence >= 1:
+            return np.inf
+        return np.log(2) / (-np.log(self.persistence))
 
     def create_simulator(self, **kwargs) -> GARCHSimulator:
         """Create GARCH simulator."""
         return GARCHSimulator(
-            sigma0=self.params.sigma0,
-            omega=self.params.omega,
-            alpha=self.params.alpha,
-            beta=self.params.beta,
+            sigma0=self.sigma0,
+            omega=self.omega,
+            alpha=self.alpha,
+            beta=self.beta,
         )
 
     def create_pricer(
         self,
-        method: Optional[PricingCapability] = None,
         n_paths: int = 100000,
         n_steps: int = 252,
         **kwargs
@@ -95,8 +147,6 @@ class GARCHModel(BaseModel[GARCHParams]):
 
         Parameters
         ----------
-        method : PricingCapability
-            Only MONTE_CARLO supported
         n_paths : int
             Number of MC paths
         n_steps : int
@@ -111,178 +161,310 @@ class GARCHModel(BaseModel[GARCHParams]):
         -----
         The risk-free rate is passed at pricing time, not construction time.
         """
-        method = method or PricingCapability.MONTE_CARLO
-
-        if method != PricingCapability.MONTE_CARLO:
-            raise ValueError(f"GARCH only supports MONTE_CARLO pricing, got {method}")
-
         return GARCHMCPricer(
             garch_type=GARCHType.GARCH,
-            sigma0=self.params.sigma0,
-            omega=self.params.omega,
-            alpha=self.params.alpha,
-            beta=self.params.beta,
+            sigma0=self.sigma0,
+            omega=self.omega,
+            alpha=self.alpha,
+            beta=self.beta,
             n_paths=n_paths,
             n_steps=n_steps,
         )
 
+    def __repr__(self) -> str:
+        return (
+            f"GARCHModel(sigma0={self.sigma0}, omega={self.omega}, "
+            f"alpha={self.alpha}, beta={self.beta})"
+        )
 
-class NGARCHModel(BaseModel[NGARCHParams]):
+
+# =============================================================================
+# NGARCH MODEL
+# =============================================================================
+
+@dataclass(frozen=True)
+class NGARCHModel:
     """
     NGARCH (Nonlinear Asymmetric GARCH) Model.
 
-    Variance follows: sigma^2_t = omega + alpha * sigma^2_{t-1} * (z_{t-1} - theta)^2 + beta * sigma^2_{t-1}
+    Variance dynamics:
+        sigma^2_t = omega + alpha * sigma^2_{t-1} * (z_{t-1} - theta)^2 + beta * sigma^2_{t-1}
 
-    Example
-    -------
-    model = NGARCHModel.from_params(sigma0=0.20, omega=0.000002, alpha=0.05, beta=0.90, theta=0.5)
+    Parameters
+    ----------
+    sigma0 : float
+        Initial volatility
+    omega : float
+        Constant term
+    alpha : float
+        ARCH coefficient
+    beta : float
+        GARCH coefficient
+    theta : float
+        Leverage parameter (theta > 0 for leverage effect)
+
+    Notes
+    -----
+    - Stationarity requires: alpha * (1 + theta^2) + beta < 1
+    - theta > 0: Bad news increases volatility more than good news
+    - theta = 0: Reduces to GARCH(1,1)
+
+    Examples
+    --------
+    model = NGARCHModel(sigma0=0.20, omega=0.000002, alpha=0.05, beta=0.90, theta=0.5)
     simulator = model.create_simulator()
-    pricer = model.create_pricer(r=0.05)
+    pricer = model.create_pricer()
     """
 
-    def __init__(self, params: NGARCHParams):
-        super().__init__(params)
+    sigma0: float
+    omega: float
+    alpha: float
+    beta: float
+    theta: float
 
-    @classmethod
-    def from_params(
-        cls,
-        sigma0: float,
-        omega: float,
-        alpha: float,
-        beta: float,
-        theta: float
-    ) -> "NGARCHModel":
-        """Create model from individual parameters."""
-        return cls(NGARCHParams(
-            sigma0=sigma0, omega=omega, alpha=alpha, beta=beta, theta=theta
-        ))
+    def __post_init__(self):
+        """Validate parameters."""
+        if self.sigma0 <= 0:
+            raise ValueError(f"sigma0 must be positive, got {self.sigma0}")
+        if self.omega <= 0:
+            raise ValueError(f"omega must be positive, got {self.omega}")
+        if self.alpha < 0:
+            raise ValueError(f"alpha must be non-negative, got {self.alpha}")
+        if self.beta < 0:
+            raise ValueError(f"beta must be non-negative, got {self.beta}")
+
+        persistence = self.alpha * (1 + self.theta ** 2) + self.beta
+        if persistence >= 1:
+            raise ValueError(
+                f"Process is not stationary: alpha*(1+theta^2) + beta = {persistence:.4f} >= 1. "
+                f"Reduce alpha, beta, or theta."
+            )
 
     @property
-    def model_name(self) -> str:
+    def name(self) -> str:
+        """Human-readable model name."""
         return "NGARCH (Nonlinear Asymmetric)"
 
     @property
-    def supported_pricing_methods(self) -> List[PricingCapability]:
+    def supported_engines(self) -> List[PricingCapability]:
+        """NGARCH only supports Monte Carlo pricing."""
         return [PricingCapability.MONTE_CARLO]
+
+    def get_parameters(self) -> Dict[str, Any]:
+        """Return model parameters as dictionary."""
+        return {
+            "sigma0": self.sigma0,
+            "omega": self.omega,
+            "alpha": self.alpha,
+            "beta": self.beta,
+            "theta": self.theta,
+        }
+
+    @property
+    def persistence(self) -> float:
+        """Returns alpha * (1 + theta^2) + beta."""
+        return self.alpha * (1 + self.theta ** 2) + self.beta
+
+    @property
+    def long_run_variance(self) -> float:
+        """Returns omega / (1 - persistence)."""
+        return self.omega / (1 - self.persistence)
+
+    @property
+    def long_run_volatility(self) -> float:
+        """Returns sqrt of long-run variance."""
+        return np.sqrt(self.long_run_variance)
 
     def create_simulator(self, **kwargs) -> NGARCHSimulator:
         """Create NGARCH simulator."""
         return NGARCHSimulator(
-            sigma0=self.params.sigma0,
-            omega=self.params.omega,
-            alpha=self.params.alpha,
-            beta=self.params.beta,
-            theta=self.params.theta,
+            sigma0=self.sigma0,
+            omega=self.omega,
+            alpha=self.alpha,
+            beta=self.beta,
+            theta=self.theta,
         )
 
     def create_pricer(
         self,
-        method: Optional[PricingCapability] = None,
         n_paths: int = 100000,
         n_steps: int = 252,
         **kwargs
     ) -> GARCHMCPricer:
         """Create NGARCH pricer (Monte Carlo)."""
-        method = method or PricingCapability.MONTE_CARLO
-
-        if method != PricingCapability.MONTE_CARLO:
-            raise ValueError(f"NGARCH only supports MONTE_CARLO pricing, got {method}")
-
         return GARCHMCPricer(
             garch_type=GARCHType.NGARCH,
-            sigma0=self.params.sigma0,
-            omega=self.params.omega,
-            alpha=self.params.alpha,
-            beta=self.params.beta,
-            theta=self.params.theta,
+            sigma0=self.sigma0,
+            omega=self.omega,
+            alpha=self.alpha,
+            beta=self.beta,
+            theta=self.theta,
             n_paths=n_paths,
             n_steps=n_steps,
         )
 
+    def __repr__(self) -> str:
+        return (
+            f"NGARCHModel(sigma0={self.sigma0}, omega={self.omega}, "
+            f"alpha={self.alpha}, beta={self.beta}, theta={self.theta})"
+        )
 
-class GJRGARCHModel(BaseModel[GJRGARCHParams]):
+
+# =============================================================================
+# GJR-GARCH MODEL
+# =============================================================================
+
+@dataclass(frozen=True)
+class GJRGARCHModel:
     """
     GJR-GARCH Model.
 
-    Variance follows: sigma^2_t = omega + (alpha + gamma * I_{t-1}) * sigma^2_{t-1} * z^2_{t-1} + beta * sigma^2_{t-1}
+    Variance dynamics:
+        sigma^2_t = omega + (alpha + gamma * I_{t-1}) * sigma^2_{t-1} * z^2_{t-1} + beta * sigma^2_{t-1}
 
-    Example
-    -------
-    model = GJRGARCHModel.from_params(sigma0=0.20, omega=0.000002, alpha=0.03, beta=0.90, gamma=0.07)
+    Where I_{t-1} = 1 if z_{t-1} < 0 (negative return indicator).
+
+    Parameters
+    ----------
+    sigma0 : float
+        Initial volatility
+    omega : float
+        Constant term
+    alpha : float
+        ARCH coefficient
+    beta : float
+        GARCH coefficient
+    gamma : float
+        Asymmetry coefficient (gamma > 0 for leverage effect)
+
+    Notes
+    -----
+    - Stationarity requires: alpha + 0.5*gamma + beta < 1
+    - gamma > 0: Negative returns add extra volatility
+    - gamma = 0: Reduces to GARCH(1,1)
+
+    Examples
+    --------
+    model = GJRGARCHModel(sigma0=0.20, omega=0.000002, alpha=0.03, beta=0.90, gamma=0.07)
     simulator = model.create_simulator()
-    pricer = model.create_pricer(r=0.05)
+    pricer = model.create_pricer()
     """
 
-    def __init__(self, params: GJRGARCHParams):
-        super().__init__(params)
+    sigma0: float
+    omega: float
+    alpha: float
+    beta: float
+    gamma: float
 
-    @classmethod
-    def from_params(
-        cls,
-        sigma0: float,
-        omega: float,
-        alpha: float,
-        beta: float,
-        gamma: float
-    ) -> "GJRGARCHModel":
-        """Create model from individual parameters."""
-        return cls(GJRGARCHParams(
-            sigma0=sigma0, omega=omega, alpha=alpha, beta=beta, gamma=gamma
-        ))
+    def __post_init__(self):
+        """Validate parameters."""
+        if self.sigma0 <= 0:
+            raise ValueError(f"sigma0 must be positive, got {self.sigma0}")
+        if self.omega <= 0:
+            raise ValueError(f"omega must be positive, got {self.omega}")
+        if self.alpha < 0:
+            raise ValueError(f"alpha must be non-negative, got {self.alpha}")
+        if self.beta < 0:
+            raise ValueError(f"beta must be non-negative, got {self.beta}")
+        if self.gamma < 0:
+            raise ValueError(f"gamma must be non-negative, got {self.gamma}")
+
+        persistence = self.alpha + 0.5 * self.gamma + self.beta
+        if persistence >= 1:
+            raise ValueError(
+                f"Process is not stationary: alpha + 0.5*gamma + beta = {persistence:.4f} >= 1. "
+                f"Reduce alpha, beta, or gamma."
+            )
 
     @property
-    def model_name(self) -> str:
+    def name(self) -> str:
+        """Human-readable model name."""
         return "GJR-GARCH"
 
     @property
-    def supported_pricing_methods(self) -> List[PricingCapability]:
+    def supported_engines(self) -> List[PricingCapability]:
+        """GJR-GARCH only supports Monte Carlo pricing."""
         return [PricingCapability.MONTE_CARLO]
+
+    def get_parameters(self) -> Dict[str, Any]:
+        """Return model parameters as dictionary."""
+        return {
+            "sigma0": self.sigma0,
+            "omega": self.omega,
+            "alpha": self.alpha,
+            "beta": self.beta,
+            "gamma": self.gamma,
+        }
+
+    @property
+    def persistence(self) -> float:
+        """Returns alpha + 0.5*gamma + beta."""
+        return self.alpha + 0.5 * self.gamma + self.beta
+
+    @property
+    def long_run_variance(self) -> float:
+        """Returns omega / (1 - persistence)."""
+        return self.omega / (1 - self.persistence)
+
+    @property
+    def long_run_volatility(self) -> float:
+        """Returns sqrt of long-run variance."""
+        return np.sqrt(self.long_run_variance)
 
     def create_simulator(self, **kwargs) -> GJRGARCHSimulator:
         """Create GJR-GARCH simulator."""
         return GJRGARCHSimulator(
-            sigma0=self.params.sigma0,
-            omega=self.params.omega,
-            alpha=self.params.alpha,
-            beta=self.params.beta,
-            gamma=self.params.gamma,
+            sigma0=self.sigma0,
+            omega=self.omega,
+            alpha=self.alpha,
+            beta=self.beta,
+            gamma=self.gamma,
         )
 
     def create_pricer(
         self,
-        method: Optional[PricingCapability] = None,
         n_paths: int = 100000,
         n_steps: int = 252,
         **kwargs
     ) -> GARCHMCPricer:
         """Create GJR-GARCH pricer (Monte Carlo)."""
-        method = method or PricingCapability.MONTE_CARLO
-
-        if method != PricingCapability.MONTE_CARLO:
-            raise ValueError(f"GJR-GARCH only supports MONTE_CARLO pricing, got {method}")
-
         return GARCHMCPricer(
             garch_type=GARCHType.GJR_GARCH,
-            sigma0=self.params.sigma0,
-            omega=self.params.omega,
-            alpha=self.params.alpha,
-            beta=self.params.beta,
-            gamma=self.params.gamma,
+            sigma0=self.sigma0,
+            omega=self.omega,
+            alpha=self.alpha,
+            beta=self.beta,
+            gamma=self.gamma,
             n_paths=n_paths,
             n_steps=n_steps,
         )
 
+    def __repr__(self) -> str:
+        return (
+            f"GJRGARCHModel(sigma0={self.sigma0}, omega={self.omega}, "
+            f"alpha={self.alpha}, beta={self.beta}, gamma={self.gamma})"
+        )
+
 
 # =============================================================================
-# Benchmark
+# PARAMETER ALIASES
+# =============================================================================
+
+# Aliases for convenience
+GARCHParams = GARCHModel
+NGARCHParams = NGARCHModel
+GJRGARCHParams = GJRGARCHModel
+
+
+# =============================================================================
+# SMOKE TEST
 # =============================================================================
 
 if __name__ == "__main__":
     import time
-    import numpy as np
 
     print("=" * 60)
-    print("GARCH Family Unified Models Benchmark")
+    print("GARCH Family Models Test")
     print("=" * 60)
 
     # Common test parameters
@@ -295,12 +477,12 @@ if __name__ == "__main__":
     print("1. GARCH(1,1) Model")
     print("=" * 60)
 
-    # omega calibrated for 20% long-run vol: omega = sigma_lr^2 * (1 - alpha - beta)
-    garch_params = {"sigma0": 0.20, "omega": 0.002, "alpha": 0.05, "beta": 0.90}
-    garch_model = GARCHModel.from_params(**garch_params)
+    # omega calibrated for ~20% long-run vol: omega = sigma_lr^2 * (1 - alpha - beta)
+    garch_model = GARCHModel(sigma0=0.20, omega=0.002, alpha=0.05, beta=0.90)
     print(f"\nModel: {garch_model}")
-    print(f"Persistence (alpha + beta): {garch_params['alpha'] + garch_params['beta']:.3f}")
-    print(f"Stationary: {garch_params['alpha'] + garch_params['beta'] < 1}")
+    print(f"Persistence: {garch_model.persistence:.3f}")
+    print(f"Long-run volatility: {garch_model.long_run_volatility:.1%}")
+    print(f"Half-life: {garch_model.half_life:.1f} time steps")
 
     # Simulator test
     print("\n  Simulator Test:")
@@ -327,11 +509,10 @@ if __name__ == "__main__":
     print("2. NGARCH (Nonlinear Asymmetric) Model")
     print("=" * 60)
 
-    # omega calibrated for 20% long-run vol (approximately, theta affects this slightly)
-    ngarch_params = {"sigma0": 0.20, "omega": 0.002, "alpha": 0.05, "beta": 0.90, "theta": 0.5}
-    ngarch_model = NGARCHModel.from_params(**ngarch_params)
+    ngarch_model = NGARCHModel(sigma0=0.20, omega=0.002, alpha=0.05, beta=0.90, theta=0.5)
     print(f"\nModel: {ngarch_model}")
-    print(f"Leverage parameter (theta): {ngarch_params['theta']}")
+    print(f"Persistence: {ngarch_model.persistence:.3f}")
+    print(f"Long-run volatility: {ngarch_model.long_run_volatility:.1%}")
 
     # Simulator test
     print("\n  Simulator Test:")
@@ -341,15 +522,6 @@ if __name__ == "__main__":
     result = simulator.simulate_paths(s0=s0, mu=0.08, t=1.0, n_paths=10000, n_steps=252)
     elapsed = time.perf_counter() - start
     print(f"  Simulated 10,000 paths in {elapsed*1000:.2f} ms")
-    print(f"  Final price mean: ${result.price_paths[:, -1].mean():.2f}")
-
-    # MC Pricer test
-    print("\n  MC Pricer Test:")
-    print("  " + "-" * 38)
-    pricer = ngarch_model.create_pricer(n_paths=50000, n_steps=int(252*t))
-    result_mc = pricer.price(s0=s0, k=k, t=t, r=r)
-    print(f"  MC Call Price: ${result_mc.price:.4f} +/- ${result_mc.std_error:.4f}")
-    print(f"  MC Time: {result_mc.computation_time*1000:.1f} ms")
 
     # =========================================================================
     # 3. GJR-GARCH Model
@@ -358,12 +530,10 @@ if __name__ == "__main__":
     print("3. GJR-GARCH Model")
     print("=" * 60)
 
-    # omega calibrated for 20% long-run vol (approximately, gamma affects this slightly)
-    gjr_params = {"sigma0": 0.20, "omega": 0.002, "alpha": 0.03, "beta": 0.90, "gamma": 0.07}
-    gjr_model = GJRGARCHModel.from_params(**gjr_params)
+    gjr_model = GJRGARCHModel(sigma0=0.20, omega=0.002, alpha=0.03, beta=0.90, gamma=0.07)
     print(f"\nModel: {gjr_model}")
-    print(f"Asymmetry parameter (gamma): {gjr_params['gamma']}")
-    print(f"Effective alpha for neg. shocks: {gjr_params['alpha'] + gjr_params['gamma']:.3f}")
+    print(f"Persistence: {gjr_model.persistence:.3f}")
+    print(f"Effective alpha for neg. shocks: {gjr_model.alpha + gjr_model.gamma:.3f}")
 
     # Simulator test
     print("\n  Simulator Test:")
@@ -373,41 +543,26 @@ if __name__ == "__main__":
     result = simulator.simulate_paths(s0=s0, mu=0.08, t=1.0, n_paths=10000, n_steps=252)
     elapsed = time.perf_counter() - start
     print(f"  Simulated 10,000 paths in {elapsed*1000:.2f} ms")
-    print(f"  Final price mean: ${result.price_paths[:, -1].mean():.2f}")
-
-    # MC Pricer test
-    print("\n  MC Pricer Test:")
-    print("  " + "-" * 38)
-    pricer = gjr_model.create_pricer(n_paths=50000, n_steps=int(252*t))
-    result_mc = pricer.price(s0=s0, k=k, t=t, r=r)
-    print(f"  MC Call Price: ${result_mc.price:.4f} +/- ${result_mc.std_error:.4f}")
-    print(f"  MC Time: {result_mc.computation_time*1000:.1f} ms")
 
     # =========================================================================
-    # 4. Model Comparison
+    # 4. Validation Test
     # =========================================================================
     print("\n" + "=" * 60)
-    print("4. GARCH Family Comparison")
+    print("4. Validation Test")
     print("=" * 60)
 
-    print("\n  Model Prices (Call, K=100, T=0.25):")
-    print("  " + "-" * 38)
+    try:
+        bad_model = GARCHModel(sigma0=0.20, omega=0.002, alpha=0.5, beta=0.6)
+        print("ERROR: Should have raised ValueError!")
+    except ValueError as e:
+        print(f"\nCorrectly rejected non-stationary GARCH: {e}")
 
-    models = [
-        ("GARCH(1,1)", garch_model),
-        ("NGARCH", ngarch_model),
-        ("GJR-GARCH", gjr_model),
-    ]
+    try:
+        bad_model = GARCHModel(sigma0=-0.1, omega=0.002, alpha=0.05, beta=0.90)
+        print("ERROR: Should have raised ValueError!")
+    except ValueError as e:
+        print(f"Correctly rejected negative sigma0: {e}")
 
-    for name, model in models:
-        pricer = model.create_pricer(n_paths=50000, n_steps=int(252*t))
-        result = pricer.price(s0=s0, k=k, t=t, r=r, seed=42)
-        print(f"  {name:12s}: ${result.price:.4f} +/- ${result.std_error:.4f}")
-
-    # Compare with Black-Scholes
-    from backend.models.gbm import GBMModel
-    bs_model = GBMModel.from_params(sigma=0.20)
-    bs_price = bs_model.create_pricer().price(s0=s0, k=k, t=t, r=r, option_type="call").price
-    print(f"  {'Black-Scholes':12s}: ${bs_price:.4f} (analytical)")
-
-    print()
+    print("\n" + "=" * 60)
+    print("All GARCH tests passed!")
+    print("=" * 60)
