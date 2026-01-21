@@ -19,7 +19,8 @@ Parameters:
     Heston: κ, θ, ξ, ρ, v0
     Jumps: λ (lambda_j), μ_J (mu_j), σ_J (sigma_j)
 
-Author: Derivatives Pricing Project
+Author: Thomas
+Created: 2025
 """
 
 import numpy as np

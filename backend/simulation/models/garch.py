@@ -19,7 +19,8 @@ References:
     Bollerslev, T. (1986). "Generalized Autoregressive Conditional
     Heteroskedasticity." Journal of Econometrics, 31(3), 307-327.
 
-Author: Derivatives Pricing Project
+Author: Thomas
+Created: 2025
 """
 
 import numpy as np
@@ -360,11 +361,6 @@ def estimate_garch_params(
     -------
     dict
         Dictionary with 'omega', 'alpha', 'beta'
-
-    Examples
-    --------
-    >>> params = estimate_garch_params(target_long_run_vol=0.20, half_life_steps=20)
-    >>> simulator = GARCHSimulator(sigma0=0.20, **params)
     """
     # persistence^half_life = 0.5 => persistence = 0.5^(1/half_life)
     persistence = 0.5 ** (1.0 / half_life_steps)

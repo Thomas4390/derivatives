@@ -30,6 +30,9 @@ Usage:
 
     # Get risk metrics
     metrics = compute_risk_metrics(pnl)
+
+Author: Thomas
+Created: 2025
 """
 
 import numpy as np

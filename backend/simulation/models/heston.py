@@ -18,7 +18,8 @@ Parameters:
 
 Feller condition: 2·κ·θ > ξ² ensures variance stays positive.
 
-Author: Derivatives Pricing Project
+Author: Thomas
+Created: 2025
 """
 
 import numpy as np

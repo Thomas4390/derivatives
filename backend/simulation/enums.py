@@ -5,7 +5,8 @@ Enumerations for Simulation Models
 This module defines enumerations for model types used throughout
 the simulation framework.
 
-Author: Derivatives Pricing Project
+Author: Thomas
+Created: 2025
 """
 
 from enum import Enum, auto

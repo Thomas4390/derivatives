@@ -7,7 +7,8 @@ Factory functions for creating simulator instances.
 Provides a unified interface for creating any simulation model
 from configuration dictionaries or enum types.
 
-Author: Derivatives Pricing Project
+Author: Thomas
+Created: 2025
 """
 
 from typing import Dict, Any, Optional, Type, Union
@@ -80,12 +81,6 @@ def create_simulator(
     -------
     BaseSimulator
         Configured simulator instance
-
-    Examples
-    --------
-    >>> sim = create_simulator("gbm", sigma=0.20)
-    >>> sim = create_simulator(ModelType.HESTON, v0=0.04, kappa=2.0, theta=0.04, xi=0.3, rho=-0.7)
-    >>> sim = create_simulator("garch", sigma0=0.20, omega=0.000002, alpha=0.05, beta=0.90)
     """
     # Resolve model type
     if isinstance(model, str):

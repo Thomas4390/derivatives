@@ -12,6 +12,9 @@ Models:
 - GARCHSimulator: GARCH(1,1)
 - NGARCHSimulator: NGARCH
 - GJRGARCHSimulator: GJR-GARCH
+
+Author: Thomas
+Created: 2025
 """
 
 from .gbm import GBMSimulator

@@ -24,7 +24,8 @@ References:
     Engle, R.F. and Ng, V.K. (1993). "Measuring and Testing the Impact
     of News on Volatility." Journal of Finance, 48(5), 1749-1778.
 
-Author: Derivatives Pricing Project
+Author: Thomas
+Created: 2025
 """
 
 import numpy as np

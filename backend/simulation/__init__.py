@@ -4,50 +4,29 @@ Monte Carlo Simulation Framework
 
 High-performance Monte Carlo simulation for derivatives pricing and risk analysis.
 
-This package provides:
+This module provides:
 - Multiple stochastic process models (GBM, Heston, Merton, Bates, GARCH family)
 - Numba-optimized implementations for maximum performance
 - Clean OOP interface with Strategy pattern
 - Unified API across all models
 
-P-Measure (Physical Measure) Implementation:
---------------------------------------------
-All simulations use the REAL-WORLD (P) measure with drift = μ (expected return).
-This is appropriate for:
-    - Scenario analysis and risk management
-    - VaR and stress testing
-    - Backtesting trading strategies
-    - Generating realistic price trajectories
-
-For DERIVATIVES PRICING, use the Q-measure (risk-neutral) where drift = r.
-Simply pass mu=r (risk-free rate) to use risk-neutral dynamics.
-
-Models Available:
------------------
-Continuous-Time:
-    - GBMSimulator: Geometric Brownian Motion
-    - HestonSimulator: Heston Stochastic Volatility
-    - MertonSimulator: Merton Jump Diffusion
-    - BatesSimulator: Bates (Heston + Jumps)
+Continuous-Time Models:
+- GBMSimulator: Geometric Brownian Motion
+- HestonSimulator: Heston Stochastic Volatility
+- MertonSimulator: Merton Jump Diffusion
+- BatesSimulator: Bates (Heston + Jumps)
 
 Discrete-Time (GARCH Family):
-    - GARCHSimulator: GARCH(1,1)
-    - NGARCHSimulator: NGARCH with leverage effect
-    - GJRGARCHSimulator: GJR-GARCH with asymmetry
+- GARCHSimulator: GARCH(1,1)
+- NGARCHSimulator: NGARCH with leverage effect
+- GJRGARCHSimulator: GJR-GARCH with asymmetry
 
-Quick Start:
-------------
->>> from backend.simulation import GBMSimulator, HestonSimulator, create_simulator
->>>
->>> # Direct instantiation
->>> sim = GBMSimulator(sigma=0.20)
->>> result = sim.simulate_paths(s0=100, mu=0.08, t=1.0, n_paths=10000, n_steps=252)
->>>
->>> # Using factory
->>> sim = create_simulator("heston", v0=0.04, kappa=2, theta=0.04, xi=0.3, rho=-0.7)
->>> result = sim.simulate_paths(s0=100, mu=0.08, t=1.0, n_paths=10000, n_steps=252)
+P-Measure vs Q-Measure:
+Default simulations use the physical (P) measure with drift = μ.
+For risk-neutral (Q) pricing, pass mu=r (risk-free rate).
 
-Author: Derivatives Pricing Project
+Author: Thomas
+Created: 2025
 """
 
 # =============================================================================

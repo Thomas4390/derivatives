@@ -17,7 +17,8 @@ Parameters:
     μ_J (mu_j): Mean of log-jump size
     σ_J (sigma_j): Std dev of log-jump size
 
-Author: Derivatives Pricing Project
+Author: Thomas
+Created: 2025
 """
 
 import numpy as np

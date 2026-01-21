@@ -12,7 +12,8 @@ Exact solution:
 
 For Q-measure (risk-neutral pricing), set μ = r (risk-free rate).
 
-Author: Derivatives Pricing Project
+Author: Thomas
+Created: 2025
 """
 
 import numpy as np

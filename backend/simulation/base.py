@@ -14,7 +14,8 @@ All concrete simulators must inherit from BaseSimulator and implement:
 - simulate_paths(): Full path simulation
 - simulate_terminal(): Memory-efficient terminal-only simulation
 
-Author: Derivatives Pricing Project
+Author: Thomas
+Created: 2025
 """
 
 from abc import ABC, abstractmethod

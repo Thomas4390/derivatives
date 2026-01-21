@@ -27,7 +27,8 @@ References:
     between the Expected Value and the Volatility of the Nominal Excess
     Return on Stocks." Journal of Finance, 48(5), 1779-1801.
 
-Author: Derivatives Pricing Project
+Author: Thomas
+Created: 2025
 """
 
 import numpy as np
