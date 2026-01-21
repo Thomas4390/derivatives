@@ -1,156 +1,111 @@
 """
 Position Classes
-=================
+================
 
-Dataclasses representing option and stock positions in a portfolio.
+Position classes for option portfolio management.
 
-Author: Derivatives Pricing Project
+This module provides:
+- PortfolioPosition: Wraps a VanillaOption with quantity and premium
+- StockPosition: Represents stock/underlying positions
+- Factory functions: long_call, short_call, long_put, short_put, long_stock, short_stock
+
+The Instrument (VanillaOption) encapsulates the payoff structure.
+
+Author: Thomas
+Created: 2025
 """
 
-from dataclasses import dataclass, field
-from enum import Enum
-from typing import Optional
+from dataclasses import dataclass
+from typing import Union
+import numpy as np
+
+from backend.instruments.options import VanillaOption
 
 
-class OptionType(Enum):
-    """Type of option contract."""
-    CALL = "call"
-    PUT = "put"
+# =============================================================================
+# POSITION CLASSES
+# =============================================================================
 
-    def __eq__(self, other):
-        """Support comparison with strings for backward compatibility."""
-        if isinstance(other, str):
-            return self.value == other.lower()
-        return super().__eq__(other)
-
-    def __hash__(self):
-        return hash(self.value)
-
-    def __str__(self):
-        return self.value
-
-    def upper(self):
-        """Return uppercase string for frontend compatibility."""
-        return self.value.upper()
-
-    def lower(self):
-        """Return lowercase string for frontend compatibility."""
-        return self.value.lower()
-
-
-class PositionType(Enum):
-    """Direction of the position."""
-    LONG = "long"
-    SHORT = "short"
-
-    def __eq__(self, other):
-        """Support comparison with strings for backward compatibility."""
-        if isinstance(other, str):
-            return self.value == other.lower()
-        return super().__eq__(other)
-
-    def __hash__(self):
-        return hash(self.value)
-
-    def __str__(self):
-        return self.value
-
-    def upper(self):
-        """Return uppercase string for frontend compatibility."""
-        return self.value.upper()
-
-    def lower(self):
-        """Return lowercase string for frontend compatibility."""
-        return self.value.lower()
-
-    @property
-    def sign(self) -> int:
-        """Return +1 for long, -1 for short."""
-        return 1 if self.value == "long" else -1
-
-
-@dataclass
-class OptionPosition:
+@dataclass(frozen=True)
+class PortfolioPosition:
     """
-    Represents an option position in a portfolio.
+    Position in a portfolio = Instrument + quantity + premium.
+
+    Immutable. Use the instrument directly for pricing via engines.
 
     Parameters
     ----------
-    option_type : str or OptionType
-        Type of option: 'call' or 'put'
-    position_type : str or PositionType
-        Direction: 'long' or 'short'
-    strike : float
-        Strike price of the option
-    quantity : int, default=1
-        Number of contracts
-    premium : float, default=0.0
-        Premium paid (positive) or received (negative) per contract
-
-    Examples
-    --------
-    >>> pos = OptionPosition('call', 'long', strike=100, quantity=10, premium=5.0)
-    >>> pos.option_type
-    <OptionType.CALL: 'call'>
-    >>> pos.sign
-    1
+    instrument : VanillaOption
+        The underlying option instrument
+    quantity : int
+        Position size: positive = long, negative = short
+    premium : float
+        Premium paid (>0) or received (<0) per unit
     """
-    option_type: OptionType
-    position_type: PositionType
-    strike: float
-    quantity: int = 1
+    instrument: VanillaOption
+    quantity: int
     premium: float = 0.0
 
     def __post_init__(self):
-        """Validate and convert string inputs to enums."""
-        # Convert strings to enums if necessary
-        if isinstance(self.option_type, str):
-            try:
-                self.option_type = OptionType(self.option_type.lower())
-            except ValueError:
-                raise ValueError(f"option_type must be 'call' or 'put', got '{self.option_type}'")
-
-        if isinstance(self.position_type, str):
-            try:
-                self.position_type = PositionType(self.position_type.lower())
-            except ValueError:
-                raise ValueError(f"position_type must be 'long' or 'short', got '{self.position_type}'")
-
-        # Validate numeric fields
-        if self.strike <= 0:
-            raise ValueError(f"strike must be positive, got {self.strike}")
-        if self.quantity <= 0:
-            raise ValueError(f"quantity must be positive, got {self.quantity}")
+        """Validate position."""
+        if self.quantity == 0:
+            raise ValueError("quantity cannot be zero")
 
     @property
     def sign(self) -> int:
-        """Return position sign: +1 for long, -1 for short."""
-        return self.position_type.sign
-
-    @property
-    def is_call(self) -> bool:
-        """True if this is a call option."""
-        return self.option_type == OptionType.CALL
-
-    @property
-    def is_put(self) -> bool:
-        """True if this is a put option."""
-        return self.option_type == OptionType.PUT
+        """Position direction: +1 long, -1 short."""
+        return 1 if self.quantity > 0 else -1
 
     @property
     def is_long(self) -> bool:
-        """True if this is a long position."""
-        return self.position_type == PositionType.LONG
+        """True if long position."""
+        return self.quantity > 0
 
     @property
     def is_short(self) -> bool:
-        """True if this is a short position."""
-        return self.position_type == PositionType.SHORT
+        """True if short position."""
+        return self.quantity < 0
 
     @property
-    def premium_paid(self) -> float:
-        """Alias for premium (backward compatibility with frontend)."""
-        return self.premium
+    def strike(self) -> float:
+        """Strike price (from instrument)."""
+        return self.instrument.strike
+
+    @property
+    def maturity(self) -> float:
+        """Time to maturity (from instrument)."""
+        return self.instrument.maturity
+
+    @property
+    def is_call(self) -> bool:
+        """True if call option."""
+        return self.instrument.is_call
+
+    @property
+    def is_put(self) -> bool:
+        """True if put option."""
+        return not self.instrument.is_call
+
+    def payoff_at_expiry(self, spot: Union[float, np.ndarray]) -> Union[float, np.ndarray]:
+        """
+        Calculate P&L at expiry.
+
+        P&L = quantity * (intrinsic_value - premium)
+
+        Parameters
+        ----------
+        spot : float or np.ndarray
+            Spot price(s) at expiry
+
+        Returns
+        -------
+        float or np.ndarray
+            P&L including premium
+        """
+        spot_arr = np.atleast_1d(np.asarray(spot, dtype=float))
+        intrinsic = self.instrument.payoff(spot_arr)
+        pnl = self.quantity * (intrinsic - self.premium)
+        return float(pnl[0]) if np.isscalar(spot) else pnl
 
     def intrinsic_value(self, spot: float) -> float:
         """
@@ -166,101 +121,279 @@ class OptionPosition:
         float
             Intrinsic value (>=0)
         """
-        if self.is_call:
-            return max(spot - self.strike, 0.0)
-        else:
-            return max(self.strike - spot, 0.0)
-
-    def payoff_at_expiry(self, spot: float) -> float:
-        """
-        Calculate P&L at expiry for this position.
-
-        Parameters
-        ----------
-        spot : float
-            Spot price at expiry
-
-        Returns
-        -------
-        float
-            Total P&L including premium
-        """
-        intrinsic = self.intrinsic_value(spot)
-        # Long pays premium, short receives it
-        return self.sign * self.quantity * (intrinsic - self.premium)
+        return float(self.instrument.payoff(np.array([spot]))[0])
 
 
-@dataclass
+@dataclass(frozen=True)
 class StockPosition:
     """
-    Represents a stock/underlying position in a portfolio.
+    Stock/underlying position.
+
+    Linear P&L - no model needed for valuation.
 
     Parameters
     ----------
-    position_type : str or PositionType
-        Direction: 'long' or 'short'
-    quantity : int, default=100
-        Number of shares
-    entry_price : float, default=0.0
+    quantity : int
+        Number of shares: positive = long, negative = short
+    entry_price : float
         Average entry price per share
-
-    Examples
-    --------
-    >>> stock = StockPosition('long', quantity=100, entry_price=50.0)
-    >>> stock.sign
-    1
-    >>> stock.pnl(55.0)
-    500.0
     """
-    position_type: PositionType
-    quantity: int = 100
+    quantity: int
     entry_price: float = 0.0
 
     def __post_init__(self):
-        """Validate and convert string inputs to enums."""
-        if isinstance(self.position_type, str):
-            try:
-                self.position_type = PositionType(self.position_type.lower())
-            except ValueError:
-                raise ValueError(f"position_type must be 'long' or 'short', got '{self.position_type}'")
-
-        if self.quantity <= 0:
-            raise ValueError(f"quantity must be positive, got {self.quantity}")
+        """Validate position."""
+        if self.quantity == 0:
+            raise ValueError("quantity cannot be zero")
         if self.entry_price < 0:
             raise ValueError(f"entry_price cannot be negative, got {self.entry_price}")
 
     @property
     def sign(self) -> int:
-        """Return position sign: +1 for long, -1 for short."""
-        return self.position_type.sign
+        """Position direction: +1 long, -1 short."""
+        return 1 if self.quantity > 0 else -1
 
     @property
     def is_long(self) -> bool:
-        """True if this is a long position."""
-        return self.position_type == PositionType.LONG
+        """True if long position."""
+        return self.quantity > 0
 
     @property
     def is_short(self) -> bool:
-        """True if this is a short position."""
-        return self.position_type == PositionType.SHORT
-
-    def pnl(self, spot: float) -> float:
-        """
-        Calculate P&L at a given spot price.
-
-        Parameters
-        ----------
-        spot : float
-            Current spot price
-
-        Returns
-        -------
-        float
-            Total P&L
-        """
-        return self.sign * self.quantity * (spot - self.entry_price)
+        """True if short position."""
+        return self.quantity < 0
 
     @property
     def delta(self) -> float:
-        """Delta of stock position (always +/- quantity)."""
-        return self.sign * self.quantity
+        """Stock delta = quantity."""
+        return float(self.quantity)
+
+    def pnl(self, spot: Union[float, np.ndarray]) -> Union[float, np.ndarray]:
+        """
+        P&L at given spot price(s).
+
+        Parameters
+        ----------
+        spot : float or np.ndarray
+            Current spot price(s)
+
+        Returns
+        -------
+        float or np.ndarray
+            P&L
+        """
+        return self.quantity * (np.asarray(spot) - self.entry_price)
+
+
+# =============================================================================
+# FACTORY FUNCTIONS
+# =============================================================================
+
+def long_call(
+    strike: float,
+    maturity: float,
+    quantity: int = 1,
+    premium: float = 0.0,
+) -> PortfolioPosition:
+    """
+    Create a long call position.
+
+    Parameters
+    ----------
+    strike : float
+        Strike price
+    maturity : float
+        Time to maturity in years
+    quantity : int
+        Number of contracts (must be positive)
+    premium : float
+        Premium paid per contract
+
+    Returns
+    -------
+    PortfolioPosition
+        Long call position
+    """
+    instrument = VanillaOption(strike=strike, maturity=maturity, is_call=True)
+    return PortfolioPosition(instrument=instrument, quantity=abs(quantity), premium=premium)
+
+
+def short_call(
+    strike: float,
+    maturity: float,
+    quantity: int = 1,
+    premium: float = 0.0,
+) -> PortfolioPosition:
+    """
+    Create a short call position.
+
+    Parameters
+    ----------
+    strike : float
+        Strike price
+    maturity : float
+        Time to maturity in years
+    quantity : int
+        Number of contracts (must be positive, will be negated)
+    premium : float
+        Premium received per contract
+
+    Returns
+    -------
+    PortfolioPosition
+        Short call position
+    """
+    instrument = VanillaOption(strike=strike, maturity=maturity, is_call=True)
+    return PortfolioPosition(instrument=instrument, quantity=-abs(quantity), premium=premium)
+
+
+def long_put(
+    strike: float,
+    maturity: float,
+    quantity: int = 1,
+    premium: float = 0.0,
+) -> PortfolioPosition:
+    """
+    Create a long put position.
+
+    Parameters
+    ----------
+    strike : float
+        Strike price
+    maturity : float
+        Time to maturity in years
+    quantity : int
+        Number of contracts (must be positive)
+    premium : float
+        Premium paid per contract
+
+    Returns
+    -------
+    PortfolioPosition
+        Long put position
+    """
+    instrument = VanillaOption(strike=strike, maturity=maturity, is_call=False)
+    return PortfolioPosition(instrument=instrument, quantity=abs(quantity), premium=premium)
+
+
+def short_put(
+    strike: float,
+    maturity: float,
+    quantity: int = 1,
+    premium: float = 0.0,
+) -> PortfolioPosition:
+    """
+    Create a short put position.
+
+    Parameters
+    ----------
+    strike : float
+        Strike price
+    maturity : float
+        Time to maturity in years
+    quantity : int
+        Number of contracts (must be positive, will be negated)
+    premium : float
+        Premium received per contract
+
+    Returns
+    -------
+    PortfolioPosition
+        Short put position
+    """
+    instrument = VanillaOption(strike=strike, maturity=maturity, is_call=False)
+    return PortfolioPosition(instrument=instrument, quantity=-abs(quantity), premium=premium)
+
+
+def long_stock(quantity: int = 100, entry_price: float = 0.0) -> StockPosition:
+    """
+    Create a long stock position.
+
+    Parameters
+    ----------
+    quantity : int
+        Number of shares (must be positive)
+    entry_price : float
+        Average entry price
+
+    Returns
+    -------
+    StockPosition
+        Long stock position
+    """
+    return StockPosition(quantity=abs(quantity), entry_price=entry_price)
+
+
+def short_stock(quantity: int = 100, entry_price: float = 0.0) -> StockPosition:
+    """
+    Create a short stock position.
+
+    Parameters
+    ----------
+    quantity : int
+        Number of shares (must be positive, will be negated)
+    entry_price : float
+        Average entry price
+
+    Returns
+    -------
+    StockPosition
+        Short stock position
+    """
+    return StockPosition(quantity=-abs(quantity), entry_price=entry_price)
+
+
+# =============================================================================
+# SMOKE TEST
+# =============================================================================
+
+if __name__ == "__main__":
+    import numpy as np
+
+    print("=" * 50)
+    print("Positions Module Smoke Test")
+    print("=" * 50)
+
+    # Test factory functions
+    print("\n--- Factory Functions ---")
+    call = long_call(strike=100, maturity=0.5, quantity=1, premium=5.0)
+    print(f"Long Call: strike={call.strike}, is_long={call.is_long}, is_call={call.is_call}")
+
+    put = short_put(strike=95, maturity=0.5, quantity=2, premium=3.0)
+    print(f"Short Put: strike={put.strike}, quantity={put.quantity}, is_short={put.is_short}")
+
+    stock = long_stock(quantity=100, entry_price=100.0)
+    print(f"Long Stock: quantity={stock.quantity}, entry={stock.entry_price}")
+
+    # Test payoff calculations
+    print("\n--- Payoff at Expiry ---")
+    spots = np.array([90.0, 100.0, 110.0])
+
+    call_pnl = call.payoff_at_expiry(spots)
+    print(f"Long Call (K=100, premium=5) at spots {spots}:")
+    print(f"  P&L: {call_pnl}")  # Expected: [-5, -5, 5]
+
+    put_pnl = put.payoff_at_expiry(spots)
+    print(f"Short Put (K=95, premium=3, qty=-2) at spots {spots}:")
+    print(f"  P&L: {put_pnl}")  # Short put profits when spot > strike
+
+    stock_pnl = stock.pnl(spots)
+    print(f"Long Stock (100 shares at 100) at spots {spots}:")
+    print(f"  P&L: {stock_pnl}")  # Expected: [-1000, 0, 1000]
+
+    # Test single spot
+    print("\n--- Single Spot ---")
+    single_pnl = call.payoff_at_expiry(105.0)
+    print(f"Long Call P&L at spot=105: {single_pnl}")  # Expected: 0
+
+    # Test immutability
+    print("\n--- Immutability Test ---")
+    try:
+        call.quantity = 10  # type: ignore
+        print("ERROR: Mutation should have failed!")
+    except Exception as e:
+        print(f"Correctly prevented mutation: {type(e).__name__}")
+
+    print("\n" + "=" * 50)
+    print("Positions smoke test passed")
+    print("=" * 50)

@@ -2,244 +2,138 @@
 Options Portfolio
 =================
 
-Main portfolio class with pluggable pricing models.
+Portfolio class for managing option and stock positions.
 
-Author: Derivatives Pricing Project
+This module provides:
+- OptionsPortfolio: Main portfolio class with valuation and Greeks calculation
+
+Uses the Model/Engine/Market architecture for pricing.
+
+Author: Thomas
+Created: 2025
 """
 
-from dataclasses import dataclass, field
-from typing import List, Optional, Dict, Any, Union
+from dataclasses import dataclass
+from typing import List, Optional, Union, Tuple
 import numpy as np
 
-from .positions import OptionPosition, StockPosition
-from .greeks import (
-    GreeksResult,
-    GreeksCalculator,
-    GreeksStrategy,
-    AnalyticalGreeksStrategy,
-    FiniteDiffGreeksStrategy,
-    AnalyticalGreeksPricer,
+from backend.core.interfaces import Model, PricingEngine
+from backend.core.market import MarketEnvironment
+from backend.core.result_types import GreeksResult
+
+from .positions import PortfolioPosition, StockPosition
+
+# Import Numba-optimized functions
+from backend.simulation.pnl_engine import (
+    calculate_portfolio_pnl_vectorized,
+    calculate_portfolio_pnl_with_stock,
+    compute_payoff_curve,
+    find_breakeven_points,
+    compute_risk_metrics,
+    RiskMetrics,
 )
-from .breakeven import BreakevenResult, BreakevenCalculator
 
 
 # =============================================================================
-# Options Portfolio Class
+# OPTIONS PORTFOLIO CLASS
 # =============================================================================
 
 class OptionsPortfolio:
     """
-    Portfolio of options and stock positions with pluggable pricing.
+    Portfolio of option and stock positions.
 
-    This class provides a unified interface for:
-    - Managing option and stock positions
-    - Calculating portfolio Greeks (analytical or finite differences)
-    - Computing P&L at expiry
-    - Finding breakeven points
+    Uses Model/Engine/Market architecture for pricing.
 
     Parameters
     ----------
-    pricer : BasePricer, optional
-        Pricing model to use. If None, uses BlackScholesPricer with given sigma.
-    sigma : float, optional
-        Volatility for default BlackScholesPricer (required if pricer is None).
-
-    Examples
-    --------
-    >>> from backend.portfolio import OptionsPortfolio, OptionPosition
-    >>> portfolio = OptionsPortfolio(sigma=0.20)
-    >>> portfolio.add_option(OptionPosition('call', 'long', strike=100, premium=5.0))
-    >>> greeks = portfolio.calculate_greeks(spot=100, rate=0.05, time_to_expiry=0.5)
-    >>> print(f"Delta: {greeks.delta:.4f}")
-
-    With custom pricer:
-    >>> from backend.option_pricing import HestonPricer
-    >>> pricer = HestonPricer(v0=0.04, kappa=2.0, theta=0.04, xi=0.3, rho=-0.7)
-    >>> portfolio = OptionsPortfolio(pricer=pricer)
+    model : Model
+        Pricing model (GBMModel, HestonModel, etc.)
+    engine : PricingEngine, optional
+        Pricing engine. If None, selects based on model capabilities:
+        - GBMModel: BSAnalyticEngine
+        - Others: FFTEngine
     """
 
-    def __init__(
-        self,
-        spot_or_pricer: Optional[Any] = None,
-        rate_or_sigma: Optional[float] = None,
-        sigma: Optional[float] = None,
-    ):
+    def __init__(self, model: Model, engine: Optional[PricingEngine] = None):
         """
-        Initialize portfolio with a pricer or spot/rate for backward compatibility.
-
-        Supports two call signatures:
-        1. OptionsPortfolio(spot_price, risk_free_rate) - legacy mode
-        2. OptionsPortfolio(pricer=pricer) or OptionsPortfolio(sigma=sigma) - new mode
+        Initialize portfolio.
 
         Parameters
         ----------
-        spot_or_pricer : float or BasePricer, optional
-            Spot price (legacy) or pricer object (new)
-        rate_or_sigma : float, optional
-            Risk-free rate (legacy) or sigma for default pricer (new)
-        sigma : float, optional
-            Volatility (only used if pricer is not provided)
+        model : Model
+            Pricing model (immutable, contains all model parameters)
+        engine : PricingEngine, optional
+            Pricing engine. If None, auto-selects based on model.
         """
-        # Legacy mode detection: if first arg is a number > 1, it's probably spot price
-        self._legacy_mode = False
-        self._spot_price: Optional[float] = None
-        self._risk_free_rate: Optional[float] = None
-
-        if spot_or_pricer is not None and isinstance(spot_or_pricer, (int, float)):
-            if spot_or_pricer > 1.0:  # Likely spot price, not sigma
-                # Legacy mode: OptionsPortfolio(spot_price, risk_free_rate)
-                self._legacy_mode = True
-                self._spot_price = float(spot_or_pricer)
-                self._risk_free_rate = float(rate_or_sigma) if rate_or_sigma is not None else 0.05
-                # Use default volatility for premium calculation
-                sigma = sigma if sigma is not None else 0.25
-                from backend.option_pricing import BlackScholesPricer
-                pricer = BlackScholesPricer(sigma=sigma)
-            else:
-                # New mode with sigma as first positional arg (unlikely but handle it)
-                sigma = float(spot_or_pricer)
-                from backend.option_pricing import BlackScholesPricer
-                pricer = BlackScholesPricer(sigma=sigma)
-        elif spot_or_pricer is not None:
-            # Pricer object provided
-            pricer = spot_or_pricer
-        elif sigma is not None or rate_or_sigma is not None:
-            # sigma provided via keyword or second positional
-            sigma_val = sigma if sigma is not None else rate_or_sigma
-            from backend.option_pricing import BlackScholesPricer
-            pricer = BlackScholesPricer(sigma=sigma_val)
-        else:
-            raise ValueError("Either pricer, sigma, or (spot_price, risk_free_rate) must be provided")
-
-        self._pricer = pricer
-        self._options: List[OptionPosition] = []
+        self._model = model
+        self._engine = engine or self._auto_select_engine(model)
+        self._positions: List[PortfolioPosition] = []
         self._stock: Optional[StockPosition] = None
 
-        # Select Greeks strategy based on pricer capabilities
-        self._greeks_calc = GreeksCalculator(AnalyticalGreeksStrategy(pricer))
+    @staticmethod
+    def _auto_select_engine(model: Model) -> PricingEngine:
+        """Auto-select appropriate engine for the model."""
+        from backend.models.gbm import GBMModel
+        from backend.engines import BSAnalyticEngine, FFTEngine
 
-    @property
-    def pricer(self) -> Any:
-        """Current pricing model."""
-        return self._pricer
-
-    @pricer.setter
-    def pricer(self, value: Any):
-        """
-        Set a new pricer and update Greeks strategy.
-
-        Parameters
-        ----------
-        value : BasePricer
-            New pricing model
-        """
-        self._pricer = value
-        self._greeks_calc = GreeksCalculator(AnalyticalGreeksStrategy(value))
-
-    @property
-    def options(self) -> List[OptionPosition]:
-        """List of option positions (read-only copy)."""
-        return list(self._options)
-
-    @property
-    def stock(self) -> Optional[StockPosition]:
-        """Stock position if any."""
-        return self._stock
+        if isinstance(model, GBMModel):
+            return BSAnalyticEngine()
+        else:
+            # FFT works with any model that has characteristic function
+            return FFTEngine()
 
     # =========================================================================
     # Position Management
     # =========================================================================
 
-    def add_option(self, position: OptionPosition) -> 'OptionsPortfolio':
+    def add(self, position: Union[PortfolioPosition, StockPosition]) -> 'OptionsPortfolio':
         """
-        Add an option position to the portfolio.
-
-        In legacy mode, calculates and sets the premium using Black-Scholes
-        if the position's premium is 0.
+        Add a position to the portfolio.
 
         Parameters
         ----------
-        position : OptionPosition
-            Option position to add
+        position : PortfolioPosition or StockPosition
+            Position to add
 
         Returns
         -------
         OptionsPortfolio
             Self for method chaining
         """
-        # In legacy mode, calculate premium if not already set
-        if self._legacy_mode and position.premium == 0.0:
-            self._calculate_and_set_premium(position)
-
-        self._options.append(position)
-        return self
-
-    def _calculate_and_set_premium(self, position: OptionPosition) -> None:
-        """Calculate premium using Black-Scholes and set it on the position."""
-        if self._spot_price is None or self._risk_free_rate is None:
-            return
-
-        # Default time to expiry (30 days)
-        time_to_expiry = 30.0 / 365.0
-
-        # Calculate option price using the pricer
-        # API: price(s0, k, t, r, option_type)
-        result = self._pricer.price(
-            s0=self._spot_price,
-            k=position.strike,
-            t=time_to_expiry,
-            r=self._risk_free_rate,
-            option_type='call' if position.is_call else 'put'
-        )
-
-        # Set the premium on the position (dataclass field assignment)
-        object.__setattr__(position, 'premium', result.price)
-
-    def add_stock(self, position: StockPosition) -> 'OptionsPortfolio':
-        """
-        Add or replace stock position.
-
-        Parameters
-        ----------
-        position : StockPosition
-            Stock position
-
-        Returns
-        -------
-        OptionsPortfolio
-            Self for method chaining
-        """
-        self._stock = position
+        if isinstance(position, StockPosition):
+            self._stock = position
+        else:
+            self._positions.append(position)
         return self
 
     def clear(self) -> 'OptionsPortfolio':
         """
-        Remove all positions from the portfolio.
+        Remove all positions.
 
         Returns
         -------
         OptionsPortfolio
             Self for method chaining
         """
-        self._options.clear()
+        self._positions.clear()
         self._stock = None
         return self
 
-    def remove_option(self, index: int) -> OptionPosition:
+    def remove_position(self, index: int) -> PortfolioPosition:
         """
         Remove and return an option position by index.
 
         Parameters
         ----------
         index : int
-            Index of option to remove
+            Index of position to remove
 
         Returns
         -------
-        OptionPosition
-            Removed option position
+        PortfolioPosition
+            Removed position
         """
-        return self._options.pop(index)
+        return self._positions.pop(index)
 
     def clear_stock(self) -> Optional[StockPosition]:
         """
@@ -248,247 +142,429 @@ class OptionsPortfolio:
         Returns
         -------
         StockPosition or None
-            Removed stock position if any
+            Removed stock position
         """
         stock = self._stock
         self._stock = None
         return stock
 
+    @property
+    def positions(self) -> List[PortfolioPosition]:
+        """Option positions (read-only copy)."""
+        return list(self._positions)
+
+    @property
+    def stock(self) -> Optional[StockPosition]:
+        """Stock position if any."""
+        return self._stock
+
+    @property
+    def model(self) -> Model:
+        """Current pricing model."""
+        return self._model
+
+    @model.setter
+    def model(self, value: Model):
+        """Set new model and auto-select engine."""
+        self._model = value
+        self._engine = self._auto_select_engine(value)
+
+    @property
+    def engine(self) -> PricingEngine:
+        """Current pricing engine."""
+        return self._engine
+
+    @engine.setter
+    def engine(self, value: PricingEngine):
+        """Set new engine."""
+        self._engine = value
+
     # =========================================================================
-    # Greeks Calculation
+    # Valuation
     # =========================================================================
 
-    def calculate_greeks(
-        self,
-        spot: float,
-        rate: float,
-        time_to_expiry: float,
-    ) -> GreeksResult:
+    def value(self, market: MarketEnvironment) -> float:
         """
-        Calculate aggregate Greeks for the portfolio.
+        Calculate current portfolio value.
 
         Parameters
         ----------
-        spot : float
-            Current spot price
-        rate : float
-            Risk-free interest rate (annualized)
-        time_to_expiry : float
-            Time to expiry in years
+        market : MarketEnvironment
+            Current market conditions (spot, rate, dividend_yield)
+
+        Returns
+        -------
+        float
+            Portfolio mark-to-market value
+        """
+        total = 0.0
+
+        for pos in self._positions:
+            result = self._engine.price(pos.instrument, self._model, market)
+            total += pos.quantity * result.price
+
+        if self._stock:
+            total += self._stock.quantity * market.spot
+
+        return total
+
+    def pnl_at_expiry(self, spot: Union[float, np.ndarray]) -> Union[float, np.ndarray]:
+        """
+        Calculate P&L at expiry (no model needed).
+
+        Parameters
+        ----------
+        spot : float or array
+            Spot price(s) at expiry
+
+        Returns
+        -------
+        float or array
+            Total P&L
+        """
+        spot_arr = np.atleast_1d(np.asarray(spot, dtype=float))
+        total = np.zeros_like(spot_arr)
+
+        for pos in self._positions:
+            total += pos.payoff_at_expiry(spot_arr)
+
+        if self._stock:
+            total += self._stock.pnl(spot_arr)
+
+        return float(total[0]) if np.isscalar(spot) else total
+
+    # =========================================================================
+    # Numba-Optimized P&L Calculation
+    # =========================================================================
+
+    def _positions_to_arrays(self) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """
+        Convert portfolio positions to numpy arrays for Numba functions.
+
+        Returns
+        -------
+        tuple
+            (strikes, option_types, position_types, quantities, premiums)
+            option_types: 1 = call, -1 = put
+            position_types: 1 = long, -1 = short
+        """
+        n_legs = len(self._positions)
+
+        strikes = np.zeros(n_legs, dtype=np.float64)
+        option_types = np.zeros(n_legs, dtype=np.float64)
+        position_types = np.zeros(n_legs, dtype=np.float64)
+        quantities = np.zeros(n_legs, dtype=np.float64)
+        premiums = np.zeros(n_legs, dtype=np.float64)
+
+        for i, pos in enumerate(self._positions):
+            strikes[i] = pos.strike
+            option_types[i] = 1.0 if pos.is_call else -1.0
+            position_types[i] = 1.0 if pos.is_long else -1.0
+            quantities[i] = abs(pos.quantity)
+            premiums[i] = pos.premium
+
+        return strikes, option_types, position_types, quantities, premiums
+
+    def pnl_at_expiry_fast(
+        self,
+        spot: np.ndarray,
+        multiplier: float = 100.0
+    ) -> np.ndarray:
+        """
+        Calculate P&L at expiry using Numba-optimized functions.
+
+        This method is significantly faster for large arrays (>1000 elements)
+        due to parallel execution across all CPU cores.
+
+        Parameters
+        ----------
+        spot : np.ndarray
+            Terminal spot prices, shape (n_paths,)
+        multiplier : float
+            Contract multiplier (default 100 shares per contract)
+
+        Returns
+        -------
+        np.ndarray
+            P&L for each spot price
+        """
+        strikes, option_types, position_types, quantities, premiums = self._positions_to_arrays()
+
+        if self._stock:
+            return calculate_portfolio_pnl_with_stock(
+                spot,
+                strikes, option_types, position_types, quantities, premiums,
+                stock_quantity=self._stock.quantity,
+                stock_entry_price=self._stock.entry_price,
+                multiplier=multiplier
+            )
+        else:
+            return calculate_portfolio_pnl_vectorized(
+                spot,
+                strikes, option_types, position_types, quantities, premiums,
+                multiplier=multiplier
+            )
+
+    def payoff_curve(
+        self,
+        spot_range: np.ndarray,
+        multiplier: float = 100.0
+    ) -> np.ndarray:
+        """
+        Compute theoretical payoff curve at expiration using Numba.
+
+        Parameters
+        ----------
+        spot_range : np.ndarray
+            Range of spot prices to evaluate
+        multiplier : float
+            Contract multiplier (default 100)
+
+        Returns
+        -------
+        np.ndarray
+            P&L values for each spot price
+        """
+        strikes, option_types, position_types, quantities, premiums = self._positions_to_arrays()
+
+        stock_qty = self._stock.quantity if self._stock else 0.0
+        stock_entry = self._stock.entry_price if self._stock else 0.0
+
+        return compute_payoff_curve(
+            spot_range,
+            strikes, option_types, position_types, quantities, premiums,
+            stock_quantity=stock_qty,
+            stock_entry_price=stock_entry,
+            multiplier=multiplier
+        )
+
+    def find_breakevens(
+        self,
+        spot_min: float = 50.0,
+        spot_max: float = 150.0,
+        n_points: int = 1000,
+        multiplier: float = 100.0
+    ) -> np.ndarray:
+        """
+        Find breakeven points using Numba-optimized functions.
+
+        Parameters
+        ----------
+        spot_min : float
+            Minimum spot price in range
+        spot_max : float
+            Maximum spot price in range
+        n_points : int
+            Number of points for interpolation
+        multiplier : float
+            Contract multiplier
+
+        Returns
+        -------
+        np.ndarray
+            Breakeven spot prices (where P&L = 0)
+        """
+        spot_range = np.linspace(spot_min, spot_max, n_points)
+        payoff = self.payoff_curve(spot_range, multiplier)
+        return find_breakeven_points(payoff, spot_range)
+
+    def risk_metrics_from_simulation(
+        self,
+        terminal_prices: np.ndarray,
+        multiplier: float = 100.0
+    ) -> RiskMetrics:
+        """
+        Compute risk metrics from simulated terminal prices.
+
+        Parameters
+        ----------
+        terminal_prices : np.ndarray
+            Array of simulated terminal spot prices
+        multiplier : float
+            Contract multiplier
+
+        Returns
+        -------
+        RiskMetrics
+            Named tuple with VaR, CVaR, probability of profit, etc.
+        """
+        pnl = self.pnl_at_expiry_fast(terminal_prices, multiplier)
+        return compute_risk_metrics(pnl)
+
+    # =========================================================================
+    # Greeks (Finite Differences)
+    # =========================================================================
+
+    def greeks(
+        self,
+        market: MarketEnvironment,
+        spot_bump: float = 0.01,
+        rate_bump: float = 0.0001,
+        vol_bump: float = 0.01,
+    ) -> GreeksResult:
+        """
+        Calculate portfolio Greeks via central finite differences.
+
+        Parameters
+        ----------
+        market : MarketEnvironment
+            Current market conditions
+        spot_bump : float
+            Relative spot bump (default 1%)
+        rate_bump : float
+            Absolute rate bump (default 1bp)
+        vol_bump : float
+            Absolute vol bump (default 1%)
 
         Returns
         -------
         GreeksResult
-            Portfolio Greeks (delta, gamma, theta, vega, rho)
+            Portfolio Greeks
         """
-        return self._greeks_calc.calculate(
-            options=self._options,
-            stock=self._stock,
-            spot=spot,
-            rate=rate,
-            time_to_expiry=time_to_expiry,
+        v0 = self.value(market)
+
+        # Delta & Gamma (via finite differences on full portfolio value)
+        # Note: Stock delta is already captured via value() which includes stock position
+        h_s = market.spot * spot_bump
+        v_up = self.value(market.bump_spot(h_s))
+        v_down = self.value(market.bump_spot(-h_s))
+        delta = (v_up - v_down) / (2 * h_s)
+        gamma = (v_up - 2 * v0 + v_down) / (h_s ** 2)
+
+        # Rho
+        h_r = rate_bump
+        v_r_up = self.value(market.bump_rate(h_r))
+        v_r_down = self.value(market.bump_rate(-h_r))
+        rho = (v_r_up - v_r_down) / (2 * h_r)
+
+        # Vega (requires model bumping)
+        vega = self._compute_vega(market, vol_bump)
+
+        # Theta (approximate via 1-day time decay)
+        theta = self._compute_theta(market)
+
+        return GreeksResult(
+            delta=delta,
+            gamma=gamma,
+            theta=theta,
+            vega=vega,
+            rho=rho,
         )
+
+    def _compute_vega(self, market: MarketEnvironment, h: float) -> float:
+        """Compute vega by bumping model volatility."""
+        params = self._model.get_parameters()
+
+        if "sigma" in params:
+            # GBM model - bump sigma
+            from backend.models.gbm import GBMModel
+            sigma = params["sigma"]
+
+            model_up = GBMModel(sigma=sigma + h)
+            model_down = GBMModel(sigma=sigma - h)
+
+            v_up = self._value_with_model(market, model_up)
+            v_down = self._value_with_model(market, model_down)
+
+            return (v_up - v_down) / (2 * h)
+
+        elif "v0" in params:
+            # Heston/Bates - bump v0
+            v0 = params["v0"]
+
+            # Create bumped models
+            model_class = type(self._model)
+            params_up = dict(params)
+            params_down = dict(params)
+            params_up["v0"] = v0 + h * v0
+            params_down["v0"] = max(v0 - h * v0, 0.001)
+
+            model_up = model_class(**params_up)
+            model_down = model_class(**params_down)
+
+            v_up = self._value_with_model(market, model_up)
+            v_down = self._value_with_model(market, model_down)
+
+            return (v_up - v_down) / (2 * h * v0)
+
+        return 0.0
+
+    def _compute_theta(self, market: MarketEnvironment) -> float:
+        """
+        Compute theta via time decay.
+
+        Approximate by creating positions with reduced maturity.
+        """
+        dt = 1.0 / 365.0  # 1 day
+
+        v0 = self.value(market)
+
+        # Create portfolio with shorter maturities
+        total_decayed = 0.0
+        for pos in self._positions:
+            new_maturity = max(pos.maturity - dt, 0.001)
+            from backend.instruments.options import VanillaOption
+            decayed_instrument = VanillaOption(
+                strike=pos.strike,
+                maturity=new_maturity,
+                is_call=pos.is_call,
+            )
+            result = self._engine.price(decayed_instrument, self._model, market)
+            total_decayed += pos.quantity * result.price
+
+        if self._stock:
+            total_decayed += self._stock.quantity * market.spot
+
+        # Theta = change in value for 1 day time decay (negative)
+        return (total_decayed - v0) / dt
+
+    def _value_with_model(self, market: MarketEnvironment, model: Model) -> float:
+        """Value portfolio with a different model."""
+        total = 0.0
+        for pos in self._positions:
+            result = self._engine.price(pos.instrument, model, market)
+            total += pos.quantity * result.price
+
+        if self._stock:
+            total += self._stock.quantity * market.spot
+
+        return total
+
+    # =========================================================================
+    # Convenience Methods
+    # =========================================================================
 
     def calculate_greeks_surface(
         self,
-        spot: float,
-        rate: float,
-        dte_range: np.ndarray,
+        market: MarketEnvironment,
+        spot_range: np.ndarray,
         greek: str = 'delta',
     ) -> np.ndarray:
         """
-        Calculate a Greek surface over days to expiry.
+        Calculate a Greek across spot prices.
 
         Parameters
         ----------
-        spot : float
-            Current spot price
-        rate : float
-            Risk-free interest rate
-        dte_range : np.ndarray
-            Array of days to expiry values
+        market : MarketEnvironment
+            Base market conditions
+        spot_range : np.ndarray
+            Array of spot prices
         greek : str
             Which Greek to compute ('delta', 'gamma', 'theta', 'vega', 'rho')
 
         Returns
         -------
         np.ndarray
-            Greek values corresponding to each DTE
+            Greek values corresponding to each spot
         """
-        results = np.zeros(len(dte_range))
-
-        for i, dte in enumerate(dte_range):
-            time_to_expiry = dte / 365.0
-            greeks = self.calculate_greeks(spot, rate, time_to_expiry)
-            results[i] = getattr(greeks, greek)
-
-        return results
-
-    def calculate_greeks_surface_2d(
-        self,
-        spot_range: np.ndarray,
-        rate: float,
-        dte_range: np.ndarray,
-        greek: str = 'delta',
-    ) -> np.ndarray:
-        """
-        Calculate a 2D Greek surface over spot and DTE.
-
-        Parameters
-        ----------
-        spot_range : np.ndarray
-            Array of spot prices
-        rate : float
-            Risk-free interest rate
-        dte_range : np.ndarray
-            Array of days to expiry values
-        greek : str
-            Which Greek to compute
-
-        Returns
-        -------
-        np.ndarray
-            2D array of shape (len(spot_range), len(dte_range))
-        """
-        results = np.zeros((len(spot_range), len(dte_range)))
+        results = np.zeros(len(spot_range))
 
         for i, spot in enumerate(spot_range):
-            for j, dte in enumerate(dte_range):
-                time_to_expiry = dte / 365.0
-                greeks = self.calculate_greeks(spot, rate, time_to_expiry)
-                results[i, j] = getattr(greeks, greek)
+            bumped_market = market.with_spot(spot)
+            greeks = self.greeks(bumped_market)
+            results[i] = getattr(greeks, greek, 0.0)
 
         return results
-
-    # =========================================================================
-    # P&L Calculation
-    # =========================================================================
-
-    def calculate_pnl_at_expiry(
-        self,
-        spot: Union[float, np.ndarray],
-    ) -> Union[float, np.ndarray]:
-        """
-        Calculate P&L at expiry for given spot price(s).
-
-        Parameters
-        ----------
-        spot : float or np.ndarray
-            Spot price(s) at expiry
-
-        Returns
-        -------
-        float or np.ndarray
-            P&L at expiry
-        """
-        if isinstance(spot, np.ndarray):
-            return np.array([self._pnl_at_spot(s) for s in spot])
-        return self._pnl_at_spot(spot)
-
-    def _pnl_at_spot(self, spot: float) -> float:
-        """Calculate P&L at a single spot price."""
-        total = 0.0
-
-        for pos in self._options:
-            total += pos.payoff_at_expiry(spot)
-
-        if self._stock is not None:
-            total += self._stock.pnl(spot)
-
-        return total
-
-    # =========================================================================
-    # Breakeven Analysis
-    # =========================================================================
-
-    def calculate_breakevens(
-        self,
-        spot_min: Optional[float] = None,
-        spot_max: Optional[float] = None,
-        precision: int = 10000,
-    ) -> BreakevenResult:
-        """
-        Calculate breakeven points for the portfolio.
-
-        Parameters
-        ----------
-        spot_min : float, optional
-            Minimum spot price to search (default: lowest strike * 0.5)
-        spot_max : float, optional
-            Maximum spot price to search (default: highest strike * 1.5)
-        precision : int
-            Number of grid points for search
-
-        Returns
-        -------
-        BreakevenResult
-            Breakeven analysis results
-        """
-        # Auto-determine search range if not provided
-        if spot_min is None or spot_max is None:
-            strikes = [pos.strike for pos in self._options]
-            if not strikes:
-                strikes = [100.0]  # Default if no options
-
-            if spot_min is None:
-                spot_min = min(strikes) * 0.5
-            if spot_max is None:
-                spot_max = max(strikes) * 1.5
-
-        calculator = BreakevenCalculator(
-            spot_min=spot_min,
-            spot_max=spot_max,
-            precision=precision,
-        )
-
-        return calculator.calculate(self._options, self._stock)
-
-    # =========================================================================
-    # Portfolio Value
-    # =========================================================================
-
-    def calculate_value(
-        self,
-        spot: float,
-        rate: float,
-        time_to_expiry: float,
-    ) -> float:
-        """
-        Calculate current portfolio value using the pricer.
-
-        Parameters
-        ----------
-        spot : float
-            Current spot price
-        rate : float
-            Risk-free interest rate
-        time_to_expiry : float
-            Time to expiry in years
-
-        Returns
-        -------
-        float
-            Current portfolio value
-        """
-        total = 0.0
-
-        for pos in self._options:
-            opt_type = pos.option_type.value
-            result = self._pricer.price(
-                s0=spot,
-                k=pos.strike,
-                t=time_to_expiry,
-                r=rate,
-                option_type=opt_type,
-            )
-            price = result.price if hasattr(result, 'price') else float(result)
-            total += pos.sign * pos.quantity * price
-
-        # Stock position value
-        if self._stock is not None:
-            total += self._stock.sign * self._stock.quantity * spot
-
-        return total
 
     # =========================================================================
     # Utility Methods
@@ -496,29 +572,106 @@ class OptionsPortfolio:
 
     def __len__(self) -> int:
         """Number of option positions."""
-        return len(self._options)
+        return len(self._positions)
 
     def __repr__(self) -> str:
-        stock_str = f", stock={self._stock}" if self._stock else ""
-        return f"OptionsPortfolio(options={len(self._options)}{stock_str})"
+        stock_str = f", stock={self._stock.quantity}" if self._stock else ""
+        return f"OptionsPortfolio({len(self._positions)} options{stock_str}, model={self._model.name})"
 
     def summary(self) -> str:
         """Generate a human-readable summary of the portfolio."""
-        lines = ["=== Portfolio Summary ==="]
+        lines = [f"=== Portfolio Summary (Model: {self._model.name}) ==="]
 
-        for i, pos in enumerate(self._options):
+        for i, pos in enumerate(self._positions):
             direction = "Long" if pos.is_long else "Short"
             opt_type = "Call" if pos.is_call else "Put"
             lines.append(
-                f"{i+1}. {direction} {pos.quantity}x {opt_type} @ K={pos.strike:.2f} "
-                f"(premium={pos.premium:.2f})"
+                f"{i+1}. {direction} {abs(pos.quantity)}x {opt_type} @ K={pos.strike:.2f} "
+                f"T={pos.maturity:.2f}y (premium={pos.premium:.2f})"
             )
 
         if self._stock:
             direction = "Long" if self._stock.is_long else "Short"
             lines.append(
-                f"Stock: {direction} {self._stock.quantity} shares "
+                f"Stock: {direction} {abs(self._stock.quantity)} shares "
                 f"@ {self._stock.entry_price:.2f}"
             )
 
         return "\n".join(lines)
+
+
+# =============================================================================
+# SMOKE TEST
+# =============================================================================
+
+if __name__ == "__main__":
+    from backend.models.gbm import GBMModel
+    from backend.models.heston import HestonModel
+    from backend.core.market import MarketEnvironment
+    from backend.engines import BSAnalyticEngine, FFTEngine
+    from .positions import long_call, short_call, long_put, long_stock
+
+    print("=" * 50)
+    print("Portfolio Module Smoke Test")
+    print("=" * 50)
+
+    # Create model and market
+    gbm = GBMModel(sigma=0.20)
+    market = MarketEnvironment(spot=100, rate=0.05, dividend_yield=0.02)
+
+    print(f"\n--- Setup ---")
+    print(f"Model: {gbm}")
+    print(f"Market: S={market.spot}, r={market.rate}, q={market.dividend_yield}")
+
+    # Build portfolio (Bull Call Spread)
+    print(f"\n--- Bull Call Spread ---")
+    portfolio = OptionsPortfolio(model=gbm)
+    portfolio.add(long_call(strike=95, maturity=0.5, premium=8.0))
+    portfolio.add(short_call(strike=105, maturity=0.5, premium=3.0))
+
+    print(portfolio.summary())
+
+    # Portfolio value
+    value = portfolio.value(market)
+    print(f"\nPortfolio Value: ${value:.4f}")
+
+    # Greeks
+    greeks = portfolio.greeks(market)
+    print(f"\n--- Greeks ---")
+    print(f"Delta: {greeks.delta:.4f}")
+    print(f"Gamma: {greeks.gamma:.6f}")
+    print(f"Theta: {greeks.theta:.4f}")
+    print(f"Vega: {greeks.vega:.4f}")
+    print(f"Rho: {greeks.rho:.4f}")
+
+    # P&L at expiry
+    print(f"\n--- P&L at Expiry ---")
+    spots = np.array([85, 90, 95, 100, 105, 110, 115])
+    pnls = portfolio.pnl_at_expiry(spots)
+    for s, p in zip(spots, pnls):
+        print(f"  Spot={s}: P&L=${p:.2f}")
+
+    # Test with Heston model
+    print(f"\n--- Heston Model ---")
+    heston = HestonModel(v0=0.04, kappa=2.0, theta=0.04, xi=0.3, rho=-0.7)
+    portfolio_heston = OptionsPortfolio(model=heston)
+    portfolio_heston.add(long_call(strike=100, maturity=0.5, premium=5.0))
+
+    value_heston = portfolio_heston.value(market)
+    greeks_heston = portfolio_heston.greeks(market)
+    print(f"Value: ${value_heston:.4f}")
+    print(f"Delta: {greeks_heston.delta:.4f}")
+
+    # Test with stock
+    print(f"\n--- Portfolio with Stock ---")
+    covered_call = OptionsPortfolio(model=gbm)
+    covered_call.add(long_stock(quantity=100, entry_price=100.0))
+    covered_call.add(short_call(strike=105, maturity=0.5, premium=3.0))
+
+    print(covered_call.summary())
+    covered_greeks = covered_call.greeks(market)
+    print(f"Covered Call Delta: {covered_greeks.delta:.4f}")  # Should be ~0.5-0.6
+
+    print("\n" + "=" * 50)
+    print("Portfolio smoke test passed")
+    print("=" * 50)

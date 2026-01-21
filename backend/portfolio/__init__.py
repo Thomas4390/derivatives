@@ -4,97 +4,89 @@ Portfolio Module
 
 Portfolio management with positions, Greeks calculation, and breakeven analysis.
 
-Quick Start
------------
-    from backend.portfolio import (
-        # Main class
-        OptionsPortfolio,
-        # Position classes
-        OptionPosition, StockPosition,
-        OptionType, PositionType,
-        # Greeks
-        GreeksResult, GreeksCalculator,
-        # Breakeven
-        BreakevenResult,
-    )
+This module provides:
+- OptionsPortfolio: Main portfolio class
+- PortfolioPosition, StockPosition: Position classes
+- Factory functions: long_call, short_call, long_put, short_put, long_stock, short_stock
+- Breakeven analysis: BreakevenResult, BreakevenCalculator, find_breakevens
 
-Example
--------
-    >>> portfolio = OptionsPortfolio(sigma=0.20)
-    >>> portfolio.add_option(OptionPosition('call', 'long', strike=100, premium=5.0))
-    >>> greeks = portfolio.calculate_greeks(spot=100, rate=0.05, time_to_expiry=0.5)
-    >>> print(f"Delta: {greeks.delta:.4f}")
+Uses the Model/Engine/Market architecture for pricing.
 
-Author: Derivatives Pricing Project
+Author: Thomas
+Created: 2025
 """
 
-# Position classes and enums
+# =============================================================================
+# Position Classes and Factory Functions
+# =============================================================================
+
 from .positions import (
-    OptionPosition,
+    # Classes
+    PortfolioPosition,
     StockPosition,
-    OptionType,
-    PositionType,
+    # Factory functions
+    long_call,
+    short_call,
+    long_put,
+    short_put,
+    long_stock,
+    short_stock,
 )
 
-# Greeks calculation
-from .greeks import (
-    GreeksResult,
-    GreeksStrategy,
-    GreeksCalculator,
-    AnalyticalGreeksStrategy,
-    FiniteDiffGreeksStrategy,
-    # Higher-order Greeks (Black-Scholes analytical)
-    calculate_bs_second_order_greeks,
-    calculate_bs_third_order_greeks,
-    DAYS_PER_YEAR,
-    # Standalone functions for frontend
-    calculate_all_greeks,
-    calculate_portfolio_greeks_3d_dte,
-    calculate_portfolio_greeks_3d_iv,
-    calculate_greeks_3d_strike,
-)
+# =============================================================================
+# Breakeven Analysis
+# =============================================================================
 
-# Breakeven analysis
 from .breakeven import (
     BreakevenResult,
     BreakevenCalculator,
     find_breakevens,
-    find_breakeven_points,  # Legacy-compatible array-based interface
+    find_breakevens_from_portfolio,
     calculate_portfolio_pnl_at_expiry,
-    calculate_pnl_at_expiry_arrays,  # Array-based interface for frontend
 )
 
-# Main portfolio class
+# =============================================================================
+# Main Portfolio Class
+# =============================================================================
+
 from .portfolio import OptionsPortfolio
+
+# =============================================================================
+# Re-export GreeksResult from core (for convenience)
+# =============================================================================
+
+from backend.core.result_types import GreeksResult
+
+# =============================================================================
+# Numba-Optimized Risk Metrics
+# =============================================================================
+
+from backend.simulation.pnl_engine import RiskMetrics
 
 
 __all__ = [
     # Main class
     "OptionsPortfolio",
-    # Positions
-    "OptionPosition",
+    # Position classes
+    "PortfolioPosition",
     "StockPosition",
-    "OptionType",
-    "PositionType",
-    # Greeks
+    # Factory functions
+    "long_call",
+    "short_call",
+    "long_put",
+    "short_put",
+    "long_stock",
+    "short_stock",
+    # Greeks (from core)
     "GreeksResult",
-    "GreeksStrategy",
-    "GreeksCalculator",
-    "AnalyticalGreeksStrategy",
-    "FiniteDiffGreeksStrategy",
-    "calculate_bs_second_order_greeks",
-    "calculate_bs_third_order_greeks",
-    "DAYS_PER_YEAR",
-    # Standalone functions for frontend
-    "calculate_all_greeks",
-    "calculate_portfolio_greeks_3d_dte",
-    "calculate_portfolio_greeks_3d_iv",
-    "calculate_greeks_3d_strike",
+    # Risk metrics (Numba-optimized)
+    "RiskMetrics",
     # Breakeven
     "BreakevenResult",
     "BreakevenCalculator",
     "find_breakevens",
-    "find_breakeven_points",
+    "find_breakevens_from_portfolio",
     "calculate_portfolio_pnl_at_expiry",
-    "calculate_pnl_at_expiry_arrays",
 ]
+
+__version__ = "2.0.0"
