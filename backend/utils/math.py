@@ -9,7 +9,8 @@ These are the SINGLE source of truth for:
 - Normal distribution functions (CDF, PDF)
 - Black-Scholes d1/d2 parameters
 
-Author: Derivatives Pricing Project
+Author: Thomas
+Created: 2025
 """
 
 import math
