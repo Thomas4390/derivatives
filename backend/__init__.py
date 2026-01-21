@@ -4,68 +4,46 @@ Backend Package - Unified API
 
 High-performance derivatives pricing and portfolio management.
 
-Quick Start
------------
-    from backend import (
-        # Portfolio management (NEW)
-        OptionsPortfolio, OptionPosition, StockPosition,
-        GreeksResult, BreakevenResult,
-        # Option pricers
-        BlackScholesPricer, HestonPricer, BatesPricer, MertonPricer,
-        PricingMethod, PricingResult,
-        # Simulators
-        GBMSimulator, HestonSimulator, MertonSimulator, BatesSimulator,
-        SimulationResult,
-        # Unified models
-        GBMModel, HestonModel, BatesModel, MertonModel,
-    )
+Three Pillars Architecture:
+- Instrument (What): VanillaOption, OptionStrategy
+- Model (Physics): GBMModel, HestonModel, BatesModel, MertonModel
+- Engine (How): BSAnalyticEngine, FFTEngine, MonteCarloEngine
 
-Examples
---------
-Portfolio Greeks (New API):
-    >>> portfolio = OptionsPortfolio(sigma=0.20)
-    >>> portfolio.add_option(OptionPosition('call', 'long', strike=100, premium=5.0))
-    >>> greeks = portfolio.calculate_greeks(spot=100, rate=0.05, time_to_expiry=0.5)
-    >>> print(f"Delta: {greeks.delta:.4f}")
+Main Components:
+- Portfolio management: OptionsPortfolio, PortfolioPosition, StockPosition
+- Pricing engines: BSAnalyticEngine, FFTEngine, MonteCarloEngine
+- Models: GBMModel, HestonModel, BatesModel, MertonModel, GARCH variants
+- Simulation: GBMSimulator, HestonSimulator, MertonSimulator, BatesSimulator
 
-With custom pricer:
-    >>> pricer = HestonPricer(v0=0.04, kappa=2.0, theta=0.04, xi=0.3, rho=-0.7)
-    >>> portfolio = OptionsPortfolio(pricer=pricer)
-
-Single option pricing:
-    >>> pricer = BlackScholesPricer(sigma=0.20)
-    >>> result = pricer.price(s0=100, k=100, t=0.25, r=0.05)
-    >>> print(f"Price: {result.price:.4f}")
-
-Simulation:
-    >>> sim = HestonSimulator(v0=0.04, kappa=2.0, theta=0.04, xi=0.3, rho=-0.7)
-    >>> result = sim.simulate_paths(s0=100, mu=0.08, t=1.0, n_paths=10000)
-
-Author: Derivatives Pricing Project
-Version: 4.0.0
+Author: Thomas
+Created: 2025
+Version: 5.0.0
 """
 
 # =============================================================================
-# Portfolio Management (NEW - Primary API)
+# Portfolio Management (NEW Architecture)
 # =============================================================================
 
 from .portfolio import (
     # Main portfolio class
     OptionsPortfolio,
     # Position classes
-    OptionPosition,
+    PortfolioPosition,
     StockPosition,
-    OptionType,
-    PositionType,
-    # Greeks
+    # Factory functions
+    long_call,
+    short_call,
+    long_put,
+    short_put,
+    long_stock,
+    short_stock,
+    # Greeks (from core)
     GreeksResult,
-    GreeksCalculator,
-    AnalyticalGreeksStrategy,
-    FiniteDiffGreeksStrategy,
     # Breakeven
     BreakevenResult,
     BreakevenCalculator,
     find_breakevens,
+    find_breakevens_from_portfolio,
 )
 
 # =============================================================================
@@ -81,41 +59,28 @@ from .utils import (
 )
 
 # =============================================================================
-# Option Pricers
+# GARCH Pricer (Standalone, uses LRNVR)
 # =============================================================================
 
-from .option_pricing import (
-    # Base classes
-    BasePricer,
-    PricingResult,
-    PricingMethod,
-    # Black-Scholes / GBM
-    BlackScholesPricer,
-    GBMPricer,
-    bs_call_price,
-    bs_put_price,
-    bs_greeks,
-    implied_volatility,
-    # Heston
-    HestonPricer,
-    heston_call_price,
-    heston_put_price,
-    # Bates
-    BatesPricer,
-    bates_call_price,
-    bates_put_price,
-    # Merton
-    MertonPricer,
-    merton_call_price,
-    merton_put_price,
-    # GARCH
+from .engines.monte_carlo.garch_pricer import (
     GARCHMCPricer,
     GARCHType,
-    # Engines
+    GARCHPricingResult,
+)
+
+# =============================================================================
+# Low-level Engines (for advanced use)
+# =============================================================================
+
+from .engines.fourier.carr_madan import (
     CarrMadanFFTEngine,
     FFTConfig,
-    MonteCarloEngine,
+)
+
+from .engines.monte_carlo.mc_base import (
+    GenericMCEngine,
     MCConfig,
+    MCResult,
 )
 
 # =============================================================================
@@ -162,12 +127,76 @@ from .models import (
     GARCHModel,
     NGARCHModel,
     GJRGARCHModel,
-    # Parameters
-    GBMParams,
-    HestonParams,
-    MertonParams,
-    BatesParams,
+    # GARCH params (aliases for backward compatibility)
     GARCHParams,
+    NGARCHParams,
+    GJRGARCHParams,
+)
+
+# =============================================================================
+# New Architecture - Core
+# =============================================================================
+
+from .core import (
+    # Interfaces
+    Instrument,
+    Model,
+    PricingEngine,
+    Payoff,
+    # Market
+    MarketEnvironment,
+    # Result types
+    PricingResult,
+    ExerciseStyle,
+)
+
+# =============================================================================
+# New Architecture - Instruments
+# =============================================================================
+
+from .instruments import (
+    # Options
+    VanillaOption,
+    EuropeanCall,
+    EuropeanPut,
+    AmericanCall,
+    AmericanPut,
+    # Payoffs
+    VanillaCallPayoff,
+    VanillaPutPayoff,
+    CompositePayoff,
+    # Strategies
+    OptionStrategy,
+    IronCondor,
+    Straddle,
+    Butterfly,
+    StrategyLeg,
+)
+
+# =============================================================================
+# New Architecture - Engines
+# =============================================================================
+
+from .engines import (
+    BSAnalyticEngine,
+    FFTEngine,
+    MonteCarloEngine,
+)
+
+# =============================================================================
+# Greeks Calculation
+# =============================================================================
+
+from .greeks import (
+    GreeksCalculator,
+    calculate_greeks,
+    # Analytic Greeks
+    bs_greeks_first_order,
+    bs_greeks_second_order,
+    bs_greeks_third_order,
+    bs_all_greeks,
+    # Numerical Greeks
+    finite_difference_greeks,
 )
 
 # =============================================================================
@@ -176,20 +205,24 @@ from .models import (
 
 __all__ = [
     # =========================================================================
-    # Portfolio Management (Primary API)
+    # Portfolio Management (New Architecture)
     # =========================================================================
     "OptionsPortfolio",
-    "OptionPosition",
+    "PortfolioPosition",
     "StockPosition",
-    "OptionType",
-    "PositionType",
+    # Factory functions
+    "long_call",
+    "short_call",
+    "long_put",
+    "short_put",
+    "long_stock",
+    "short_stock",
+    # Greeks & Breakeven
     "GreeksResult",
-    "GreeksCalculator",
-    "AnalyticalGreeksStrategy",
-    "FiniteDiffGreeksStrategy",
     "BreakevenResult",
     "BreakevenCalculator",
     "find_breakevens",
+    "find_breakevens_from_portfolio",
     # =========================================================================
     # Utilities
     # =========================================================================
@@ -199,38 +232,19 @@ __all__ = [
     "norm_pdf_vec",
     "d1_d2",
     # =========================================================================
-    # Option Pricers
+    # GARCH Pricer
     # =========================================================================
-    "BasePricer",
-    "PricingResult",
-    "PricingMethod",
-    # Black-Scholes
-    "BlackScholesPricer",
-    "GBMPricer",
-    "bs_call_price",
-    "bs_put_price",
-    "bs_greeks",
-    "implied_volatility",
-    # Heston
-    "HestonPricer",
-    "heston_call_price",
-    "heston_put_price",
-    # Bates
-    "BatesPricer",
-    "bates_call_price",
-    "bates_put_price",
-    # Merton
-    "MertonPricer",
-    "merton_call_price",
-    "merton_put_price",
-    # GARCH
     "GARCHMCPricer",
     "GARCHType",
-    # Engines
+    "GARCHPricingResult",
+    # =========================================================================
+    # Low-level Engines
+    # =========================================================================
     "CarrMadanFFTEngine",
     "FFTConfig",
-    "MonteCarloEngine",
+    "GenericMCEngine",
     "MCConfig",
+    "MCResult",
     # =========================================================================
     # Simulation
     # =========================================================================
@@ -262,11 +276,52 @@ __all__ = [
     "GARCHModel",
     "NGARCHModel",
     "GJRGARCHModel",
-    "GBMParams",
-    "HestonParams",
-    "MertonParams",
-    "BatesParams",
+    # GARCH params (aliases for backward compatibility)
     "GARCHParams",
+    "NGARCHParams",
+    "GJRGARCHParams",
+    # =========================================================================
+    # Core Interfaces and Types
+    # =========================================================================
+    "Instrument",
+    "Model",
+    "PricingEngine",
+    "Payoff",
+    "MarketEnvironment",
+    "PricingResult",
+    "ExerciseStyle",
+    # =========================================================================
+    # Instruments
+    # =========================================================================
+    "VanillaOption",
+    "EuropeanCall",
+    "EuropeanPut",
+    "AmericanCall",
+    "AmericanPut",
+    "VanillaCallPayoff",
+    "VanillaPutPayoff",
+    "CompositePayoff",
+    "OptionStrategy",
+    "IronCondor",
+    "Straddle",
+    "Butterfly",
+    "StrategyLeg",
+    # =========================================================================
+    # Engines
+    # =========================================================================
+    "BSAnalyticEngine",
+    "FFTEngine",
+    "MonteCarloEngine",
+    # =========================================================================
+    # Greeks Calculation
+    # =========================================================================
+    "GreeksCalculator",
+    "calculate_greeks",
+    "bs_greeks_first_order",
+    "bs_greeks_second_order",
+    "bs_greeks_third_order",
+    "bs_all_greeks",
+    "finite_difference_greeks",
 ]
 
-__version__ = "4.0.0"
+__version__ = "5.0.0"
