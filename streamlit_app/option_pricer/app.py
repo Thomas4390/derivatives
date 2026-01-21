@@ -20,13 +20,13 @@ import streamlit as st
 import numpy as np
 import json
 
-# Backend imports (new architecture)
-from backend.portfolio import (
+# Pricing functions (using new backend architecture)
+from services.pricing_adapter import (
     OptionsPortfolio,
     OptionPosition,
     StockPosition,
     calculate_all_greeks,
-    calculate_pnl_at_expiry_arrays as calculate_portfolio_pnl_at_expiry,  # Array-based interface
+    calculate_pnl_at_expiry_arrays as calculate_portfolio_pnl_at_expiry,
     find_breakeven_points,
     calculate_portfolio_greeks_3d_dte,
     calculate_portfolio_greeks_3d_iv,

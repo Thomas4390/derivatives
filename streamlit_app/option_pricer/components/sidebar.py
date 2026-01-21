@@ -624,7 +624,10 @@ def _render_leg_editor(
 
     # Calculate premium
     portfolio_temp = portfolio_class(spot_price, risk_free_rate)
-    position_temp = option_position_class(new_option_type, new_position_type, new_strike, new_quantity)
+    position_temp = option_position_class(
+        new_option_type, new_position_type, new_strike, new_quantity,
+        spot_price=spot_price, risk_free_rate=risk_free_rate
+    )
     portfolio_temp.add_option(position_temp)
     premium = position_temp.premium_paid
     total_cost = premium * new_quantity * CONTRACT_MULTIPLIER
@@ -795,7 +798,9 @@ def _apply_strategy(
                 leg_state['option_type'],
                 leg_state['position_type'],
                 leg_state['strike'],
-                leg_state['quantity']
+                leg_state['quantity'],
+                spot_price=spot_price,
+                risk_free_rate=risk_free_rate
             )
             portfolio_temp.add_option(position_temp)
             premium = position_temp.premium_paid

@@ -11,7 +11,6 @@ import json
 from config.constants import (
     GREEK_NAMES,
     GREEK_TITLES,
-    CONTRACT_MULTIPLIER,
     STRIKE_RANGE_FACTORS
 )
 from config.chart_theme import (
@@ -133,46 +132,34 @@ def calculate_3d_surface(
         Tuple of (X, Y, Z, y_label)
     """
     portfolio_data = json.loads(portfolio_json)
-
-    # Prepare portfolio arrays
-    if portfolio_data.get('options') and len(portfolio_data['options']) > 0:
-        strikes = np.array([pos['strike'] for pos in portfolio_data['options']])
-        option_types = np.array([
-            1 if pos['option_type'] == 'call' else 0
-            for pos in portfolio_data['options']
-        ])
-        position_types = np.array([
-            1 if pos['position_type'] == 'long' else -1
-            for pos in portfolio_data['options']
-        ])
-        quantities = np.array([
-            pos['quantity'] * CONTRACT_MULTIPLIER
-            for pos in portfolio_data['options']
-        ])
-    else:
-        strikes = np.array([])
-        option_types = np.array([], dtype=np.int32)
-        position_types = np.array([], dtype=np.int32)
-        quantities = np.array([], dtype=np.int32)
-
     spot_base = portfolio_data.get('spot_price', 100.0)
     spot_range = np.linspace(spot_base * 0.7, spot_base * 1.3, 100)
     greek_idx = GREEK_NAMES.index(greek_name)
 
     if surface_type == "DTE":
         dte_range = np.linspace(1, 90, 100)
-        matrix_3d = _calculate_greeks_3d_dte_func(
-            strikes, option_types, position_types, quantities,
-            spot_range, dte_range, risk_free_rate, 0.25
+        # New signature: (portfolio_json, spot_range, dte_range, risk_free_rate, base_iv, greek_index)
+        matrix_2d = _calculate_greeks_3d_dte_func(
+            portfolio_json,
+            spot_range,
+            dte_range,
+            risk_free_rate,
+            0.25,  # base_iv
+            greek_idx
         )
-        return spot_range, dte_range, matrix_3d[:, :, greek_idx].T, "DTE (days)"
+        return spot_range, dte_range, matrix_2d.T, "DTE (days)"
     else:
         iv_range = np.linspace(0.05, 0.50, 100)
-        matrix_3d = _calculate_greeks_3d_iv_func(
-            strikes, option_types, position_types, quantities,
-            spot_range, 30.0, risk_free_rate, iv_range
+        # New signature: (portfolio_json, spot_range, iv_range, risk_free_rate, base_dte, greek_index)
+        matrix_2d = _calculate_greeks_3d_iv_func(
+            portfolio_json,
+            spot_range,
+            iv_range,
+            risk_free_rate,
+            30.0,  # base_dte
+            greek_idx
         )
-        return spot_range, iv_range * 100, matrix_3d[:, :, greek_idx].T, "IV (%)"
+        return spot_range, iv_range * 100, matrix_2d.T, "IV (%)"
 
 
 @st.cache_data(ttl=600)
@@ -207,21 +194,36 @@ def calculate_3d_surface_strike(
     spot_range = np.linspace(spot_price * 0.7, spot_price * 1.3, 100)
     strike_range = np.array([spot_price * f for f in STRIKE_RANGE_FACTORS])
 
-    option_type_int = 1 if option_type == 'call' else 0
-    position_type_int = 1 if position_type == 'long' else -1
-    quantity_mult = quantity * CONTRACT_MULTIPLIER
-
     greek_idx = GREEK_NAMES.index(greek_name)
 
-    matrix_3d = _calculate_greeks_3d_strike_func(
-        spot_range, strike_range, dte, risk_free_rate, volatility,
-        option_type_int, position_type_int, quantity_mult
+    # Build a portfolio JSON with the single position for the new function signature
+    portfolio_data = {
+        'spot_price': spot_price,
+        'options': [{
+            'option_type': option_type,
+            'position_type': position_type,
+            'strike': spot_price,  # Will be varied
+            'quantity': quantity
+        }],
+        'stock': None
+    }
+    portfolio_json = json.dumps(portfolio_data)
+
+    # New signature: (portfolio_json, spot_range, strike_range, risk_free_rate, base_iv, base_dte, greek_index)
+    matrix_2d = _calculate_greeks_3d_strike_func(
+        portfolio_json,
+        spot_range,
+        strike_range,
+        risk_free_rate,
+        volatility,
+        dte,
+        greek_idx
     )
 
     # Convert strike range to percentage of spot for better visualization
     strike_pct = np.array([f * 100 for f in STRIKE_RANGE_FACTORS])
 
-    return spot_range, strike_pct, matrix_3d[:, :, greek_idx].T, "Strike (% of Spot)"
+    return spot_range, strike_pct, matrix_2d.T, "Strike (% of Spot)"
 
 
 def render_3d_tab(
