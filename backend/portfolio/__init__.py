@@ -20,7 +20,7 @@ Created: 2025
 # Position Classes and Factory Functions
 # =============================================================================
 
-from .positions import (
+from backend.portfolio.positions import (
     # Classes
     PortfolioPosition,
     StockPosition,
@@ -37,7 +37,7 @@ from .positions import (
 # Breakeven Analysis
 # =============================================================================
 
-from .breakeven import (
+from backend.portfolio.breakeven import (
     BreakevenResult,
     BreakevenCalculator,
     find_breakevens,
@@ -49,7 +49,7 @@ from .breakeven import (
 # Main Portfolio Class
 # =============================================================================
 
-from .portfolio import OptionsPortfolio
+from backend.portfolio.portfolio import OptionsPortfolio
 
 # =============================================================================
 # Re-export GreeksResult from core (for convenience)
@@ -61,7 +61,7 @@ from backend.core.result_types import GreeksResult
 # P&L Engine (Numba-Optimized)
 # =============================================================================
 
-from .pnl import (
+from backend.portfolio.pnl import (
     RiskMetrics,
     calculate_portfolio_pnl_vectorized,
     calculate_portfolio_pnl_with_stock,
@@ -78,7 +78,7 @@ from .pnl import (
 # Greeks Surface Calculations (Numba-parallel)
 # =============================================================================
 
-from .greeks_surfaces import (
+from backend.portfolio.greeks_surfaces import (
     portfolio_greeks_surface_dte,
     portfolio_greeks_surface_iv,
     single_option_greeks_surface_strike,

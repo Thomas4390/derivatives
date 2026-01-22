@@ -21,7 +21,7 @@ from backend.core.interfaces import Model, PricingEngine
 from backend.core.market import MarketEnvironment
 from backend.core.result_types import GreeksResult
 
-from .positions import PortfolioPosition, StockPosition
+from backend.portfolio.positions import PortfolioPosition, StockPosition
 
 # Import Numba-optimized functions from portfolio.pnl
 from backend.portfolio.pnl import (

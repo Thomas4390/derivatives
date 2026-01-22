@@ -15,15 +15,15 @@ Author: Thomas
 Created: 2025
 """
 
-from .heston_cf import (
+from backend.models.characteristic_functions.heston_cf import (
     heston_characteristic_function,
     heston_cf_vectorized,
 )
-from .bates_cf import (
+from backend.models.characteristic_functions.bates_cf import (
     bates_characteristic_function,
     bates_cf_vectorized,
 )
-from .merton_cf import (
+from backend.models.characteristic_functions.merton_cf import (
     merton_characteristic_function,
     merton_cf_vectorized,
     create_merton_cf,

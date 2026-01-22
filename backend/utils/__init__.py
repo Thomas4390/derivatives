@@ -19,7 +19,7 @@ Author: Thomas
 Created: 2025
 """
 
-from .math import (
+from backend.utils.math import (
     # Constants
     DAYS_PER_YEAR,
     SQRT_2PI,
@@ -56,7 +56,7 @@ from .math import (
     delta_to_strike,
 )
 
-from .validation import (
+from backend.utils.validation import (
     # Exceptions
     ValidationError,
     ParameterOutOfRangeError,

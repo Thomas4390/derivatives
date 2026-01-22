@@ -13,9 +13,9 @@ Created: 2025
 
 from typing import Dict, Any, Optional, Type, Union
 
-from .base import BaseSimulator
-from .enums import ModelType, DiscretizationScheme
-from .models import (
+from backend.simulation.base import BaseSimulator
+from backend.simulation.enums import ModelType, DiscretizationScheme
+from backend.simulation.models import (
     GBMSimulator,
     HestonSimulator,
     MertonSimulator,

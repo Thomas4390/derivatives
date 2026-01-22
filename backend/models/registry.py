@@ -23,7 +23,7 @@ Created: 2025
 
 from typing import Dict, Type, Optional, List, Any, TYPE_CHECKING
 
-from .base import BaseModel, PricingCapability
+from backend.models.base import BaseModel, PricingCapability
 
 if TYPE_CHECKING:
     from backend.simulation.base import BaseSimulator

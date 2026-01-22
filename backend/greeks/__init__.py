@@ -18,8 +18,8 @@ Author: Thomas
 Created: 2025
 """
 
-from .calculator import GreeksCalculator, calculate_greeks
-from .analytic import (
+from backend.greeks.calculator import GreeksCalculator, calculate_greeks
+from backend.greeks.analytic import (
     bs_greeks_first_order,
     bs_greeks_second_order,
     bs_greeks_third_order,
@@ -44,7 +44,7 @@ from .analytic import (
     SecondOrderGreeks,
     ThirdOrderGreeks,
 )
-from .numerical import (
+from backend.greeks.numerical import (
     # Configuration
     GreeksBumpConfig,
     DEFAULT_BUMP_CONFIG,

@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from typing import List, Optional, Tuple, TYPE_CHECKING
 import numpy as np
 
-from .positions import PortfolioPosition, StockPosition
+from backend.portfolio.positions import PortfolioPosition, StockPosition
 
 # Import Numba-optimized functions from portfolio.pnl (moved from simulation)
 from backend.portfolio.pnl import (

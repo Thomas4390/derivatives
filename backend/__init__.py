@@ -24,7 +24,7 @@ Version: 5.0.0
 # Portfolio Management (NEW Architecture)
 # =============================================================================
 
-from .portfolio import (
+from backend.portfolio import (
     # Main portfolio class
     OptionsPortfolio,
     # Position classes
@@ -50,7 +50,7 @@ from .portfolio import (
 # Utilities
 # =============================================================================
 
-from .utils import (
+from backend.utils import (
     norm_cdf,
     norm_pdf,
     norm_cdf_vec,
@@ -62,7 +62,7 @@ from .utils import (
 # GARCH Pricer (Standalone, uses LRNVR)
 # =============================================================================
 
-from .engines.monte_carlo.garch_pricer import (
+from backend.engines.monte_carlo.garch_pricer import (
     GARCHMCPricer,
     GARCHType,
     GARCHPricingResult,
@@ -72,12 +72,12 @@ from .engines.monte_carlo.garch_pricer import (
 # Low-level Engines (for advanced use)
 # =============================================================================
 
-from .engines.fourier.carr_madan import (
+from backend.engines.fourier.carr_madan import (
     CarrMadanFFTEngine,
     FFTConfig,
 )
 
-from .engines.monte_carlo.mc_base import (
+from backend.engines.monte_carlo.mc_base import (
     GenericMCEngine,
     MCConfig,
     MCResult,
@@ -87,7 +87,7 @@ from .engines.monte_carlo.mc_base import (
 # Simulation
 # =============================================================================
 
-from .simulation import (
+from backend.simulation import (
     # Base
     BaseSimulator,
     SimulationResult,
@@ -114,7 +114,7 @@ from .simulation import (
 # Unified Models
 # =============================================================================
 
-from .models import (
+from backend.models import (
     # Base
     BaseModel,
     PricingCapability,
@@ -137,7 +137,7 @@ from .models import (
 # New Architecture - Core
 # =============================================================================
 
-from .core import (
+from backend.core import (
     # Interfaces
     Instrument,
     Model,
@@ -154,7 +154,7 @@ from .core import (
 # New Architecture - Instruments
 # =============================================================================
 
-from .instruments import (
+from backend.instruments import (
     # Options
     VanillaOption,
     EuropeanCall,
@@ -177,7 +177,7 @@ from .instruments import (
 # New Architecture - Engines
 # =============================================================================
 
-from .engines import (
+from backend.engines import (
     BSAnalyticEngine,
     FFTEngine,
     MonteCarloEngine,
@@ -187,7 +187,7 @@ from .engines import (
 # Greeks Calculation
 # =============================================================================
 
-from .greeks import (
+from backend.greeks import (
     GreeksCalculator,
     calculate_greeks,
     # Analytic Greeks

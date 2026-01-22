@@ -58,7 +58,7 @@ Author: Thomas
 Created: 2025
 """
 
-from .sde_kernels import (
+from backend.math_kernels.sde_kernels import (
     euler_step,
     milstein_step,
     gbm_exact_step,
@@ -71,7 +71,7 @@ from .sde_kernels import (
     merton_jump_step,
 )
 
-from .random import (
+from backend.math_kernels.random import (
     generate_normal,
     generate_normal_2d,
     generate_correlated_normals,
@@ -83,7 +83,7 @@ from .random import (
     box_muller_transform,
 )
 
-from .payoff_kernels import (
+from backend.math_kernels.payoff_kernels import (
     call_payoff,
     put_payoff,
     call_payoff_vec,
@@ -100,7 +100,7 @@ from .payoff_kernels import (
     barrier_down_out_put_payoff,
 )
 
-from .regression import (
+from backend.math_kernels.regression import (
     laguerre_basis,
     polynomial_basis,
     lstsq_regression,
