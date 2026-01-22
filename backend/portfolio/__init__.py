@@ -63,6 +63,34 @@ from backend.core.result_types import GreeksResult
 
 from backend.simulation.pnl_engine import RiskMetrics
 
+# =============================================================================
+# Greeks Surface Calculations (Numba-parallel)
+# =============================================================================
+
+from .greeks_surfaces import (
+    portfolio_greeks_surface_dte,
+    portfolio_greeks_surface_iv,
+    single_option_greeks_surface_strike,
+    get_greek_name,
+    # P&L functions (Numba-optimized)
+    calculate_pnl_curve,
+    # Greek indices
+    GREEK_PRICE,
+    GREEK_DELTA,
+    GREEK_GAMMA,
+    GREEK_VEGA,
+    GREEK_THETA,
+    GREEK_RHO,
+    GREEK_VANNA,
+    GREEK_VOLGA,
+    GREEK_CHARM,
+    GREEK_VETA,
+    GREEK_SPEED,
+    GREEK_ZOMMA,
+    GREEK_COLOR,
+    GREEK_ULTIMA,
+)
+
 
 __all__ = [
     # Main class
@@ -87,6 +115,28 @@ __all__ = [
     "find_breakevens",
     "find_breakevens_from_portfolio",
     "calculate_portfolio_pnl_at_expiry",
+    # Greeks surfaces
+    "portfolio_greeks_surface_dte",
+    "portfolio_greeks_surface_iv",
+    "single_option_greeks_surface_strike",
+    "get_greek_name",
+    # P&L functions
+    "calculate_pnl_curve",
+    # Greek indices
+    "GREEK_PRICE",
+    "GREEK_DELTA",
+    "GREEK_GAMMA",
+    "GREEK_VEGA",
+    "GREEK_THETA",
+    "GREEK_RHO",
+    "GREEK_VANNA",
+    "GREEK_VOLGA",
+    "GREEK_CHARM",
+    "GREEK_VETA",
+    "GREEK_SPEED",
+    "GREEK_ZOMMA",
+    "GREEK_COLOR",
+    "GREEK_ULTIMA",
 ]
 
 __version__ = "2.0.0"

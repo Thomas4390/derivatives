@@ -53,8 +53,8 @@ from backend.core.registry import (
     price,
 )
 
-# Black-Scholes formulas (single source of truth)
-from backend.core.bs_formulas import (
+# Black-Scholes formulas - imported from utils (single source of truth)
+from backend.utils import (
     norm_cdf,
     norm_pdf,
     d1_d2,

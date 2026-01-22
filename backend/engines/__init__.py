@@ -69,13 +69,26 @@ from backend.engines.monte_carlo.mc_base import MCConfig, MCResult
 from backend.engines.vectorized_bs import (
     calculate_first_order_greeks,
     calculate_all_greeks,
-    calculate_portfolio_greeks_3d_dte_vectorized,
-    calculate_portfolio_greeks_3d_iv_vectorized,
-    calculate_greeks_3d_strike_vectorized,
-    calculate_portfolio_pnl_at_expiry,
-    calculate_pnl_curve,
     calculate_greeks_vectorized,
+    # Greek indices
+    GREEK_PRICE,
+    GREEK_DELTA,
+    GREEK_GAMMA,
+    GREEK_VEGA,
+    GREEK_THETA,
+    GREEK_RHO,
+    GREEK_VANNA,
+    GREEK_VOLGA,
+    GREEK_CHARM,
+    GREEK_VETA,
+    GREEK_SPEED,
+    GREEK_ZOMMA,
+    GREEK_COLOR,
+    GREEK_ULTIMA,
 )
+
+# Note: Portfolio Greeks surfaces are now in backend.portfolio.greeks_surfaces
+# Import them from there: from backend.portfolio import portfolio_greeks_surface_dte, etc.
 
 
 __all__ = [
@@ -92,12 +105,22 @@ __all__ = [
     # Vectorized functions (Numba-optimized)
     "calculate_first_order_greeks",
     "calculate_all_greeks",
-    "calculate_portfolio_greeks_3d_dte_vectorized",
-    "calculate_portfolio_greeks_3d_iv_vectorized",
-    "calculate_greeks_3d_strike_vectorized",
-    "calculate_portfolio_pnl_at_expiry",
-    "calculate_pnl_curve",
     "calculate_greeks_vectorized",
+    # Greek indices
+    "GREEK_PRICE",
+    "GREEK_DELTA",
+    "GREEK_GAMMA",
+    "GREEK_VEGA",
+    "GREEK_THETA",
+    "GREEK_RHO",
+    "GREEK_VANNA",
+    "GREEK_VOLGA",
+    "GREEK_CHARM",
+    "GREEK_VETA",
+    "GREEK_SPEED",
+    "GREEK_ZOMMA",
+    "GREEK_COLOR",
+    "GREEK_ULTIMA",
 ]
 
 __version__ = "2.0.0"
