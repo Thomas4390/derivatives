@@ -265,6 +265,204 @@ def assert_greek_close(actual: float, expected: float, rtol: float = GREEK_RTOL,
 
 
 # =============================================================================
+# Test Output Helpers
+# =============================================================================
+
+class TestReporter:
+    """
+    Helper class for consistent test output formatting.
+
+    Usage in tests:
+        from tests.conftest import report
+
+        def test_something():
+            result = compute_something()
+            report.value("Price", result, expected=5.0, unit="$")
+    """
+
+    def __init__(self, precision: int = 6):
+        self.precision = precision
+
+    def header(self, title: str) -> None:
+        """Print a section header."""
+        print(f"\n{'─' * 50}")
+        print(f"  {title}")
+        print(f"{'─' * 50}")
+
+    def value(
+        self,
+        label: str,
+        actual: float,
+        expected: float = None,
+        unit: str = "",
+        precision: int = None
+    ) -> None:
+        """
+        Print a single value comparison.
+
+        Args:
+            label: Description of the value
+            actual: Computed value
+            expected: Expected value (optional)
+            unit: Unit string (e.g., "$", "%")
+            precision: Override default precision
+        """
+        prec = precision if precision is not None else self.precision
+
+        if expected is not None:
+            diff = actual - expected
+            rel_diff = abs(diff / expected) * 100 if expected != 0 else 0
+            print(f"  {label}:")
+            print(f"    Computed: {actual:>{prec + 8}.{prec}f} {unit}")
+            print(f"    Expected: {expected:>{prec + 8}.{prec}f} {unit}")
+            print(f"    Diff:     {diff:>+{prec + 8}.{prec}f} {unit} ({rel_diff:.4f}%)")
+        else:
+            print(f"  {label}: {actual:.{prec}f} {unit}")
+
+    def comparison(
+        self,
+        label1: str,
+        value1: float,
+        label2: str,
+        value2: float,
+        unit: str = "",
+        precision: int = None
+    ) -> None:
+        """
+        Print a comparison between two computed values.
+
+        Args:
+            label1: Description of first value
+            value1: First computed value
+            label2: Description of second value
+            value2: Second computed value
+            unit: Unit string
+            precision: Override default precision
+        """
+        prec = precision if precision is not None else self.precision
+        diff = value1 - value2
+        rel_diff = abs(diff / value2) * 100 if value2 != 0 else 0
+
+        print(f"  {label1}: {value1:.{prec}f} {unit}")
+        print(f"  {label2}: {value2:.{prec}f} {unit}")
+        print(f"  Difference: {diff:+.{prec}f} {unit} ({rel_diff:.4f}%)")
+
+    def greeks(self, greeks_obj, label: str = "Greeks") -> None:
+        """
+        Print all Greeks from a Greeks result object.
+
+        Args:
+            greeks_obj: Object with delta, gamma, vega, theta, rho attributes
+            label: Optional label for the section
+        """
+        print(f"  {label}:")
+        print(f"    Delta: {greeks_obj.delta:>12.6f}")
+        print(f"    Gamma: {greeks_obj.gamma:>12.6f}")
+        print(f"    Vega:  {greeks_obj.vega:>12.6f}")
+        print(f"    Theta: {greeks_obj.theta:>12.6f}")
+        if hasattr(greeks_obj, 'rho') and greeks_obj.rho is not None:
+            print(f"    Rho:   {greeks_obj.rho:>12.6f}")
+
+    def table(
+        self,
+        headers: list,
+        rows: list,
+        title: str = None,
+        precision: int = None
+    ) -> None:
+        """
+        Print a formatted table of results.
+
+        Args:
+            headers: List of column headers
+            rows: List of row tuples/lists
+            title: Optional table title
+            precision: Override default precision
+        """
+        prec = precision if precision is not None else self.precision
+
+        if title:
+            print(f"\n  {title}:")
+
+        # Calculate column widths
+        col_widths = [len(h) for h in headers]
+        for row in rows:
+            for i, val in enumerate(row):
+                if isinstance(val, float):
+                    val_str = f"{val:.{prec}f}"
+                else:
+                    val_str = str(val)
+                col_widths[i] = max(col_widths[i], len(val_str))
+
+        # Print header
+        header_str = "  │ " + " │ ".join(h.center(col_widths[i]) for i, h in enumerate(headers)) + " │"
+        separator = "  ├─" + "─┼─".join("─" * w for w in col_widths) + "─┤"
+        top_border = "  ┌─" + "─┬─".join("─" * w for w in col_widths) + "─┐"
+        bottom_border = "  └─" + "─┴─".join("─" * w for w in col_widths) + "─┘"
+
+        print(top_border)
+        print(header_str)
+        print(separator)
+
+        # Print rows
+        for row in rows:
+            row_strs = []
+            for i, val in enumerate(row):
+                if isinstance(val, float):
+                    val_str = f"{val:.{prec}f}"
+                else:
+                    val_str = str(val)
+                row_strs.append(val_str.rjust(col_widths[i]))
+            print("  │ " + " │ ".join(row_strs) + " │")
+
+        print(bottom_border)
+
+    def array_stats(
+        self,
+        arr: np.ndarray,
+        label: str = "Array",
+        precision: int = None
+    ) -> None:
+        """
+        Print statistics for a numpy array.
+
+        Args:
+            arr: Numpy array
+            label: Description label
+            precision: Override default precision
+        """
+        prec = precision if precision is not None else self.precision
+
+        print(f"  {label} statistics:")
+        print(f"    Mean:   {np.mean(arr):.{prec}f}")
+        print(f"    Std:    {np.std(arr):.{prec}f}")
+        print(f"    Min:    {np.min(arr):.{prec}f}")
+        print(f"    Max:    {np.max(arr):.{prec}f}")
+        print(f"    Median: {np.median(arr):.{prec}f}")
+
+    def success(self, message: str) -> None:
+        """Print a success message."""
+        print(f"  ✓ {message}")
+
+    def info(self, message: str) -> None:
+        """Print an info message."""
+        print(f"  ℹ {message}")
+
+    def params(self, **kwargs) -> None:
+        """Print test parameters."""
+        print("  Parameters:")
+        for key, value in kwargs.items():
+            if isinstance(value, float):
+                print(f"    {key}: {value:.6f}")
+            else:
+                print(f"    {key}: {value}")
+
+
+# Global reporter instance for easy access
+report = TestReporter()
+
+
+# =============================================================================
 # Known Values (for validation)
 # =============================================================================
 
