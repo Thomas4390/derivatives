@@ -105,7 +105,9 @@ class BaseModel(ABC):
         """
         pass
 
-    def characteristic_function(self, u, s0: float, t: float, r: float):
+    def characteristic_function(
+        self, u: complex, s0: float, t: float, r: float, q: float = 0.0
+    ) -> complex:
         """
         Characteristic function phi(u) = E^Q[exp(i*u*ln(S_T))].
 
@@ -113,7 +115,7 @@ class BaseModel(ABC):
 
         Parameters
         ----------
-        u : complex or array
+        u : complex
             Frequency argument
         s0 : float
             Initial spot price
@@ -121,15 +123,50 @@ class BaseModel(ABC):
             Time to maturity
         r : float
             Risk-free rate
+        q : float, optional
+            Continuous dividend yield (default 0.0)
 
         Returns
         -------
-        complex or array
-            Characteristic function value(s)
+        complex
+            Characteristic function value
         """
         raise NotImplementedError(
             f"{self.model_name} does not have a characteristic function"
         )
+
+    def characteristic_function_vectorized(
+        self, u, s0: float, t: float, r: float, q: float = 0.0
+    ):
+        """
+        Vectorized characteristic function for arrays of u.
+
+        Override in models that support efficient FFT pricing.
+        Default implementation loops over scalar characteristic_function.
+
+        Parameters
+        ----------
+        u : array-like
+            Array of frequency arguments
+        s0 : float
+            Initial spot price
+        t : float
+            Time to maturity
+        r : float
+            Risk-free rate
+        q : float, optional
+            Continuous dividend yield (default 0.0)
+
+        Returns
+        -------
+        np.ndarray
+            Array of characteristic function values
+        """
+        import numpy as np
+        u_arr = np.asarray(u)
+        return np.array([
+            self.characteristic_function(ui, s0, t, r, q) for ui in u_arr.flat
+        ]).reshape(u_arr.shape)
 
     @abstractmethod
     def get_parameters(self) -> Dict[str, Any]:

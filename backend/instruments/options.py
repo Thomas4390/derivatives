@@ -252,9 +252,17 @@ class DigitalOption(Instrument):
 # FACTORY FUNCTIONS
 # =============================================================================
 
-def EuropeanCall(strike: float, maturity: float) -> VanillaOption:
+def create_vanilla_option(
+    strike: float,
+    maturity: float,
+    is_call: bool = True,
+    exercise: ExerciseStyle = ExerciseStyle.EUROPEAN,
+) -> VanillaOption:
     """
-    Factory for European call option.
+    Generic factory for vanilla options.
+
+    This is the primary factory function. Use the convenience aliases
+    (EuropeanCall, EuropeanPut, etc.) for simpler usage.
 
     Parameters
     ----------
@@ -262,144 +270,62 @@ def EuropeanCall(strike: float, maturity: float) -> VanillaOption:
         Strike price
     maturity : float
         Time to expiration in years
+    is_call : bool, default True
+        True for call, False for put
+    exercise : ExerciseStyle, default EUROPEAN
+        Exercise style (EUROPEAN, AMERICAN, BERMUDAN)
 
     Returns
     -------
     VanillaOption
-        European call option
+        Configured option instrument
 
     Examples
     --------
-    call = EuropeanCall(strike=100, maturity=0.5)
+    >>> call = create_vanilla_option(100, 0.5, is_call=True)
+    >>> american_put = create_vanilla_option(100, 0.5, False, ExerciseStyle.AMERICAN)
     """
-    return VanillaOption(strike=strike, maturity=maturity, is_call=True)
+    return VanillaOption(
+        strike=strike,
+        maturity=maturity,
+        is_call=is_call,
+        exercise=exercise,
+    )
+
+
+# -----------------------------------------------------------------------------
+# Convenience Aliases
+# -----------------------------------------------------------------------------
+# These provide backward-compatible, expressive names for common option types.
+
+def EuropeanCall(strike: float, maturity: float) -> VanillaOption:
+    """Create a European call option."""
+    return create_vanilla_option(strike, maturity, True, ExerciseStyle.EUROPEAN)
 
 
 def EuropeanPut(strike: float, maturity: float) -> VanillaOption:
-    """
-    Factory for European put option.
-
-    Parameters
-    ----------
-    strike : float
-        Strike price
-    maturity : float
-        Time to expiration in years
-
-    Returns
-    -------
-    VanillaOption
-        European put option
-
-    Examples
-    --------
-    put = EuropeanPut(strike=100, maturity=0.5)
-    """
-    return VanillaOption(strike=strike, maturity=maturity, is_call=False)
+    """Create a European put option."""
+    return create_vanilla_option(strike, maturity, False, ExerciseStyle.EUROPEAN)
 
 
 def AmericanCall(strike: float, maturity: float) -> VanillaOption:
-    """
-    Factory for American call option.
-
-    Parameters
-    ----------
-    strike : float
-        Strike price
-    maturity : float
-        Time to expiration in years
-
-    Returns
-    -------
-    VanillaOption
-        American call option
-
-    Examples
-    --------
-    call = AmericanCall(strike=100, maturity=0.5)
-    """
-    return VanillaOption(
-        strike=strike,
-        maturity=maturity,
-        is_call=True,
-        exercise=ExerciseStyle.AMERICAN,
-    )
+    """Create an American call option."""
+    return create_vanilla_option(strike, maturity, True, ExerciseStyle.AMERICAN)
 
 
 def AmericanPut(strike: float, maturity: float) -> VanillaOption:
-    """
-    Factory for American put option.
-
-    Parameters
-    ----------
-    strike : float
-        Strike price
-    maturity : float
-        Time to expiration in years
-
-    Returns
-    -------
-    VanillaOption
-        American put option
-
-    Examples
-    --------
-    put = AmericanPut(strike=100, maturity=0.5)
-    """
-    return VanillaOption(
-        strike=strike,
-        maturity=maturity,
-        is_call=False,
-        exercise=ExerciseStyle.AMERICAN,
-    )
+    """Create an American put option."""
+    return create_vanilla_option(strike, maturity, False, ExerciseStyle.AMERICAN)
 
 
 def BermudanCall(strike: float, maturity: float) -> VanillaOption:
-    """
-    Factory for Bermudan call option.
-
-    Parameters
-    ----------
-    strike : float
-        Strike price
-    maturity : float
-        Time to expiration in years
-
-    Returns
-    -------
-    VanillaOption
-        Bermudan call option
-    """
-    return VanillaOption(
-        strike=strike,
-        maturity=maturity,
-        is_call=True,
-        exercise=ExerciseStyle.BERMUDAN,
-    )
+    """Create a Bermudan call option."""
+    return create_vanilla_option(strike, maturity, True, ExerciseStyle.BERMUDAN)
 
 
 def BermudanPut(strike: float, maturity: float) -> VanillaOption:
-    """
-    Factory for Bermudan put option.
-
-    Parameters
-    ----------
-    strike : float
-        Strike price
-    maturity : float
-        Time to expiration in years
-
-    Returns
-    -------
-    VanillaOption
-        Bermudan put option
-    """
-    return VanillaOption(
-        strike=strike,
-        maturity=maturity,
-        is_call=False,
-        exercise=ExerciseStyle.BERMUDAN,
-    )
+    """Create a Bermudan put option."""
+    return create_vanilla_option(strike, maturity, False, ExerciseStyle.BERMUDAN)
 
 
 if __name__ == "__main__":

@@ -18,3 +18,21 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["backend"]
+
+[tool.pytest.ini_options]
+# Verbose output to display test results
+addopts = "-v -s --tb=short"
+# -v: verbose mode (shows test names)
+# -s: disable output capture (shows print statements)
+# --tb=short: shorter traceback format
+
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+
+# Display duration of slowest tests
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::PendingDeprecationWarning",
+]

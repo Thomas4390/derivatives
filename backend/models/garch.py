@@ -15,6 +15,7 @@ Author: Thomas
 Created: 2025
 """
 
+from abc import abstractmethod
 from dataclasses import dataclass
 from typing import List, Dict, Any
 import numpy as np
@@ -28,16 +29,16 @@ from backend.engines.monte_carlo.garch_pricer import GARCHMCPricer, GARCHType
 
 
 # =============================================================================
-# GARCH(1,1) MODEL
+# BASE GARCH MODEL
 # =============================================================================
 
 @dataclass(frozen=True)
-class GARCHModel(Model):
+class BaseGARCHModel(Model):
     """
-    GARCH(1,1) Model.
+    Base class for GARCH family models.
 
-    Variance dynamics:
-        sigma^2_t = omega + alpha * sigma^2_{t-1} * z^2_{t-1} + beta * sigma^2_{t-1}
+    All GARCH variants share these common parameters and must implement
+    their specific persistence calculation.
 
     Parameters
     ----------
@@ -49,6 +50,74 @@ class GARCHModel(Model):
         ARCH coefficient - reaction to past shocks (alpha >= 0)
     beta : float
         GARCH coefficient - persistence (beta >= 0)
+
+    Notes
+    -----
+    - All GARCH models only support Monte Carlo pricing
+    - Long-run variance = omega / (1 - persistence)
+    - persistence property must be implemented by subclasses
+    """
+
+    sigma0: float
+    omega: float
+    alpha: float
+    beta: float
+
+    def _validate_base_params(self) -> None:
+        """Validate common GARCH parameters."""
+        if self.sigma0 <= 0:
+            raise ValueError(f"sigma0 must be positive, got {self.sigma0}")
+        if self.omega <= 0:
+            raise ValueError(f"omega must be positive, got {self.omega}")
+        if self.alpha < 0:
+            raise ValueError(f"alpha must be non-negative, got {self.alpha}")
+        if self.beta < 0:
+            raise ValueError(f"beta must be non-negative, got {self.beta}")
+
+    @property
+    def supported_engines(self) -> List[PricingCapability]:
+        """GARCH models only support Monte Carlo pricing."""
+        return [PricingCapability.MONTE_CARLO]
+
+    @property
+    @abstractmethod
+    def persistence(self) -> float:
+        """
+        Model-specific persistence measure.
+
+        Must be < 1 for stationarity.
+        """
+        ...
+
+    @property
+    def long_run_variance(self) -> float:
+        """Returns omega / (1 - persistence)."""
+        return self.omega / (1 - self.persistence)
+
+    @property
+    def long_run_volatility(self) -> float:
+        """Returns sqrt of long-run variance."""
+        return np.sqrt(self.long_run_variance)
+
+    @property
+    def half_life(self) -> float:
+        """Half-life of variance shocks in time steps."""
+        if self.persistence <= 0 or self.persistence >= 1:
+            return np.inf
+        return np.log(2) / (-np.log(self.persistence))
+
+
+# =============================================================================
+# GARCH(1,1) MODEL
+# =============================================================================
+
+@dataclass(frozen=True)
+class GARCHModel(BaseGARCHModel):
+    """
+    GARCH(1,1) Model.
+
+    Variance dynamics:
+        sigma^2_t = omega + alpha * sigma^2_{t-1} * z^2_{t-1} + beta * sigma^2_{t-1}
 
     Notes
     -----
@@ -64,26 +133,12 @@ class GARCHModel(Model):
     price = pricer.price(s0=100, k=100, t=0.25, r=0.05)
     """
 
-    sigma0: float
-    omega: float
-    alpha: float
-    beta: float
-
     def __post_init__(self):
         """Validate parameters."""
-        if self.sigma0 <= 0:
-            raise ValueError(f"sigma0 must be positive, got {self.sigma0}")
-        if self.omega <= 0:
-            raise ValueError(f"omega must be positive, got {self.omega}")
-        if self.alpha < 0:
-            raise ValueError(f"alpha must be non-negative, got {self.alpha}")
-        if self.beta < 0:
-            raise ValueError(f"beta must be non-negative, got {self.beta}")
-
-        persistence = self.alpha + self.beta
-        if persistence >= 1:
+        self._validate_base_params()
+        if self.persistence >= 1:
             raise ValueError(
-                f"Process is not stationary: alpha + beta = {persistence:.4f} >= 1. "
+                f"Process is not stationary: alpha + beta = {self.persistence:.4f} >= 1. "
                 f"Reduce alpha or beta."
             )
 
@@ -91,11 +146,6 @@ class GARCHModel(Model):
     def name(self) -> str:
         """Human-readable model name."""
         return "GARCH(1,1)"
-
-    @property
-    def supported_engines(self) -> List[PricingCapability]:
-        """GARCH only supports Monte Carlo pricing."""
-        return [PricingCapability.MONTE_CARLO]
 
     def get_parameters(self) -> Dict[str, Any]:
         """Return model parameters as dictionary."""
@@ -110,23 +160,6 @@ class GARCHModel(Model):
     def persistence(self) -> float:
         """Returns alpha + beta, the persistence of shocks."""
         return self.alpha + self.beta
-
-    @property
-    def long_run_variance(self) -> float:
-        """Returns omega / (1 - alpha - beta)."""
-        return self.omega / (1 - self.persistence)
-
-    @property
-    def long_run_volatility(self) -> float:
-        """Returns sqrt of long-run variance."""
-        return np.sqrt(self.long_run_variance)
-
-    @property
-    def half_life(self) -> float:
-        """Half-life of variance shocks in time steps."""
-        if self.persistence <= 0 or self.persistence >= 1:
-            return np.inf
-        return np.log(2) / (-np.log(self.persistence))
 
     def create_simulator(self, **kwargs) -> GARCHSimulator:
         """Create GARCH simulator."""
@@ -184,7 +217,7 @@ class GARCHModel(Model):
 # =============================================================================
 
 @dataclass(frozen=True)
-class NGARCHModel(Model):
+class NGARCHModel(BaseGARCHModel):
     """
     NGARCH (Nonlinear Asymmetric GARCH) Model.
 
@@ -193,14 +226,6 @@ class NGARCHModel(Model):
 
     Parameters
     ----------
-    sigma0 : float
-        Initial volatility
-    omega : float
-        Constant term
-    alpha : float
-        ARCH coefficient
-    beta : float
-        GARCH coefficient
     theta : float
         Leverage parameter (theta > 0 for leverage effect)
 
@@ -217,27 +242,14 @@ class NGARCHModel(Model):
     pricer = model.create_pricer()
     """
 
-    sigma0: float
-    omega: float
-    alpha: float
-    beta: float
-    theta: float
+    theta: float = 0.0
 
     def __post_init__(self):
         """Validate parameters."""
-        if self.sigma0 <= 0:
-            raise ValueError(f"sigma0 must be positive, got {self.sigma0}")
-        if self.omega <= 0:
-            raise ValueError(f"omega must be positive, got {self.omega}")
-        if self.alpha < 0:
-            raise ValueError(f"alpha must be non-negative, got {self.alpha}")
-        if self.beta < 0:
-            raise ValueError(f"beta must be non-negative, got {self.beta}")
-
-        persistence = self.alpha * (1 + self.theta ** 2) + self.beta
-        if persistence >= 1:
+        self._validate_base_params()
+        if self.persistence >= 1:
             raise ValueError(
-                f"Process is not stationary: alpha*(1+theta^2) + beta = {persistence:.4f} >= 1. "
+                f"Process is not stationary: alpha*(1+theta^2) + beta = {self.persistence:.4f} >= 1. "
                 f"Reduce alpha, beta, or theta."
             )
 
@@ -245,11 +257,6 @@ class NGARCHModel(Model):
     def name(self) -> str:
         """Human-readable model name."""
         return "NGARCH (Nonlinear Asymmetric)"
-
-    @property
-    def supported_engines(self) -> List[PricingCapability]:
-        """NGARCH only supports Monte Carlo pricing."""
-        return [PricingCapability.MONTE_CARLO]
 
     def get_parameters(self) -> Dict[str, Any]:
         """Return model parameters as dictionary."""
@@ -265,16 +272,6 @@ class NGARCHModel(Model):
     def persistence(self) -> float:
         """Returns alpha * (1 + theta^2) + beta."""
         return self.alpha * (1 + self.theta ** 2) + self.beta
-
-    @property
-    def long_run_variance(self) -> float:
-        """Returns omega / (1 - persistence)."""
-        return self.omega / (1 - self.persistence)
-
-    @property
-    def long_run_volatility(self) -> float:
-        """Returns sqrt of long-run variance."""
-        return np.sqrt(self.long_run_variance)
 
     def create_simulator(self, **kwargs) -> NGARCHSimulator:
         """Create NGARCH simulator."""
@@ -316,7 +313,7 @@ class NGARCHModel(Model):
 # =============================================================================
 
 @dataclass(frozen=True)
-class GJRGARCHModel(Model):
+class GJRGARCHModel(BaseGARCHModel):
     """
     GJR-GARCH Model.
 
@@ -327,14 +324,6 @@ class GJRGARCHModel(Model):
 
     Parameters
     ----------
-    sigma0 : float
-        Initial volatility
-    omega : float
-        Constant term
-    alpha : float
-        ARCH coefficient
-    beta : float
-        GARCH coefficient
     gamma : float
         Asymmetry coefficient (gamma > 0 for leverage effect)
 
@@ -351,29 +340,16 @@ class GJRGARCHModel(Model):
     pricer = model.create_pricer()
     """
 
-    sigma0: float
-    omega: float
-    alpha: float
-    beta: float
-    gamma: float
+    gamma: float = 0.0
 
     def __post_init__(self):
         """Validate parameters."""
-        if self.sigma0 <= 0:
-            raise ValueError(f"sigma0 must be positive, got {self.sigma0}")
-        if self.omega <= 0:
-            raise ValueError(f"omega must be positive, got {self.omega}")
-        if self.alpha < 0:
-            raise ValueError(f"alpha must be non-negative, got {self.alpha}")
-        if self.beta < 0:
-            raise ValueError(f"beta must be non-negative, got {self.beta}")
+        self._validate_base_params()
         if self.gamma < 0:
             raise ValueError(f"gamma must be non-negative, got {self.gamma}")
-
-        persistence = self.alpha + 0.5 * self.gamma + self.beta
-        if persistence >= 1:
+        if self.persistence >= 1:
             raise ValueError(
-                f"Process is not stationary: alpha + 0.5*gamma + beta = {persistence:.4f} >= 1. "
+                f"Process is not stationary: alpha + 0.5*gamma + beta = {self.persistence:.4f} >= 1. "
                 f"Reduce alpha, beta, or gamma."
             )
 
@@ -381,11 +357,6 @@ class GJRGARCHModel(Model):
     def name(self) -> str:
         """Human-readable model name."""
         return "GJR-GARCH"
-
-    @property
-    def supported_engines(self) -> List[PricingCapability]:
-        """GJR-GARCH only supports Monte Carlo pricing."""
-        return [PricingCapability.MONTE_CARLO]
 
     def get_parameters(self) -> Dict[str, Any]:
         """Return model parameters as dictionary."""
@@ -401,16 +372,6 @@ class GJRGARCHModel(Model):
     def persistence(self) -> float:
         """Returns alpha + 0.5*gamma + beta."""
         return self.alpha + 0.5 * self.gamma + self.beta
-
-    @property
-    def long_run_variance(self) -> float:
-        """Returns omega / (1 - persistence)."""
-        return self.omega / (1 - self.persistence)
-
-    @property
-    def long_run_volatility(self) -> float:
-        """Returns sqrt of long-run variance."""
-        return np.sqrt(self.long_run_variance)
 
     def create_simulator(self, **kwargs) -> GJRGARCHSimulator:
         """Create GJR-GARCH simulator."""

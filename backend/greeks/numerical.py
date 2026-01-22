@@ -14,6 +14,7 @@ Created: 2025
 """
 
 import numpy as np
+from dataclasses import dataclass
 from typing import Callable, NamedTuple, Optional
 
 
@@ -23,6 +24,56 @@ from typing import Callable, NamedTuple, Optional
 
 # Pricing function signature: (spot, strike, time, rate, vol, ...) -> price
 PricingFunc = Callable[..., float]
+
+
+@dataclass(frozen=True)
+class GreeksBumpConfig:
+    """
+    Configuration for finite difference bump sizes.
+
+    Centralizes the default perturbation sizes used in numerical Greeks
+    calculations. All values are industry-standard defaults.
+
+    Parameters
+    ----------
+    spot_bump : float
+        Relative spot bump (default 1%). Applied as: h = spot * spot_bump
+    vol_bump : float
+        Absolute volatility bump (default 1% = 0.01).
+        Applied as: vol ± vol_bump
+    time_bump_days : float
+        Time decay bump in calendar days (default 1 day).
+        Converted to years internally: h = time_bump_days / 365
+    rate_bump : float
+        Absolute rate bump in basis points (default 1bp = 0.0001).
+        Applied as: rate ± rate_bump
+
+    Examples
+    --------
+    >>> config = GreeksBumpConfig()  # Use defaults
+    >>> config.spot_bump
+    0.01
+
+    >>> custom = GreeksBumpConfig(spot_bump=0.005, vol_bump=0.001)
+    >>> custom.spot_bump
+    0.005
+
+    Notes
+    -----
+    Default values are chosen for numerical stability and practical relevance:
+    - 1% spot bump: Standard for equity delta hedging
+    - 1% vol bump: Standard vega reporting convention
+    - 1 day theta: Daily P&L relevance
+    - 1bp rate bump: Typical rate sensitivity measure
+    """
+    spot_bump: float = 0.01       # 1% relative
+    vol_bump: float = 0.01        # 1% absolute
+    time_bump_days: float = 1.0   # 1 calendar day
+    rate_bump: float = 0.0001     # 1 basis point
+
+
+# Module-level default configuration
+DEFAULT_BUMP_CONFIG = GreeksBumpConfig()
 
 
 class NumericalGreeks(NamedTuple):
@@ -305,6 +356,293 @@ def finite_difference_volga(
     return (v_up - 2 * v_mid + v_down) / (h ** 2) / 10000.0
 
 
+def finite_difference_charm(
+    price_func: PricingFunc,
+    spot: float,
+    time: float,
+    spot_bump: float = 0.01,
+    time_bump_days: float = 1.0,
+    **kwargs
+) -> float:
+    """
+    Calculate charm (∂²V/∂S∂t) via cross finite difference.
+
+    Returns charm per day.
+
+    Parameters
+    ----------
+    price_func : callable
+        Pricing function
+    spot : float
+        Current spot price
+    time : float
+        Time to expiry (years)
+    spot_bump : float
+        Relative spot bump
+    time_bump_days : float
+        Time bump in days
+    **kwargs
+        Additional arguments
+
+    Returns
+    -------
+    float
+        Charm estimate (per day)
+    """
+    hs = spot * spot_bump
+    ht = time_bump_days / 365.0
+    time_down = max(time - ht, 0.001)
+
+    v_up_now = price_func(spot + hs, time=time, **kwargs)
+    v_up_later = price_func(spot + hs, time=time_down, **kwargs)
+    v_down_now = price_func(spot - hs, time=time, **kwargs)
+    v_down_later = price_func(spot - hs, time=time_down, **kwargs)
+
+    # ∂²V/∂S∂t = ∂(∂V/∂S)/∂t
+    delta_now = (v_up_now - v_down_now) / (2 * hs)
+    delta_later = (v_up_later - v_down_later) / (2 * hs)
+
+    return (delta_later - delta_now) / time_bump_days
+
+
+def finite_difference_veta(
+    price_func: PricingFunc,
+    spot: float,
+    vol: float,
+    time: float,
+    vol_bump: float = 0.01,
+    time_bump_days: float = 1.0,
+    **kwargs
+) -> float:
+    """
+    Calculate veta (∂²V/∂σ∂t) via cross finite difference.
+
+    Returns veta per day per 1% vol.
+
+    Parameters
+    ----------
+    price_func : callable
+        Pricing function
+    spot : float
+        Current spot price
+    vol : float
+        Current volatility
+    time : float
+        Time to expiry (years)
+    vol_bump : float
+        Absolute vol bump
+    time_bump_days : float
+        Time bump in days
+    **kwargs
+        Additional arguments
+
+    Returns
+    -------
+    float
+        Veta estimate (per day per 1% vol)
+    """
+    hv = vol_bump
+    ht = time_bump_days / 365.0
+    time_down = max(time - ht, 0.001)
+
+    v_up_now = price_func(spot, vol=vol + hv, time=time, **kwargs)
+    v_up_later = price_func(spot, vol=vol + hv, time=time_down, **kwargs)
+    v_down_now = price_func(spot, vol=vol - hv, time=time, **kwargs)
+    v_down_later = price_func(spot, vol=vol - hv, time=time_down, **kwargs)
+
+    # ∂²V/∂σ∂t = ∂(∂V/∂σ)/∂t
+    vega_now = (v_up_now - v_down_now) / (2 * hv)
+    vega_later = (v_up_later - v_down_later) / (2 * hv)
+
+    return (vega_later - vega_now) / time_bump_days / 100.0
+
+
+# =============================================================================
+# Third-Order Greeks
+# =============================================================================
+
+def finite_difference_speed(
+    price_func: PricingFunc,
+    spot: float,
+    bump: float = 0.01,
+    **kwargs
+) -> float:
+    """
+    Calculate speed (∂³V/∂S³) via finite difference.
+
+    Parameters
+    ----------
+    price_func : callable
+        Pricing function
+    spot : float
+        Current spot price
+    bump : float
+        Relative spot bump
+    **kwargs
+        Additional arguments
+
+    Returns
+    -------
+    float
+        Speed estimate
+    """
+    h = spot * bump
+
+    # Five-point stencil for third derivative
+    v_2up = price_func(spot + 2*h, **kwargs)
+    v_up = price_func(spot + h, **kwargs)
+    v_down = price_func(spot - h, **kwargs)
+    v_2down = price_func(spot - 2*h, **kwargs)
+
+    # Third derivative approximation
+    return (v_2up - 2*v_up + 2*v_down - v_2down) / (2 * h**3)
+
+
+def finite_difference_zomma(
+    price_func: PricingFunc,
+    spot: float,
+    vol: float,
+    spot_bump: float = 0.01,
+    vol_bump: float = 0.01,
+    **kwargs
+) -> float:
+    """
+    Calculate zomma (∂³V/∂S²∂σ) via finite difference.
+
+    Returns zomma per 1% vol change.
+
+    Parameters
+    ----------
+    price_func : callable
+        Pricing function
+    spot : float
+        Current spot price
+    vol : float
+        Current volatility
+    spot_bump : float
+        Relative spot bump
+    vol_bump : float
+        Absolute vol bump
+    **kwargs
+        Additional arguments
+
+    Returns
+    -------
+    float
+        Zomma estimate (per 1% vol)
+    """
+    hs = spot * spot_bump
+    hv = vol_bump
+
+    # Gamma at vol + hv
+    v_up_vup = price_func(spot + hs, vol=vol + hv, **kwargs)
+    v_mid_vup = price_func(spot, vol=vol + hv, **kwargs)
+    v_down_vup = price_func(spot - hs, vol=vol + hv, **kwargs)
+    gamma_vup = (v_up_vup - 2*v_mid_vup + v_down_vup) / (hs**2)
+
+    # Gamma at vol - hv
+    v_up_vdown = price_func(spot + hs, vol=vol - hv, **kwargs)
+    v_mid_vdown = price_func(spot, vol=vol - hv, **kwargs)
+    v_down_vdown = price_func(spot - hs, vol=vol - hv, **kwargs)
+    gamma_vdown = (v_up_vdown - 2*v_mid_vdown + v_down_vdown) / (hs**2)
+
+    return (gamma_vup - gamma_vdown) / (2 * hv) / 100.0
+
+
+def finite_difference_color(
+    price_func: PricingFunc,
+    spot: float,
+    time: float,
+    spot_bump: float = 0.01,
+    time_bump_days: float = 1.0,
+    **kwargs
+) -> float:
+    """
+    Calculate color (∂³V/∂S²∂t) via finite difference.
+
+    Returns color per day.
+
+    Parameters
+    ----------
+    price_func : callable
+        Pricing function
+    spot : float
+        Current spot price
+    time : float
+        Time to expiry (years)
+    spot_bump : float
+        Relative spot bump
+    time_bump_days : float
+        Time bump in days
+    **kwargs
+        Additional arguments
+
+    Returns
+    -------
+    float
+        Color estimate (per day)
+    """
+    hs = spot * spot_bump
+    ht = time_bump_days / 365.0
+    time_down = max(time - ht, 0.001)
+
+    # Gamma now
+    v_up_now = price_func(spot + hs, time=time, **kwargs)
+    v_mid_now = price_func(spot, time=time, **kwargs)
+    v_down_now = price_func(spot - hs, time=time, **kwargs)
+    gamma_now = (v_up_now - 2*v_mid_now + v_down_now) / (hs**2)
+
+    # Gamma later
+    v_up_later = price_func(spot + hs, time=time_down, **kwargs)
+    v_mid_later = price_func(spot, time=time_down, **kwargs)
+    v_down_later = price_func(spot - hs, time=time_down, **kwargs)
+    gamma_later = (v_up_later - 2*v_mid_later + v_down_later) / (hs**2)
+
+    return (gamma_later - gamma_now) / time_bump_days
+
+
+def finite_difference_ultima(
+    price_func: PricingFunc,
+    spot: float,
+    vol: float,
+    bump: float = 0.01,
+    **kwargs
+) -> float:
+    """
+    Calculate ultima (∂³V/∂σ³) via finite difference.
+
+    Returns ultima per 1% vol change cubed.
+
+    Parameters
+    ----------
+    price_func : callable
+        Pricing function
+    spot : float
+        Current spot price
+    vol : float
+        Current volatility
+    bump : float
+        Absolute vol bump
+    **kwargs
+        Additional arguments
+
+    Returns
+    -------
+    float
+        Ultima estimate (per 1%³ vol)
+    """
+    h = bump
+
+    # Five-point stencil for third derivative
+    v_2up = price_func(spot, vol=vol + 2*h, **kwargs)
+    v_up = price_func(spot, vol=vol + h, **kwargs)
+    v_down = price_func(spot, vol=vol - h, **kwargs)
+    v_2down = price_func(spot, vol=vol - 2*h, **kwargs)
+
+    # Third derivative approximation
+    return (v_2up - 2*v_up + 2*v_down - v_2down) / (2 * h**3) / 1000000.0
+
+
 # =============================================================================
 # All Greeks Combined
 # =============================================================================
@@ -315,10 +653,11 @@ def finite_difference_greeks(
     vol: float,
     time: float,
     rate: float,
-    spot_bump: float = 0.01,
-    vol_bump: float = 0.01,
-    time_bump_days: float = 1.0,
-    rate_bump: float = 0.0001,
+    config: Optional[GreeksBumpConfig] = None,
+    spot_bump: Optional[float] = None,
+    vol_bump: Optional[float] = None,
+    time_bump_days: Optional[float] = None,
+    rate_bump: Optional[float] = None,
     **kwargs
 ) -> NumericalGreeks:
     """
@@ -337,14 +676,17 @@ def finite_difference_greeks(
         Time to expiry (years)
     rate : float
         Risk-free rate
-    spot_bump : float
-        Relative spot bump (default 1%)
-    vol_bump : float
-        Absolute vol bump (default 1%)
-    time_bump_days : float
-        Time bump in days (default 1 day)
-    rate_bump : float
-        Absolute rate bump (default 1bp)
+    config : GreeksBumpConfig, optional
+        Bump configuration. If not provided, uses DEFAULT_BUMP_CONFIG.
+        Individual bump parameters override config values if specified.
+    spot_bump : float, optional
+        Relative spot bump (overrides config)
+    vol_bump : float, optional
+        Absolute vol bump (overrides config)
+    time_bump_days : float, optional
+        Time bump in days (overrides config)
+    rate_bump : float, optional
+        Absolute rate bump (overrides config)
     **kwargs
         Additional arguments for price_func
 
@@ -353,11 +695,18 @@ def finite_difference_greeks(
     NumericalGreeks
         Named tuple with (delta, gamma, vega, theta, rho)
     """
+    # Use config or defaults, with individual overrides
+    cfg = config or DEFAULT_BUMP_CONFIG
+    _spot_bump = spot_bump if spot_bump is not None else cfg.spot_bump
+    _vol_bump = vol_bump if vol_bump is not None else cfg.vol_bump
+    _time_bump_days = time_bump_days if time_bump_days is not None else cfg.time_bump_days
+    _rate_bump = rate_bump if rate_bump is not None else cfg.rate_bump
+
     # Cache commonly reused values
-    h_s = spot * spot_bump
-    h_v = vol_bump
-    h_t = time_bump_days / 365.0
-    h_r = rate_bump
+    h_s = spot * _spot_bump
+    h_v = _vol_bump
+    h_t = _time_bump_days / 365.0
+    h_r = _rate_bump
 
     # Base price
     v_mid = price_func(spot, vol=vol, time=time, rate=rate, **kwargs)
@@ -381,7 +730,7 @@ def finite_difference_greeks(
     delta = (v_s_up - v_s_down) / (2 * h_s)
     gamma = (v_s_up - 2 * v_mid + v_s_down) / (h_s ** 2)
     vega = (v_v_up - v_v_down) / (2 * h_v) / 100.0
-    theta = (v_t_bump - v_mid) / time_bump_days
+    theta = (v_t_bump - v_mid) / _time_bump_days
     rho = (v_r_up - v_r_down) / (2 * h_r) / 100.0
 
     return NumericalGreeks(
@@ -402,33 +751,43 @@ class ModelNumericalGreeks:
     Numerical Greeks calculator that works with model/engine architecture.
 
     Provides finite difference Greeks for any pricing engine.
+
+    Parameters
+    ----------
+    config : GreeksBumpConfig, optional
+        Bump configuration. If not provided, uses DEFAULT_BUMP_CONFIG.
     """
 
-    def __init__(
-        self,
-        spot_bump: float = 0.01,
-        vol_bump: float = 0.01,
-        time_bump_days: float = 1.0,
-        rate_bump: float = 0.0001
-    ):
+    def __init__(self, config: Optional[GreeksBumpConfig] = None):
         """
         Initialize numerical Greeks calculator.
 
         Parameters
         ----------
-        spot_bump : float
-            Relative spot bump (default 1%)
-        vol_bump : float
-            Absolute vol bump (default 1%)
-        time_bump_days : float
-            Time bump in days (default 1 day)
-        rate_bump : float
-            Absolute rate bump (default 1bp)
+        config : GreeksBumpConfig, optional
+            Bump configuration. If not provided, uses DEFAULT_BUMP_CONFIG.
         """
-        self.spot_bump = spot_bump
-        self.vol_bump = vol_bump
-        self.time_bump_days = time_bump_days
-        self.rate_bump = rate_bump
+        self.config = config or DEFAULT_BUMP_CONFIG
+
+    @property
+    def spot_bump(self) -> float:
+        """Relative spot bump."""
+        return self.config.spot_bump
+
+    @property
+    def vol_bump(self) -> float:
+        """Absolute volatility bump."""
+        return self.config.vol_bump
+
+    @property
+    def time_bump_days(self) -> float:
+        """Time decay bump in days."""
+        return self.config.time_bump_days
+
+    @property
+    def rate_bump(self) -> float:
+        """Absolute rate bump."""
+        return self.config.rate_bump
 
     def calculate(
         self,

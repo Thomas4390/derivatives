@@ -11,6 +11,31 @@ Includes all 14 Greeks:
 
 All functions are Numba-optimized for performance.
 
+Scaling Conventions
+-------------------
+Greeks are scaled to provide intuitive, market-standard values:
+
+**First Order:**
+    - Delta: raw (sensitivity to $1 move in spot)
+    - Gamma: raw (change in delta per $1 move in spot)
+    - Vega: per 1% volatility change (divide raw by 100)
+    - Theta: per calendar day (divide raw by 365)
+    - Rho: per 1% rate change (divide raw by 100)
+
+**Second Order:**
+    - Vanna: per 1% volatility change
+    - Volga: per 1%² volatility change (divide raw by 10,000)
+    - Charm: per calendar day
+    - Veta: per day per 1% volatility
+
+**Third Order:**
+    - Speed: raw
+    - Zomma: per 1% volatility change
+    - Color: per calendar day
+    - Ultima: per 1%³ volatility change (divide raw by 1,000,000)
+
+To obtain raw (unscaled) values, use the `unscale_greeks()` function.
+
 Author: Thomas
 Created: 2025
 """
@@ -27,6 +52,25 @@ from typing import NamedTuple
 
 DAYS_PER_YEAR = 365.0
 SQRT_2PI = math.sqrt(2.0 * math.pi)
+
+# -----------------------------------------------------------------------------
+# Scaling Factors
+# -----------------------------------------------------------------------------
+# These factors convert raw mathematical Greeks to market-standard values.
+# Raw value = scaled value * SCALE_FACTOR (or / UNSCALE_FACTOR)
+
+VEGA_SCALE = 100.0       # Vega is per 1% vol (0.01 in decimal)
+RHO_SCALE = 100.0        # Rho is per 1% rate (0.01 in decimal)
+THETA_SCALE = DAYS_PER_YEAR  # Theta is per calendar day
+
+VANNA_SCALE = 100.0      # Per 1% vol
+VOLGA_SCALE = 10000.0    # Per 1%² vol (100 * 100)
+CHARM_SCALE = DAYS_PER_YEAR  # Per calendar day
+VETA_SCALE = DAYS_PER_YEAR * 100.0  # Per day per 1% vol
+
+ZOMMA_SCALE = 100.0      # Per 1% vol
+COLOR_SCALE = DAYS_PER_YEAR  # Per calendar day
+ULTIMA_SCALE = 1000000.0  # Per 1%³ vol (100 * 100 * 100)
 
 
 # =============================================================================
@@ -574,6 +618,106 @@ def bs_greeks_surface(
         result['ultima'][i] = greeks[13]
 
     return result
+
+
+# =============================================================================
+# Utility Functions
+# =============================================================================
+
+def unscale_greeks(greeks: AllGreeks) -> AllGreeks:
+    """
+    Convert scaled Greeks back to raw mathematical values.
+
+    This function reverses the market-standard scaling applied by default,
+    returning the raw mathematical sensitivities.
+
+    Parameters
+    ----------
+    greeks : AllGreeks
+        Scaled Greeks from bs_all_greeks()
+
+    Returns
+    -------
+    AllGreeks
+        Raw (unscaled) Greeks
+
+    Examples
+    --------
+    >>> scaled = bs_all_greeks(100, 100, 0.25, 0.05, 0.0, 0.20, True)
+    >>> raw = unscale_greeks(scaled)
+    >>> # raw.vega is now the sensitivity to a 1.0 (100%) vol change
+    >>> # raw.theta is now the sensitivity per year (not per day)
+
+    Notes
+    -----
+    Scaling transformations:
+    - vega: scaled_value * 100 (from per 1% to per 100%)
+    - theta: scaled_value * 365 (from per day to per year)
+    - rho: scaled_value * 100 (from per 1% to per 100%)
+    - vanna: scaled_value * 100
+    - volga: scaled_value * 10000
+    - charm: scaled_value * 365
+    - veta: scaled_value * 36500
+    - zomma: scaled_value * 100
+    - color: scaled_value * 365
+    - ultima: scaled_value * 1000000
+    """
+    return AllGreeks(
+        price=greeks.price,
+        # First order
+        delta=greeks.delta,
+        gamma=greeks.gamma,
+        vega=greeks.vega * VEGA_SCALE,
+        theta=greeks.theta * THETA_SCALE,
+        rho=greeks.rho * RHO_SCALE,
+        # Second order
+        vanna=greeks.vanna * VANNA_SCALE,
+        volga=greeks.volga * VOLGA_SCALE,
+        charm=greeks.charm * CHARM_SCALE,
+        veta=greeks.veta * VETA_SCALE,
+        # Third order
+        speed=greeks.speed,
+        zomma=greeks.zomma * ZOMMA_SCALE,
+        color=greeks.color * COLOR_SCALE,
+        ultima=greeks.ultima * ULTIMA_SCALE,
+    )
+
+
+def scale_greeks(raw_greeks: AllGreeks) -> AllGreeks:
+    """
+    Apply market-standard scaling to raw Greeks.
+
+    This is the inverse of unscale_greeks().
+
+    Parameters
+    ----------
+    raw_greeks : AllGreeks
+        Raw mathematical Greeks
+
+    Returns
+    -------
+    AllGreeks
+        Market-standard scaled Greeks
+    """
+    return AllGreeks(
+        price=raw_greeks.price,
+        # First order
+        delta=raw_greeks.delta,
+        gamma=raw_greeks.gamma,
+        vega=raw_greeks.vega / VEGA_SCALE,
+        theta=raw_greeks.theta / THETA_SCALE,
+        rho=raw_greeks.rho / RHO_SCALE,
+        # Second order
+        vanna=raw_greeks.vanna / VANNA_SCALE,
+        volga=raw_greeks.volga / VOLGA_SCALE,
+        charm=raw_greeks.charm / CHARM_SCALE,
+        veta=raw_greeks.veta / VETA_SCALE,
+        # Third order
+        speed=raw_greeks.speed,
+        zomma=raw_greeks.zomma / ZOMMA_SCALE,
+        color=raw_greeks.color / COLOR_SCALE,
+        ultima=raw_greeks.ultima / ULTIMA_SCALE,
+    )
 
 
 # =============================================================================

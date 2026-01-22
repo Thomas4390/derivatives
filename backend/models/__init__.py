@@ -36,6 +36,7 @@ from backend.models.bates import BatesModel
 
 # GARCH family models (now also using merged parameters)
 from backend.models.garch import (
+    BaseGARCHModel,
     GARCHModel,
     NGARCHModel,
     GJRGARCHModel,
@@ -74,6 +75,7 @@ __all__ = [
     "MertonModel",
     "BatesModel",
     # GARCH family
+    "BaseGARCHModel",
     "GARCHModel",
     "NGARCHModel",
     "GJRGARCHModel",

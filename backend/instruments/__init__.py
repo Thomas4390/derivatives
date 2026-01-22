@@ -56,7 +56,9 @@ from backend.instruments.payoffs import (
 from backend.instruments.options import (
     VanillaOption,
     DigitalOption,
-    # Factory functions
+    # Generic factory
+    create_vanilla_option,
+    # Convenience factories
     EuropeanCall,
     EuropeanPut,
     AmericanCall,
@@ -98,7 +100,9 @@ __all__ = [
     # Options
     "VanillaOption",
     "DigitalOption",
-    # Factory functions
+    # Generic factory
+    "create_vanilla_option",
+    # Convenience factories
     "EuropeanCall",
     "EuropeanPut",
     "AmericanCall",
