@@ -646,7 +646,7 @@ if __name__ == "__main__":
     from backend.models.heston import HestonModel
     from backend.core.market import MarketEnvironment
     from backend.engines import BSAnalyticEngine, FFTEngine
-    from .positions import long_call, short_call, long_put, long_stock
+    from backend.portfolio.positions import long_call, short_call, long_put, long_stock
 
     print("=" * 50)
     print("Portfolio Module Smoke Test")

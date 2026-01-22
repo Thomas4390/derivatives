@@ -881,7 +881,7 @@ if __name__ == "__main__":
     print("=" * 50)
 
     # Create a simple BS pricing function for testing
-    from .analytic import bs_all_greeks
+    from backend.greeks.analytic import bs_all_greeks
 
     def bs_price(spot, vol=0.20, time=0.25, rate=0.05, strike=100.0, is_call=True):
         greeks = bs_all_greeks(spot, strike, time, rate, 0.0, vol, is_call)

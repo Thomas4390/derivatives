@@ -141,7 +141,7 @@ class GreeksCalculator:
         include_higher_order: bool
     ) -> Union[GreeksResult, AllGreeksResult]:
         """Calculate analytic Black-Scholes Greeks."""
-        from .analytic import bs_all_greeks
+        from backend.greeks.analytic import bs_all_greeks
 
         params = model.get_parameters()
         sigma = params['sigma']
@@ -191,7 +191,7 @@ class GreeksCalculator:
         include_higher_order: bool
     ) -> Union[GreeksResult, AllGreeksResult]:
         """Calculate numerical Greeks via finite differences."""
-        from .numerical import ModelNumericalGreeks
+        from backend.greeks.numerical import ModelNumericalGreeks
 
         num_calc = ModelNumericalGreeks(
             spot_bump=self.spot_bump,

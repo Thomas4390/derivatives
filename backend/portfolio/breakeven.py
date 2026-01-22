@@ -28,7 +28,7 @@ from backend.portfolio.pnl import (
 )
 
 if TYPE_CHECKING:
-    from .portfolio import OptionsPortfolio
+    from backend.portfolio.portfolio import OptionsPortfolio
 
 
 # =============================================================================
@@ -495,7 +495,7 @@ def find_breakevens_from_portfolio(
 # =============================================================================
 
 if __name__ == "__main__":
-    from .positions import long_call, short_call, long_put, long_stock
+    from backend.portfolio.positions import long_call, short_call, long_put, long_stock
 
     print("=" * 50)
     print("Breakeven Module Smoke Test")
