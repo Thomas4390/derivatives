@@ -180,3 +180,67 @@ def bates_cf_vectorized(
         )
 
     return result
+
+
+# =============================================================================
+# SMOKE TEST
+# =============================================================================
+
+if __name__ == "__main__":
+    print("=" * 50)
+    print("Bates Characteristic Function Smoke Test")
+    print("=" * 50)
+
+    # Test parameters
+    s0, v0, t, r = 100.0, 0.04, 0.5, 0.05
+    kappa, theta, xi, rho = 2.0, 0.04, 0.3, -0.7
+    lambda_j, mu_j, sigma_j = 0.5, -0.1, 0.2
+
+    # Test scalar CF
+    print("\n--- Scalar Characteristic Function ---")
+    u = 1.0 + 0.5j
+    cf = bates_characteristic_function(u, s0, v0, t, r, kappa, theta, xi, rho, lambda_j, mu_j, sigma_j)
+    print(f"u = {u}")
+    print(f"phi(u) = {cf}")
+    print(f"|phi(u)| = {np.abs(cf):.6f}")
+
+    # Test at u=0 (should be 1)
+    cf_zero = bates_characteristic_function(0.0 + 0j, s0, v0, t, r, kappa, theta, xi, rho, lambda_j, mu_j, sigma_j)
+    print(f"\nphi(0) = {cf_zero}")
+    assert np.abs(cf_zero - 1.0) < 1e-10, "CF at u=0 should be 1"
+    print("phi(0) = 1 ✓")
+
+    # Test vectorized CF
+    print("\n--- Vectorized Characteristic Function ---")
+    u_arr = np.array([0.5, 1.0, 1.5, 2.0]) + 0.5j
+    cf_vec = bates_cf_vectorized(u_arr, s0, v0, t, r, kappa, theta, xi, rho, lambda_j, mu_j, sigma_j)
+    print(f"u_arr = {u_arr}")
+    print(f"|phi(u_arr)| = {np.abs(cf_vec)}")
+
+    # Verify vectorized matches scalar
+    print("\n--- Consistency Check ---")
+    for i, ui in enumerate(u_arr):
+        cf_scalar = bates_characteristic_function(ui, s0, v0, t, r, kappa, theta, xi, rho, lambda_j, mu_j, sigma_j)
+        assert np.abs(cf_vec[i] - cf_scalar) < 1e-10, f"Mismatch at index {i}"
+    print("Vectorized matches scalar: ✓")
+
+    # Compare with Heston (lambda=0 should reduce to Heston CF)
+    print("\n--- Comparison with Heston (lambda_j=0) ---")
+    from backend.models.characteristic_functions.heston_cf import heston_characteristic_function
+
+    cf_bates_no_jump = bates_characteristic_function(u, s0, v0, t, r, kappa, theta, xi, rho, 0.0, mu_j, sigma_j)
+    cf_heston = heston_characteristic_function(u, s0, v0, t, r, kappa, theta, xi, rho)
+    print(f"Bates (lambda=0): |phi(u)| = {np.abs(cf_bates_no_jump):.6f}")
+    print(f"Heston:           |phi(u)| = {np.abs(cf_heston):.6f}")
+    assert np.abs(cf_bates_no_jump - cf_heston) < 1e-10, "Bates with lambda=0 should equal Heston"
+    print("Bates(lambda=0) = Heston: ✓")
+
+    # Parameter sensitivity
+    print("\n--- Jump Intensity Sensitivity ---")
+    for lam in [0.0, 0.5, 1.0, 2.0]:
+        cf_test = bates_characteristic_function(1.0 + 0j, s0, v0, t, r, kappa, theta, xi, rho, lam, mu_j, sigma_j)
+        print(f"lambda={lam:.1f}: |phi(1)| = {np.abs(cf_test):.6f}")
+
+    print("\n" + "=" * 50)
+    print("Bates CF smoke test passed")
+    print("=" * 50)

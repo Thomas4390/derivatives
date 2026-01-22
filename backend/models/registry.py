@@ -240,3 +240,50 @@ class ModelRegistry:
 
 # Global singleton instance
 registry = ModelRegistry()
+
+
+# =============================================================================
+# SMOKE TEST
+# =============================================================================
+
+if __name__ == "__main__":
+    print("=" * 50)
+    print("Model Registry Smoke Test")
+    print("=" * 50)
+
+    # Import models for registration
+    from backend.models.gbm import GBMModel
+    from backend.models.heston import HestonModel
+
+    # Test registration
+    print("\n--- Registration Test ---")
+    registry.register("gbm", GBMModel, aliases=["bs", "black-scholes"])
+    registry.register("heston", HestonModel, aliases=["sv", "stochvol"])
+    print(f"Registered models: {list(registry.list_models().keys())}")
+    print(f"Registered aliases: {registry.list_aliases()}")
+
+    # Test retrieval
+    print("\n--- Retrieval Test ---")
+    gbm_class = registry.get("gbm")
+    print(f"Retrieved GBM class: {gbm_class.__name__}")
+
+    gbm_class_alias = registry.get("bs")
+    print(f"Retrieved via alias 'bs': {gbm_class_alias.__name__}")
+
+    # Test is_registered
+    print("\n--- Registration Check ---")
+    print(f"'gbm' registered: {registry.is_registered('gbm')}")
+    print(f"'bs' registered (alias): {registry.is_registered('bs')}")
+    print(f"'unknown' registered: {registry.is_registered('unknown')}")
+
+    # Test error handling
+    print("\n--- Error Handling ---")
+    try:
+        registry.get("nonexistent")
+        print("ERROR: Should have raised KeyError!")
+    except KeyError as e:
+        print(f"Correctly raised KeyError: {e}")
+
+    print("\n" + "=" * 50)
+    print("Model Registry smoke test passed")
+    print("=" * 50)

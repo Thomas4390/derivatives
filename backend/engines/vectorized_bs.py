@@ -5,12 +5,13 @@ Vectorized Black-Scholes Engine
 High-performance Numba-compiled functions for vectorized Greeks calculations.
 This module provides fast array-based operations for the Streamlit frontend.
 
-Reuses mathematical primitives from backend/utils/math.py for consistency.
+All calculations delegate to backend.utils.math (single source of truth).
+This module provides convenience wrappers with option_type: int (1=call, 0=put)
+interface expected by the frontend.
 
 Performance optimizations:
 - @njit(fastmath=True, cache=True): JIT compilation with fast math
 - @njit(parallel=True) + prange: Parallel CPU execution
-- Reuses Numba-compiled functions from utils/math
 
 Note: Portfolio-level Greeks surfaces and P&L calculations have been moved to:
 - backend/portfolio/greeks_surfaces.py - Greeks 3D surface calculations
@@ -22,16 +23,13 @@ Created: 2025
 
 import numpy as np
 from numba import njit, prange
-from typing import Tuple
 
-# Import shared mathematical primitives
+# Import from single source of truth
 from backend.utils.math import (
-    norm_cdf,
-    norm_pdf,
-    d1_d2,
+    DAYS_PER_YEAR,
+    bs_greeks as _bs_greeks,
     bs_second_order_greeks,
     bs_third_order_greeks,
-    DAYS_PER_YEAR,
 )
 
 
@@ -78,7 +76,7 @@ GREEK_ULTIMA = 13
 
 
 # =============================================================================
-# BLACK-SCHOLES FIRST-ORDER GREEKS
+# BLACK-SCHOLES FIRST-ORDER GREEKS (Wrapper with option_type interface)
 # =============================================================================
 
 @njit(fastmath=True, cache=True)
@@ -89,12 +87,11 @@ def calculate_first_order_greeks(
     risk_free_rate: float,
     volatility: float,
     option_type: int
-) -> Tuple[float, float, float, float, float, float]:
+) -> tuple:
     """
     Calculate first-order Black-Scholes Greeks.
 
-    Computes price and first-order sensitivities using closed-form formulas.
-    Handles expiration gracefully by returning intrinsic values.
+    Wrapper around utils.math.bs_greeks with option_type: int interface.
 
     Parameters
     ----------
@@ -122,45 +119,13 @@ def calculate_first_order_greeks(
         - theta: ∂V/∂t per calendar day (scaled by 1/365)
         - rho: ∂V/∂r per 1% rate change (scaled by 1/100)
     """
-    if time_to_expiry <= 0:
-        if option_type == 1:  # Call
-            price = max(spot - strike, 0.0)
-            delta = 1.0 if spot > strike else 0.0
-        else:  # Put
-            price = max(strike - spot, 0.0)
-            delta = -1.0 if spot < strike else 0.0
-        return price, delta, 0.0, 0.0, 0.0, 0.0
+    # Convert option_type (1=call, 0=put) to is_call (bool)
+    is_call = option_type == 1
 
-    d1, d2 = d1_d2(spot, strike, time_to_expiry, risk_free_rate, volatility)
-    sqrt_t = np.sqrt(time_to_expiry)
-
-    n_d1 = norm_cdf(d1)
-    n_d2 = norm_cdf(d2)
-    n_prime_d1 = norm_pdf(d1)
-    n_minus_d1 = norm_cdf(-d1)
-    n_minus_d2 = norm_cdf(-d2)
-    exp_rt = np.exp(-risk_free_rate * time_to_expiry)
-
-    # Gamma (same for calls and puts)
-    gamma = n_prime_d1 / (spot * volatility * sqrt_t) if volatility > 0 else 0.0
-
-    # Vega (per 1% change)
-    vega = spot * n_prime_d1 * sqrt_t / 100.0
-
-    if option_type == 1:  # Call
-        price = spot * n_d1 - strike * exp_rt * n_d2
-        delta = n_d1
-        theta = (-spot * n_prime_d1 * volatility / (2 * sqrt_t)
-                - risk_free_rate * strike * exp_rt * n_d2) / DAYS_PER_YEAR
-        rho = strike * time_to_expiry * exp_rt * n_d2 / 100.0
-    else:  # Put
-        price = strike * exp_rt * n_minus_d2 - spot * n_minus_d1
-        delta = n_d1 - 1.0
-        theta = (-spot * n_prime_d1 * volatility / (2 * sqrt_t)
-                + risk_free_rate * strike * exp_rt * n_minus_d2) / DAYS_PER_YEAR
-        rho = -strike * time_to_expiry * exp_rt * n_minus_d2 / 100.0
-
-    return price, delta, gamma, vega, theta, rho
+    # Delegate to single source of truth
+    return _bs_greeks(
+        spot, strike, time_to_expiry, risk_free_rate, volatility, is_call
+    )
 
 
 # =============================================================================
@@ -179,7 +144,7 @@ def calculate_all_greeks(
     """
     Calculate all 14 Greeks in a single pass.
 
-    Uses shared functions from utils/math for second and third order Greeks.
+    Uses shared functions from utils/math for all Greeks.
 
     Parameters
     ----------
@@ -204,9 +169,12 @@ def calculate_all_greeks(
     """
     greeks = np.zeros(14)
 
-    # First-order Greeks
-    price, delta, gamma, vega, theta, rho = calculate_first_order_greeks(
-        spot, strike, time_to_expiry, risk_free_rate, volatility, option_type
+    # Convert option_type (1=call, 0=put) to is_call (bool)
+    is_call = option_type == 1
+
+    # First-order Greeks (from utils/math)
+    price, delta, gamma, vega, theta, rho = _bs_greeks(
+        spot, strike, time_to_expiry, risk_free_rate, volatility, is_call
     )
     greeks[0] = price
     greeks[1] = delta
@@ -282,3 +250,73 @@ def calculate_greeks_vectorized(
         )
 
     return result
+
+
+# =============================================================================
+# SMOKE TEST
+# =============================================================================
+
+if __name__ == "__main__":
+    print("=" * 50)
+    print("Vectorized BS Engine Smoke Test")
+    print("=" * 50)
+
+    # Test parameters
+    spot, strike, t, r, vol = 100.0, 100.0, 0.5, 0.05, 0.20
+
+    # Test first-order Greeks
+    print("\n--- First-Order Greeks ---")
+    price, delta, gamma, vega, theta, rho = calculate_first_order_greeks(
+        spot, strike, t, r, vol, option_type=1  # Call
+    )
+    print(f"Call option (ATM):")
+    print(f"  Price: ${price:.4f}")
+    print(f"  Delta: {delta:.4f}")
+    print(f"  Gamma: {gamma:.6f}")
+    print(f"  Vega:  {vega:.4f} (per 1% vol)")
+    print(f"  Theta: {theta:.4f} (per day)")
+    print(f"  Rho:   {rho:.4f} (per 1% rate)")
+
+    # Test put option
+    price_put, delta_put, _, _, _, _ = calculate_first_order_greeks(
+        spot, strike, t, r, vol, option_type=0  # Put
+    )
+    print(f"\nPut option (ATM):")
+    print(f"  Price: ${price_put:.4f}")
+    print(f"  Delta: {delta_put:.4f}")
+
+    # Verify put-call parity for delta
+    print(f"\nDelta verification: Call - Put = {delta - delta_put:.4f} (should be ~1)")
+
+    # Test all 14 Greeks
+    print("\n--- All 14 Greeks ---")
+    all_greeks = calculate_all_greeks(spot, strike, t, r, vol, option_type=1)
+    greek_names = [
+        "price", "delta", "gamma", "vega", "theta", "rho",
+        "vanna", "volga", "charm", "veta",
+        "speed", "zomma", "color", "ultima"
+    ]
+    for i, name in enumerate(greek_names):
+        print(f"  {name:>8}: {all_greeks[i]:>12.6f}")
+
+    # Test vectorized calculation
+    print("\n--- Vectorized Greeks ---")
+    spot_range = np.array([90.0, 95.0, 100.0, 105.0, 110.0])
+    greeks_matrix = calculate_greeks_vectorized(
+        spot_range, strike, t, r, vol, option_type=1
+    )
+    print(f"Spot range: {spot_range}")
+    print(f"Prices:     {greeks_matrix[:, GREEK_PRICE]}")
+    print(f"Deltas:     {greeks_matrix[:, GREEK_DELTA]}")
+    print(f"Gammas:     {greeks_matrix[:, GREEK_GAMMA]}")
+
+    # Verify vectorized matches scalar
+    print("\n--- Consistency Check ---")
+    for i, s in enumerate(spot_range):
+        scalar_greeks = calculate_all_greeks(s, strike, t, r, vol, option_type=1)
+        assert np.allclose(greeks_matrix[i, :], scalar_greeks, rtol=1e-10), f"Mismatch at spot={s}"
+    print("Vectorized matches scalar: ✓")
+
+    print("\n" + "=" * 50)
+    print("Vectorized BS Engine smoke test passed")
+    print("=" * 50)

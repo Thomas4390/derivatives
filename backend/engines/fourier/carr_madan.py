@@ -453,3 +453,79 @@ def fft_price(
         return engine.price_call(characteristic_fn, s0, k, t, r)
     else:
         return engine.price_put(characteristic_fn, s0, k, t, r, q)
+
+
+# =============================================================================
+# SMOKE TEST
+# =============================================================================
+
+if __name__ == "__main__":
+    from backend.models.characteristic_functions.heston_cf import heston_cf_vectorized
+
+    print("=" * 50)
+    print("Carr-Madan FFT Engine Smoke Test")
+    print("=" * 50)
+
+    # Test parameters
+    s0, k, t, r = 100.0, 100.0, 0.5, 0.05
+    v0, kappa, theta, xi, rho = 0.04, 2.0, 0.04, 0.3, -0.7
+
+    # Create characteristic function for Heston model
+    def heston_cf(u: np.ndarray) -> np.ndarray:
+        return heston_cf_vectorized(u, s0, v0, t, r, kappa, theta, xi, rho)
+
+    # Test FFT config
+    print("\n--- FFT Configuration ---")
+    config = FFTConfig(alpha=1.5, n_fft=4096)
+    print(f"Alpha: {config.alpha}")
+    print(f"N_FFT: {config.n_fft}")
+    print(f"Eta:   {config.eta}")
+
+    # Test config validation
+    try:
+        FFTConfig(alpha=-1.0)
+        print("ERROR: Should have raised ValueError!")
+    except ValueError as e:
+        print(f"Config validation works: {e}")
+
+    # Test call pricing
+    print("\n--- Call Pricing ---")
+    engine = CarrMadanFFTEngine(config)
+    call_price = engine.price_call(heston_cf, s0, k, t, r)
+    print(f"ATM Call (K={k}): ${call_price:.4f}")
+
+    # Test put pricing
+    print("\n--- Put Pricing ---")
+    put_price = engine.price_put(heston_cf, s0, k, t, r)
+    print(f"ATM Put (K={k}): ${put_price:.4f}")
+
+    # Test put-call parity: C - P = S - K*exp(-rT)
+    parity_check = call_price - put_price
+    parity_expected = s0 - k * np.exp(-r * t)
+    print(f"\nPut-Call Parity:")
+    print(f"  C - P = ${parity_check:.4f}")
+    print(f"  S - K*e^(-rT) = ${parity_expected:.4f}")
+    print(f"  Difference: ${abs(parity_check - parity_expected):.6f}")
+    assert abs(parity_check - parity_expected) < 0.01, "Put-call parity violated"
+    print("  Put-call parity: ✓")
+
+    # Test multiple strikes
+    print("\n--- Multiple Strikes ---")
+    strikes = np.array([90, 95, 100, 105, 110])
+    call_prices = engine.price_strikes(heston_cf, s0, strikes, t, r, is_call=True)
+    put_prices = engine.price_strikes(heston_cf, s0, strikes, t, r, is_call=False)
+    print(f"{'Strike':>8} {'Call':>10} {'Put':>10}")
+    print("-" * 30)
+    for i, strike in enumerate(strikes):
+        print(f"{strike:>8} ${call_prices[i]:>9.4f} ${put_prices[i]:>9.4f}")
+
+    # Test convenience function
+    print("\n--- Convenience Function ---")
+    quick_price = fft_price(heston_cf, s0, k, t, r, is_call=True)
+    print(f"fft_price result: ${quick_price:.4f}")
+    assert abs(quick_price - call_price) < 1e-10, "Convenience function mismatch"
+    print("Convenience function matches engine: ✓")
+
+    print("\n" + "=" * 50)
+    print("Carr-Madan FFT Engine smoke test passed")
+    print("=" * 50)

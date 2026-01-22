@@ -23,8 +23,8 @@ from backend.core.result_types import GreeksResult
 
 from .positions import PortfolioPosition, StockPosition
 
-# Import Numba-optimized functions
-from backend.simulation.pnl_engine import (
+# Import Numba-optimized functions from portfolio.pnl
+from backend.portfolio.pnl import (
     calculate_portfolio_pnl_vectorized,
     calculate_portfolio_pnl_with_stock,
     compute_payoff_curve,

@@ -20,15 +20,12 @@ import numpy as np
 from numba import njit, prange
 from typing import Tuple
 
-# Import directly from utils.math to avoid circular imports with engines
-from backend.utils.math import (
-    norm_cdf,
-    norm_pdf,
-    d1_d2,
-    bs_second_order_greeks,
-    bs_third_order_greeks,
-    DAYS_PER_YEAR,
+# Import Greeks calculation functions from vectorized_bs
+# (same convention: option_type 1=call, 0=put)
+from backend.engines.vectorized_bs import (
+    calculate_all_greeks as _calculate_all_greeks,
 )
+from backend.utils.math import DAYS_PER_YEAR
 
 # Greek indices - defined locally to avoid circular imports
 GREEK_PRICE = 0
@@ -47,100 +44,8 @@ GREEK_COLOR = 12
 GREEK_ULTIMA = 13
 
 
-# =============================================================================
-# LOCAL GREEKS CALCULATION (to avoid circular imports with engines)
-# =============================================================================
-
-@njit(fastmath=True, cache=True)
-def _calculate_first_order_greeks(
-    spot: float,
-    strike: float,
-    time_to_expiry: float,
-    risk_free_rate: float,
-    volatility: float,
-    option_type: int
-) -> Tuple[float, float, float, float, float, float]:
-    """Calculate first-order Black-Scholes Greeks."""
-    if time_to_expiry <= 0:
-        if option_type == 1:  # Call
-            price = max(spot - strike, 0.0)
-            delta = 1.0 if spot > strike else 0.0
-        else:  # Put
-            price = max(strike - spot, 0.0)
-            delta = -1.0 if spot < strike else 0.0
-        return price, delta, 0.0, 0.0, 0.0, 0.0
-
-    d1, d2 = d1_d2(spot, strike, time_to_expiry, risk_free_rate, volatility)
-    sqrt_t = np.sqrt(time_to_expiry)
-
-    n_d1 = norm_cdf(d1)
-    n_d2 = norm_cdf(d2)
-    n_prime_d1 = norm_pdf(d1)
-    n_minus_d1 = norm_cdf(-d1)
-    n_minus_d2 = norm_cdf(-d2)
-    exp_rt = np.exp(-risk_free_rate * time_to_expiry)
-
-    gamma = n_prime_d1 / (spot * volatility * sqrt_t) if volatility > 0 else 0.0
-    vega = spot * n_prime_d1 * sqrt_t / 100.0
-
-    if option_type == 1:  # Call
-        price = spot * n_d1 - strike * exp_rt * n_d2
-        delta = n_d1
-        theta = (-spot * n_prime_d1 * volatility / (2 * sqrt_t)
-                - risk_free_rate * strike * exp_rt * n_d2) / DAYS_PER_YEAR
-        rho = strike * time_to_expiry * exp_rt * n_d2 / 100.0
-    else:  # Put
-        price = strike * exp_rt * n_minus_d2 - spot * n_minus_d1
-        delta = n_d1 - 1.0
-        theta = (-spot * n_prime_d1 * volatility / (2 * sqrt_t)
-                + risk_free_rate * strike * exp_rt * n_minus_d2) / DAYS_PER_YEAR
-        rho = -strike * time_to_expiry * exp_rt * n_minus_d2 / 100.0
-
-    return price, delta, gamma, vega, theta, rho
-
-
-@njit(fastmath=True, cache=True)
-def _calculate_all_greeks(
-    spot: float,
-    strike: float,
-    time_to_expiry: float,
-    risk_free_rate: float,
-    volatility: float,
-    option_type: int
-) -> np.ndarray:
-    """Calculate all 14 Greeks in a single pass."""
-    greeks = np.zeros(14)
-
-    # First-order Greeks
-    price, delta, gamma, vega, theta, rho = _calculate_first_order_greeks(
-        spot, strike, time_to_expiry, risk_free_rate, volatility, option_type
-    )
-    greeks[0] = price
-    greeks[1] = delta
-    greeks[2] = gamma
-    greeks[3] = vega
-    greeks[4] = theta
-    greeks[5] = rho
-
-    # Second-order Greeks
-    vanna, volga, charm, veta = bs_second_order_greeks(
-        spot, strike, time_to_expiry, risk_free_rate, volatility
-    )
-    greeks[6] = vanna
-    greeks[7] = volga
-    greeks[8] = charm
-    greeks[9] = veta
-
-    # Third-order Greeks
-    speed, zomma, color, ultima = bs_third_order_greeks(
-        spot, strike, time_to_expiry, risk_free_rate, volatility
-    )
-    greeks[10] = speed
-    greeks[11] = zomma
-    greeks[12] = color
-    greeks[13] = ultima
-
-    return greeks
+# NOTE: Greeks calculations are imported from backend.engines.vectorized_bs
+# to avoid code duplication. The function _calculate_all_greeks is imported above.
 
 
 # =============================================================================
@@ -361,7 +266,13 @@ def get_greek_name(greek_index: int) -> str:
 
 
 # =============================================================================
-# P&L CALCULATIONS (for backward compatibility with Streamlit adapter)
+# P&L CALCULATIONS (for Streamlit adapter)
+# =============================================================================
+# NOTE: These functions use a DIFFERENT convention than pnl.py:
+#   - Here: option_type = 1 (call), 0 (put)
+#   - pnl.py: option_type = 1 (call), -1 (put)
+# The Streamlit frontend relies on the 0=put convention.
+# Do NOT remove these in favor of pnl.py without updating the frontend.
 # =============================================================================
 
 @njit(fastmath=True, cache=True)
@@ -511,3 +422,151 @@ __all__ = [
     "GREEK_COLOR",
     "GREEK_ULTIMA",
 ]
+
+
+# =============================================================================
+# SMOKE TEST
+# =============================================================================
+
+if __name__ == "__main__":
+    print("=" * 50)
+    print("Greeks Surfaces Smoke Test")
+    print("=" * 50)
+
+    # Test data - Bull Call Spread: Long 100 Call, Short 110 Call
+    strikes = np.array([100.0, 110.0], dtype=np.float64)
+    option_types = np.array([1, 1], dtype=np.int64)  # Both calls (1=call, 0=put)
+    position_types = np.array([1, -1], dtype=np.int64)  # Long, Short
+    quantities = np.array([100.0, 100.0], dtype=np.float64)  # 1 contract each (100 multiplier)
+    premiums = np.array([8.0, 3.0], dtype=np.float64)  # Premium per share
+
+    # Market parameters
+    risk_free_rate = 0.05
+    volatility = 0.20
+    base_dte = 30.0  # 30 days to expiry
+
+    # Ranges for surfaces
+    spot_range = np.linspace(80.0, 130.0, 50)
+    dte_range = np.array([7.0, 14.0, 30.0, 60.0, 90.0])
+    iv_range = np.array([0.15, 0.20, 0.25, 0.30, 0.35])
+    strike_range = np.linspace(90.0, 120.0, 30)
+
+    # --- Test 1: Greek name lookup ---
+    print("\n--- Test 1: Greek Name Lookup ---")
+    for idx in range(14):
+        name = get_greek_name(idx)
+        print(f"  Index {idx:2d}: {name}")
+    invalid_name = get_greek_name(99)
+    print(f"  Index 99 (invalid): {invalid_name}")
+
+    # --- Test 2: Portfolio Greeks Surface (Spot vs DTE) ---
+    print("\n--- Test 2: Greeks Surface (Spot vs DTE) ---")
+    delta_surface = portfolio_greeks_surface_dte(
+        strikes, option_types.astype(np.int64), position_types.astype(np.int64),
+        quantities, spot_range, dte_range,
+        risk_free_rate, volatility, GREEK_DELTA
+    )
+    print(f"  Delta surface shape: {delta_surface.shape}")
+    print(f"  Delta at S=100, DTE=30: {delta_surface[24, 2]:.4f}")  # Midpoint
+    print(f"  Delta range: [{delta_surface.min():.4f}, {delta_surface.max():.4f}]")
+
+    gamma_surface = portfolio_greeks_surface_dte(
+        strikes, option_types.astype(np.int64), position_types.astype(np.int64),
+        quantities, spot_range, dte_range,
+        risk_free_rate, volatility, GREEK_GAMMA
+    )
+    print(f"  Gamma surface shape: {gamma_surface.shape}")
+    print(f"  Gamma at S=100, DTE=30: {gamma_surface[24, 2]:.6f}")
+
+    # --- Test 3: Portfolio Greeks Surface (Spot vs IV) ---
+    print("\n--- Test 3: Greeks Surface (Spot vs IV) ---")
+    vega_surface = portfolio_greeks_surface_iv(
+        strikes, option_types.astype(np.int64), position_types.astype(np.int64),
+        quantities, spot_range, iv_range,
+        risk_free_rate, base_dte, GREEK_VEGA
+    )
+    print(f"  Vega surface shape: {vega_surface.shape}")
+    print(f"  Vega at S=100, IV=20%: {vega_surface[24, 1]:.4f}")
+    print(f"  Vega range: [{vega_surface.min():.4f}, {vega_surface.max():.4f}]")
+
+    # --- Test 4: Single Option Greeks Surface (Spot vs Strike) ---
+    print("\n--- Test 4: Single Option Surface (Spot vs Strike) ---")
+    single_delta = single_option_greeks_surface_strike(
+        spot_range, strike_range, base_dte,
+        risk_free_rate, volatility,
+        option_type=1,  # Call
+        position_type=1,  # Long
+        quantity=100,
+        greek_index=GREEK_DELTA
+    )
+    print(f"  Single call delta surface shape: {single_delta.shape}")
+    print(f"  Delta at S=100, K=100 (ATM): {single_delta[24, 10]:.4f}")
+
+    # --- Test 5: P&L Curve ---
+    print("\n--- Test 5: P&L Curve ---")
+    pnl_curve = calculate_pnl_curve(
+        spot_range, strikes, option_types.astype(np.float64),
+        position_types.astype(np.float64), quantities, premiums,
+        stock_quantity=0.0, stock_entry_price=0.0
+    )
+    print(f"  P&L curve length: {len(pnl_curve)}")
+    print(f"  P&L at S=80: ${pnl_curve[0]:.2f}")
+    print(f"  P&L at S=100: ${pnl_curve[24]:.2f}")
+    print(f"  P&L at S=130: ${pnl_curve[-1]:.2f}")
+    print(f"  Max P&L: ${pnl_curve.max():.2f} at S=${spot_range[np.argmax(pnl_curve)]:.2f}")
+    print(f"  Min P&L: ${pnl_curve.min():.2f} at S=${spot_range[np.argmin(pnl_curve)]:.2f}")
+
+    # --- Test 6: P&L at Single Spot ---
+    print("\n--- Test 6: P&L at Single Spot ---")
+    test_spots = [80.0, 95.0, 100.0, 105.0, 110.0, 120.0]
+    for spot in test_spots:
+        pnl = calculate_portfolio_pnl_at_expiry(
+            spot, strikes, option_types.astype(np.float64),
+            position_types.astype(np.float64), quantities, premiums,
+            stock_quantity=0.0, stock_entry_price=0.0
+        )
+        print(f"  S={spot:6.1f}: P&L = ${pnl:8.2f}")
+
+    # --- Test 7: P&L with Stock Position ---
+    print("\n--- Test 7: P&L with Stock (Covered Call) ---")
+    # Covered call: Long 100 shares + Short 1 Call @ 105
+    cc_strikes = np.array([105.0], dtype=np.float64)
+    cc_option_types = np.array([1.0], dtype=np.float64)  # Call
+    cc_position_types = np.array([-1.0], dtype=np.float64)  # Short
+    cc_quantities = np.array([100.0], dtype=np.float64)
+    cc_premiums = np.array([5.0], dtype=np.float64)
+
+    for spot in [90.0, 100.0, 105.0, 115.0]:
+        pnl = calculate_portfolio_pnl_at_expiry(
+            spot, cc_strikes, cc_option_types, cc_position_types,
+            cc_quantities, cc_premiums,
+            stock_quantity=100.0, stock_entry_price=100.0
+        )
+        print(f"  S={spot:6.1f}: P&L = ${pnl:8.2f}")
+
+    # --- Validation: Bull Call Spread P&L ---
+    print("\n--- Validation: Bull Call Spread ---")
+    # Net premium paid: 8 - 3 = 5 per share = $500 total
+    # Max profit at S >= 110: (110-100) * 100 - 500 = $500
+    # Max loss at S <= 100: -$500 (premium paid)
+    pnl_below = calculate_portfolio_pnl_at_expiry(
+        90.0, strikes, option_types.astype(np.float64),
+        position_types.astype(np.float64), quantities, premiums,
+        0.0, 0.0
+    )
+    pnl_above = calculate_portfolio_pnl_at_expiry(
+        120.0, strikes, option_types.astype(np.float64),
+        position_types.astype(np.float64), quantities, premiums,
+        0.0, 0.0
+    )
+    print(f"  P&L at S=90 (below both strikes): ${pnl_below:.2f} (expected: -$500)")
+    print(f"  P&L at S=120 (above both strikes): ${pnl_above:.2f} (expected: $500)")
+
+    # Verify values
+    assert abs(pnl_below - (-500.0)) < 0.01, f"Expected -500, got {pnl_below}"
+    assert abs(pnl_above - 500.0) < 0.01, f"Expected 500, got {pnl_above}"
+    print("  ✓ Validation passed!")
+
+    print("\n" + "=" * 50)
+    print("Greeks Surfaces smoke test passed")
+    print("=" * 50)

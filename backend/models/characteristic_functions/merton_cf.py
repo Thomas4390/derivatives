@@ -199,3 +199,63 @@ def create_merton_cf(
         return merton_cf_vectorized(u, s0, t, r, sigma, lambda_j, mu_j, sigma_j)
 
     return cf
+
+
+# =============================================================================
+# SMOKE TEST
+# =============================================================================
+
+if __name__ == "__main__":
+    print("=" * 50)
+    print("Merton Characteristic Function Smoke Test")
+    print("=" * 50)
+
+    # Test parameters
+    s0, t, r = 100.0, 0.5, 0.05
+    sigma = 0.20
+    lambda_j, mu_j, sigma_j = 0.5, -0.1, 0.2
+
+    # Test scalar CF
+    print("\n--- Scalar Characteristic Function ---")
+    u = 1.0 + 0.5j
+    cf = merton_characteristic_function(u, s0, t, r, sigma, lambda_j, mu_j, sigma_j)
+    print(f"u = {u}")
+    print(f"phi(u) = {cf}")
+    print(f"|phi(u)| = {np.abs(cf):.6f}")
+
+    # Test at u=0 (should be 1)
+    cf_zero = merton_characteristic_function(0.0 + 0j, s0, t, r, sigma, lambda_j, mu_j, sigma_j)
+    print(f"\nphi(0) = {cf_zero}")
+    assert np.abs(cf_zero - 1.0) < 1e-10, "CF at u=0 should be 1"
+    print("phi(0) = 1 ✓")
+
+    # Test vectorized CF
+    print("\n--- Vectorized Characteristic Function ---")
+    u_arr = np.array([0.5, 1.0, 1.5, 2.0]) + 0.5j
+    cf_vec = merton_cf_vectorized(u_arr, s0, t, r, sigma, lambda_j, mu_j, sigma_j)
+    print(f"u_arr = {u_arr}")
+    print(f"|phi(u_arr)| = {np.abs(cf_vec)}")
+
+    # Verify vectorized matches scalar
+    print("\n--- Consistency Check ---")
+    for i, ui in enumerate(u_arr):
+        cf_scalar = merton_characteristic_function(ui, s0, t, r, sigma, lambda_j, mu_j, sigma_j)
+        assert np.abs(cf_vec[i] - cf_scalar) < 1e-10, f"Mismatch at index {i}"
+    print("Vectorized matches scalar: ✓")
+
+    # Test factory function
+    print("\n--- Factory Function ---")
+    cf_factory = create_merton_cf(s0, t, r, sigma, lambda_j, mu_j, sigma_j)
+    cf_factory_result = cf_factory(u_arr)
+    assert np.allclose(cf_factory_result, cf_vec), "Factory mismatch"
+    print("Factory function works correctly: ✓")
+
+    # Compare with no jumps (should approach GBM CF)
+    print("\n--- Jump Intensity Sensitivity ---")
+    for lam in [0.0, 0.5, 1.0, 2.0]:
+        cf_test = merton_characteristic_function(1.0 + 0j, s0, t, r, sigma, lam, mu_j, sigma_j)
+        print(f"lambda={lam:.1f}: |phi(1)| = {np.abs(cf_test):.6f}")
+
+    print("\n" + "=" * 50)
+    print("Merton CF smoke test passed")
+    print("=" * 50)

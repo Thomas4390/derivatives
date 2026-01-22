@@ -241,3 +241,121 @@ def get_model_info(model: Union[str, ModelType]) -> Dict[str, Any]:
         "has_jumps": model_type in ModelType.jump_models(),
         "is_continuous_time": model_type in ModelType.continuous_time_models(),
     }
+
+
+# =============================================================================
+# SMOKE TEST
+# =============================================================================
+
+if __name__ == "__main__":
+    print("=" * 50)
+    print("Model Factory Smoke Test")
+    print("=" * 50)
+
+    # Test list_models
+    print("\n--- Available Models ---")
+    models = list_models()
+    for name, desc in models.items():
+        print(f"  {name}: {desc}")
+
+    # Test create_simulator with string names
+    print("\n--- Create Simulator (String Names) ---")
+    string_names = ["gbm", "heston", "merton", "bates", "garch", "ngarch", "gjr_garch"]
+    configs = {
+        "gbm": {"sigma": 0.2},
+        "heston": {"v0": 0.04, "kappa": 2.0, "theta": 0.04, "xi": 0.3, "rho": -0.7},
+        "merton": {"sigma": 0.2, "lambda_j": 0.5, "mu_j": -0.1, "sigma_j": 0.2},
+        "bates": {"v0": 0.04, "kappa": 2.0, "theta": 0.04, "xi": 0.3, "rho": -0.7,
+                  "lambda_j": 0.5, "mu_j": -0.1, "sigma_j": 0.2},
+        "garch": {"sigma0": 0.2, "omega": 1e-6, "alpha": 0.1, "beta": 0.85},
+        "ngarch": {"sigma0": 0.2, "omega": 1e-6, "alpha": 0.1, "beta": 0.85, "theta": 0.5},
+        "gjr_garch": {"sigma0": 0.2, "omega": 1e-6, "alpha": 0.05, "beta": 0.85, "gamma": 0.1},
+    }
+
+    for name in string_names:
+        sim = create_simulator(name, **configs[name])
+        print(f"  {name} -> {sim.model_name}")
+
+    # Test create_simulator with ModelType enum
+    print("\n--- Create Simulator (ModelType Enum) ---")
+    sim = create_simulator(ModelType.GBM, sigma=0.25)
+    print(f"  ModelType.GBM -> {sim.model_name}")
+    sim = create_simulator(ModelType.HESTON, v0=0.04, kappa=2.0, theta=0.04, xi=0.3, rho=-0.7)
+    print(f"  ModelType.HESTON -> {sim.model_name}")
+
+    # Test convenience factory functions
+    print("\n--- Convenience Factory Functions ---")
+    gbm = create_gbm(sigma=0.2)
+    print(f"  create_gbm: {gbm.model_name}")
+
+    heston = create_heston(v0=0.04, kappa=2.0, theta=0.04, xi=0.3, rho=-0.7)
+    print(f"  create_heston: {heston.model_name}")
+
+    merton = create_merton(sigma=0.2, lambda_j=0.5, mu_j=-0.1, sigma_j=0.2)
+    print(f"  create_merton: {merton.model_name}")
+
+    bates = create_bates(v0=0.04, kappa=2.0, theta=0.04, xi=0.3, rho=-0.7,
+                         lambda_j=0.5, mu_j=-0.1, sigma_j=0.2)
+    print(f"  create_bates: {bates.model_name}")
+
+    garch = create_garch(sigma0=0.2, omega=1e-6, alpha=0.1, beta=0.85)
+    print(f"  create_garch: {garch.model_name}")
+
+    ngarch = create_ngarch(sigma0=0.2, omega=1e-6, alpha=0.1, beta=0.85, theta=0.5)
+    print(f"  create_ngarch: {ngarch.model_name}")
+
+    gjr = create_gjr_garch(sigma0=0.2, omega=1e-6, alpha=0.05, beta=0.85, gamma=0.1)
+    print(f"  create_gjr_garch: {gjr.model_name}")
+
+    # Test name aliases
+    print("\n--- Name Aliases ---")
+    aliases = [
+        ("geometric_brownian_motion", "GBM"),
+        ("heston_jump", "Bates"),
+        ("jump_diffusion", "Merton"),
+        ("garch11", "GARCH"),
+        ("tgarch", "GJR-GARCH"),
+    ]
+    for alias, expected in aliases:
+        sim = create_simulator(alias, **configs[alias.replace("geometric_brownian_motion", "gbm")
+                                                 .replace("heston_jump", "bates")
+                                                 .replace("jump_diffusion", "merton")
+                                                 .replace("garch11", "garch")
+                                                 .replace("tgarch", "gjr_garch")])
+        print(f"  '{alias}' -> {sim.model_name}")
+
+    # Test get_model_info
+    print("\n--- Model Information ---")
+    info = get_model_info("heston")
+    print(f"  Name: {info['name']}")
+    print(f"  Description: {info['description']}")
+    print(f"  Class: {info['class']}")
+    print(f"  Is stochastic vol: {info['is_stochastic_vol']}")
+    print(f"  Has jumps: {info['has_jumps']}")
+    print(f"  Is continuous time: {info['is_continuous_time']}")
+    print(f"  Parameters: {list(info['parameters'].keys())}")
+
+    # Test error handling
+    print("\n--- Error Handling ---")
+    try:
+        create_simulator("unknown_model")
+        print("  ERROR: Should have raised ValueError")
+    except ValueError as e:
+        print(f"  Unknown model rejected: ✓")
+
+    try:
+        create_simulator(123)  # Invalid type
+        print("  ERROR: Should have raised TypeError")
+    except TypeError as e:
+        print(f"  Invalid type rejected: ✓")
+
+    # Test simulation
+    print("\n--- Simulation Test ---")
+    sim = create_simulator("gbm", sigma=0.2)
+    result = sim.simulate_paths(s0=100.0, mu=0.05, t=1.0, n_paths=100, n_steps=252, seed=42)
+    print(f"  GBM simulation: {result.n_paths} paths, {result.n_steps} steps")
+    print(f"  Terminal mean: {result.terminal_mean:.2f}")
+
+    print("\n" + "=" * 50)
+    print("Model Factory smoke test passed")
+    print("=" * 50)

@@ -392,3 +392,89 @@ def mc_price(
 
 # Alias for convenience
 MonteCarloEngine = GenericMCEngine
+
+
+# =============================================================================
+# SMOKE TEST
+# =============================================================================
+
+if __name__ == "__main__":
+    print("=" * 50)
+    print("Generic MC Engine Smoke Test")
+    print("=" * 50)
+
+    # Test parameters
+    s0, k, t, r = 100.0, 100.0, 0.5, 0.05
+    sigma = 0.20
+
+    # Create a simple GBM terminal simulator for testing
+    def gbm_terminal_simulator(s0, t, r, n_paths, n_steps, seed=None):
+        """Simple GBM terminal price simulator."""
+        if seed is not None:
+            np.random.seed(seed)
+        dt = t / n_steps
+        z = np.random.standard_normal((n_paths, n_steps))
+        log_returns = (r - 0.5 * sigma**2) * dt + sigma * np.sqrt(dt) * z
+        return s0 * np.exp(np.sum(log_returns, axis=1))
+
+    # Test MCConfig
+    print("\n--- MC Configuration ---")
+    config = MCConfig(n_paths=10000, n_steps=100, seed=42)
+    print(f"n_paths: {config.n_paths}")
+    print(f"n_steps: {config.n_steps}")
+    print(f"antithetic: {config.antithetic}")
+    print(f"seed: {config.seed}")
+
+    # Test config validation
+    try:
+        MCConfig(n_paths=-1)
+        print("ERROR: Should have raised ValueError!")
+    except ValueError as e:
+        print(f"Config validation works: {e}")
+
+    # Test GenericMCEngine
+    print("\n--- Generic MC Engine ---")
+    engine = GenericMCEngine(config)
+    result = engine.price(gbm_terminal_simulator, s0, k, t, r, is_call=True)
+    print(f"Call Price: ${result.price:.4f} ± ${result.std_error:.4f}")
+    print(f"N Paths:    {result.n_paths}")
+
+    # Test put option
+    result_put = engine.price(gbm_terminal_simulator, s0, k, t, r, is_call=False)
+    print(f"Put Price:  ${result_put.price:.4f} ± ${result_put.std_error:.4f}")
+
+    # Compare with Black-Scholes (approximate check)
+    from backend.utils.math import bs_price
+    bs_call = bs_price(s0, k, t, r, sigma, is_call=True)
+    bs_put = bs_price(s0, k, t, r, sigma, is_call=False)
+    print(f"\nBS Call: ${bs_call:.4f}, MC Call: ${result.price:.4f}")
+    print(f"BS Put:  ${bs_put:.4f}, MC Put:  ${result_put.price:.4f}")
+    print(f"Call difference: ${abs(result.price - bs_call):.4f} ({abs(result.price - bs_call)/bs_call*100:.2f}%)")
+
+    # Test multiple strikes
+    print("\n--- Multiple Strikes ---")
+    strikes = np.array([90.0, 95.0, 100.0, 105.0, 110.0])
+    prices, std_errors = engine.price_strikes(
+        gbm_terminal_simulator, s0, strikes, t, r, is_call=True
+    )
+    print(f"{'Strike':>8} {'MC Price':>12} {'Std Err':>10} {'BS Price':>12}")
+    print("-" * 44)
+    for i, strike in enumerate(strikes):
+        bs_price_i = bs_price(s0, strike, t, r, sigma, is_call=True)
+        print(f"{strike:>8.0f} ${prices[i]:>11.4f} ${std_errors[i]:>9.4f} ${bs_price_i:>11.4f}")
+
+    # Test convenience function
+    print("\n--- Convenience Function ---")
+    quick_result = mc_price(gbm_terminal_simulator, s0, k, t, r, n_paths=10000, seed=42)
+    print(f"mc_price result: ${quick_result.price:.4f} ± ${quick_result.std_error:.4f}")
+
+    # Test MCResult
+    print("\n--- MCResult NamedTuple ---")
+    print(f"Result type: {type(result)}")
+    print(f"Price field: {result.price:.4f}")
+    print(f"Std error field: {result.std_error:.4f}")
+    print(f"N paths field: {result.n_paths}")
+
+    print("\n" + "=" * 50)
+    print("Generic MC Engine smoke test passed")
+    print("=" * 50)

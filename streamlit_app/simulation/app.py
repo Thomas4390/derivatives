@@ -23,7 +23,7 @@ import numpy as np
 # Backend imports
 from backend.simulation.simulate_paths import SimulationResult
 from backend.simulation.simulate_volatility import VolatilitySimulationResult
-from backend.simulation.pnl_engine import RiskMetrics
+from backend.portfolio.pnl import RiskMetrics
 
 # Local imports
 from config.styles import (

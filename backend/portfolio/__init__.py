@@ -58,10 +58,21 @@ from .portfolio import OptionsPortfolio
 from backend.core.result_types import GreeksResult
 
 # =============================================================================
-# Numba-Optimized Risk Metrics
+# P&L Engine (Numba-Optimized)
 # =============================================================================
 
-from backend.simulation.pnl_engine import RiskMetrics
+from .pnl import (
+    RiskMetrics,
+    calculate_portfolio_pnl_vectorized,
+    calculate_portfolio_pnl_with_stock,
+    compute_risk_metrics,
+    compute_risk_metrics_core,
+    compute_skewness_kurtosis,
+    compute_percentiles,
+    compute_payoff_curve,
+    prepare_position_arrays,
+    warm_up_jit,
+)
 
 # =============================================================================
 # Greeks Surface Calculations (Numba-parallel)
@@ -107,8 +118,17 @@ __all__ = [
     "short_stock",
     # Greeks (from core)
     "GreeksResult",
-    # Risk metrics (Numba-optimized)
+    # P&L Engine (from pnl.py)
     "RiskMetrics",
+    "calculate_portfolio_pnl_vectorized",
+    "calculate_portfolio_pnl_with_stock",
+    "compute_risk_metrics",
+    "compute_risk_metrics_core",
+    "compute_skewness_kurtosis",
+    "compute_percentiles",
+    "compute_payoff_curve",
+    "prepare_position_arrays",
+    "warm_up_jit",
     # Breakeven
     "BreakevenResult",
     "BreakevenCalculator",
@@ -120,7 +140,7 @@ __all__ = [
     "portfolio_greeks_surface_iv",
     "single_option_greeks_surface_strike",
     "get_greek_name",
-    # P&L functions
+    # P&L functions (from greeks_surfaces.py)
     "calculate_pnl_curve",
     # Greek indices
     "GREEK_PRICE",
@@ -139,4 +159,4 @@ __all__ = [
     "GREEK_ULTIMA",
 ]
 
-__version__ = "2.0.0"
+__version__ = "2.1.0"  # Added pnl.py module

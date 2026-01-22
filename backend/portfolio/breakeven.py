@@ -9,7 +9,7 @@ This module provides:
 - BreakevenCalculator: Grid search calculator with Numba-optimized functions
 - Convenience functions: find_breakevens, find_breakevens_from_portfolio
 
-Uses Numba-optimized functions from pnl_engine for maximum performance.
+Uses Numba-optimized functions from pnl module for maximum performance.
 
 Author: Thomas
 Created: 2025
@@ -21,8 +21,8 @@ import numpy as np
 
 from .positions import PortfolioPosition, StockPosition
 
-# Import Numba-optimized functions
-from backend.simulation.pnl_engine import (
+# Import Numba-optimized functions from portfolio.pnl (moved from simulation)
+from backend.portfolio.pnl import (
     compute_payoff_curve as _compute_payoff_curve_numba,
     find_breakeven_points as _find_breakeven_points_numba,
 )

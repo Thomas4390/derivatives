@@ -88,3 +88,87 @@ class Measure(Enum):
 
     P_MEASURE = "Physical (Real-World)"
     Q_MEASURE = "Risk-Neutral"
+
+
+# =============================================================================
+# SMOKE TEST
+# =============================================================================
+
+if __name__ == "__main__":
+    print("=" * 50)
+    print("Simulation Enums Smoke Test")
+    print("=" * 50)
+
+    # Test ModelType
+    print("\n--- ModelType Enumeration ---")
+    print("All models:")
+    for model in ModelType:
+        print(f"  {model.name}: {model.value}")
+
+    # Test classification methods
+    print("\n--- Model Classifications ---")
+
+    continuous = ModelType.continuous_time_models()
+    print(f"Continuous-time models: {[m.name for m in continuous]}")
+    assert ModelType.GBM in continuous
+    assert ModelType.HESTON in continuous
+    assert ModelType.BATES in continuous
+    assert ModelType.MERTON in continuous
+
+    discrete = ModelType.discrete_time_models()
+    print(f"Discrete-time models: {[m.name for m in discrete]}")
+    assert ModelType.GARCH in discrete
+    assert ModelType.NGARCH in discrete
+    assert ModelType.GJR_GARCH in discrete
+
+    stoch_vol = ModelType.stochastic_vol_models()
+    print(f"Stochastic volatility models: {[m.name for m in stoch_vol]}")
+    assert ModelType.HESTON in stoch_vol
+    assert ModelType.BATES in stoch_vol
+    assert ModelType.GARCH in stoch_vol
+    assert ModelType.GBM not in stoch_vol
+
+    jump = ModelType.jump_models()
+    print(f"Jump models: {[m.name for m in jump]}")
+    assert ModelType.MERTON in jump
+    assert ModelType.BATES in jump
+    assert ModelType.GBM not in jump
+
+    # Test DiscretizationScheme
+    print("\n--- DiscretizationScheme Enumeration ---")
+    print("All schemes:")
+    for scheme in DiscretizationScheme:
+        print(f"  {scheme.name}")
+
+    default_scheme = DiscretizationScheme.default()
+    print(f"Default scheme: {default_scheme.name}")
+    assert default_scheme == DiscretizationScheme.FULL_TRUNCATION
+
+    # Test Measure
+    print("\n--- Measure Enumeration ---")
+    print("All measures:")
+    for measure in Measure:
+        print(f"  {measure.name}: {measure.value}")
+
+    # Verify expected values
+    print("\n--- Consistency Checks ---")
+
+    # Bates should be in both stochastic vol AND jump models
+    assert ModelType.BATES in stoch_vol and ModelType.BATES in jump
+    print("Bates is stochastic vol AND has jumps: ✓")
+
+    # GBM should be only continuous, no stoch vol, no jumps
+    assert ModelType.GBM in continuous
+    assert ModelType.GBM not in stoch_vol
+    assert ModelType.GBM not in jump
+    print("GBM is continuous only: ✓")
+
+    # All models should be either continuous or discrete
+    all_models = set(ModelType)
+    classified = set(continuous) | set(discrete)
+    assert all_models == classified
+    print("All models classified: ✓")
+
+    print("\n" + "=" * 50)
+    print("Simulation Enums smoke test passed")
+    print("=" * 50)

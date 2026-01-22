@@ -376,3 +376,169 @@ class StochasticVolatilityMixin:
             True if Feller condition is satisfied
         """
         raise NotImplementedError("Subclass must implement feller_condition_satisfied()")
+
+
+# =============================================================================
+# SMOKE TEST
+# =============================================================================
+
+if __name__ == "__main__":
+    print("=" * 50)
+    print("Simulation Base Classes Smoke Test")
+    print("=" * 50)
+
+    # Test SimulationResult
+    print("\n--- SimulationResult ---")
+
+    # Create mock simulation data
+    n_paths, n_steps = 1000, 100
+    np.random.seed(42)
+
+    # Simulate simple GBM-like paths
+    s0 = 100.0
+    t = 1.0
+    dt = t / n_steps
+    time_grid = np.linspace(0, t, n_steps + 1)
+
+    # Generate log returns
+    log_returns = np.random.normal(0.05 * dt, 0.2 * np.sqrt(dt), (n_paths, n_steps))
+    log_prices = np.zeros((n_paths, n_steps + 1))
+    log_prices[:, 0] = np.log(s0)
+    log_prices[:, 1:] = np.log(s0) + np.cumsum(log_returns, axis=1)
+    price_paths = np.exp(log_prices)
+
+    # Create volatility paths (mock)
+    vol_paths = np.ones((n_paths, n_steps + 1)) * 0.2
+
+    # Create result
+    result = SimulationResult(
+        price_paths=price_paths,
+        time_grid=time_grid,
+        model_name="TestModel",
+        computation_time=0.1,
+        n_paths=n_paths,
+        n_steps=n_steps,
+        volatility_paths=vol_paths,
+        parameters={"sigma": 0.2}
+    )
+
+    print(f"Result: {result}")
+    print(f"Terminal prices shape: {result.terminal_prices.shape}")
+    print(f"Initial price: {result.initial_price:.2f}")
+    print(f"Terminal mean: {result.terminal_mean:.2f}")
+    print(f"Terminal std: {result.terminal_std:.2f}")
+    print(f"Mean path shape: {result.mean_path.shape}")
+    print(f"Has volatility: {result.has_volatility}")
+
+    # Test computed properties
+    print("\n--- Computed Properties ---")
+    log_rets = result.log_returns()
+    print(f"Log returns shape: {log_rets.shape}")
+    assert log_rets.shape == (n_paths, n_steps), "Log returns shape mismatch"
+
+    realized_vol = result.realized_volatility()
+    print(f"Realized volatility shape: {realized_vol.shape}")
+    print(f"Mean realized vol: {np.mean(realized_vol):.4f}")
+
+    percentiles = result.percentile_paths([5, 50, 95])
+    print(f"Percentile paths shape: {percentiles.shape}")
+    assert percentiles.shape == (3, n_steps + 1), "Percentile shape mismatch"
+
+    # Test volatility properties
+    print("\n--- Volatility Properties ---")
+    terminal_vol = result.terminal_volatility
+    print(f"Terminal volatility shape: {terminal_vol.shape}")
+
+    mean_vol_path = result.mean_volatility_path
+    print(f"Mean volatility path shape: {mean_vol_path.shape}")
+
+    # Test without volatility
+    print("\n--- Result Without Volatility ---")
+    result_no_vol = SimulationResult(
+        price_paths=price_paths,
+        time_grid=time_grid,
+        model_name="NoVolModel",
+        computation_time=0.05,
+        n_paths=n_paths,
+        n_steps=n_steps
+    )
+    print(f"Has volatility: {result_no_vol.has_volatility}")
+    assert result_no_vol.terminal_volatility is None, "Should be None"
+    assert result_no_vol.mean_volatility_path is None, "Should be None"
+    print("No volatility handling: ✓")
+
+    # Test BaseSimulator validation
+    print("\n--- BaseSimulator Validation ---")
+
+    class DummySimulator(BaseSimulator):
+        """Minimal concrete implementation for testing."""
+        def __init__(self):
+            super().__init__()
+            self._model_name = "DummySimulator"
+
+        def simulate_paths(self, s0, mu, t, n_paths, n_steps, seed=None):
+            return None
+
+        def simulate_terminal(self, s0, mu, t, n_paths, n_steps, seed=None):
+            return None
+
+        def get_parameters(self):
+            return {"test": 1}
+
+    simulator = DummySimulator()
+    print(f"Simulator: {simulator}")
+
+    # Test valid inputs
+    try:
+        simulator.validate_inputs(100.0, 0.05, 1.0, 1000, 252)
+        print("Valid inputs accepted: ✓")
+    except ValueError as e:
+        print(f"ERROR: Valid inputs rejected: {e}")
+
+    # Test invalid inputs
+    invalid_cases = [
+        (-100.0, 0.05, 1.0, 1000, 252, "negative s0"),
+        (100.0, 0.05, -1.0, 1000, 252, "negative t"),
+        (100.0, 0.05, 1.0, -1000, 252, "negative n_paths"),
+        (100.0, 0.05, 1.0, 1000, -252, "negative n_steps"),
+    ]
+
+    for s0, mu, t, n_paths, n_steps, desc in invalid_cases:
+        try:
+            simulator.validate_inputs(s0, mu, t, n_paths, n_steps)
+            print(f"ERROR: Should have rejected {desc}")
+        except ValueError:
+            print(f"Correctly rejected {desc}: ✓")
+
+    # Test StochasticVolatilityMixin
+    print("\n--- StochasticVolatilityMixin ---")
+
+    class VolSimulator(BaseSimulator, StochasticVolatilityMixin):
+        """Test stochastic volatility simulator."""
+        def __init__(self):
+            super().__init__()
+            self._model_name = "VolSimulator"
+
+        def simulate_paths(self, s0, mu, t, n_paths, n_steps, seed=None):
+            return None
+
+        def simulate_terminal(self, s0, mu, t, n_paths, n_steps, seed=None):
+            return None
+
+        def get_parameters(self):
+            return {"v0": 0.04}
+
+        def long_run_variance(self):
+            return 0.04
+
+        def feller_condition_satisfied(self):
+            return True
+
+    vol_sim = VolSimulator()
+    print(f"Long-run variance: {vol_sim.long_run_variance():.4f}")
+    print(f"Long-run volatility: {vol_sim.long_run_volatility():.4f}")
+    print(f"Feller satisfied: {vol_sim.feller_condition_satisfied()}")
+
+    print("\n" + "=" * 50)
+    print("Simulation Base Classes smoke test passed")
+    print("=" * 50)

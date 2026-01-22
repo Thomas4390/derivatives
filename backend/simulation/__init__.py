@@ -85,10 +85,12 @@ from .factory import (
 )
 
 # =============================================================================
-# P&L Engine (Kept Separate)
+# P&L Engine (Re-exported from portfolio.pnl for backward compatibility)
+# NOTE: These functions have been moved to backend.portfolio.pnl
+#       Import directly from there for new code.
 # =============================================================================
 
-from .pnl_engine import (
+from backend.portfolio.pnl import (
     # Data classes
     RiskMetrics,
     # Core P&L calculation (Numba-optimized)

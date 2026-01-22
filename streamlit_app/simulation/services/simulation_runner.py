@@ -17,7 +17,7 @@ from backend.simulation.simulate_volatility import (
     simulate_volatility_paths,
     VolatilitySimulationResult
 )
-from backend.simulation.pnl_engine import (
+from backend.portfolio.pnl import (
     calculate_portfolio_pnl_vectorized,
     calculate_portfolio_pnl_with_stock,
     compute_risk_metrics,

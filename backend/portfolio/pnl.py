@@ -1,10 +1,16 @@
 """
-P&L Engine for Monte Carlo Option Simulation
-=============================================
+Portfolio P&L Engine
+====================
 
 Numba-optimized functions for computing portfolio P&L distributions
 from simulated terminal prices. Designed for maximum performance with
 parallel execution across all CPU cores.
+
+This module provides:
+- P&L calculations for options portfolios at expiration
+- Risk metrics (VaR, CVaR, skewness, kurtosis)
+- Payoff curve generation
+- Breakeven point detection
 
 Key Optimizations:
 -----------------
@@ -15,7 +21,7 @@ Key Optimizations:
 
 Usage:
 ------
-    from backend.simulation.pnl_engine import (
+    from backend.portfolio.pnl import (
         calculate_portfolio_pnl_vectorized,
         compute_risk_metrics,
         compute_percentiles
@@ -535,3 +541,128 @@ def warm_up_jit():
     )
     _ = compute_risk_metrics(pnl)
     _ = compute_percentiles(pnl, np.array([5.0, 50.0, 95.0]))
+
+
+# =============================================================================
+# EXPORTS
+# =============================================================================
+
+__all__ = [
+    # Results
+    "RiskMetrics",
+    # Core P&L
+    "calculate_portfolio_pnl_vectorized",
+    "calculate_portfolio_pnl_with_stock",
+    # Risk Metrics
+    "compute_risk_metrics",
+    "compute_risk_metrics_core",
+    "compute_skewness_kurtosis",
+    "compute_percentiles",
+    # Payoff & Breakeven
+    "compute_payoff_curve",
+    "find_breakeven_points",
+    # Utilities
+    "prepare_position_arrays",
+    "warm_up_jit",
+]
+
+
+# =============================================================================
+# SMOKE TEST
+# =============================================================================
+
+if __name__ == "__main__":
+    print("=" * 50)
+    print("P&L Engine Smoke Test")
+    print("=" * 50)
+
+    # Test data - Bull Call Spread: Long 95 Call, Short 105 Call
+    print("\n--- Bull Call Spread Setup ---")
+    strikes = np.array([95.0, 105.0], dtype=np.float64)
+    option_types = np.array([1.0, 1.0], dtype=np.float64)  # Both calls
+    position_types = np.array([1.0, -1.0], dtype=np.float64)  # Long, Short
+    quantities = np.array([1.0, 1.0], dtype=np.float64)
+    premiums = np.array([8.0, 3.0], dtype=np.float64)  # Net debit: $5
+
+    print(f"  Long Call K=95 @ $8.00")
+    print(f"  Short Call K=105 @ $3.00")
+    print(f"  Net Debit: $5.00")
+
+    # Simulated terminal prices
+    terminal_prices = np.array([80, 90, 95, 100, 105, 110, 120], dtype=np.float64)
+
+    # Test calculate_portfolio_pnl_vectorized
+    print("\n--- P&L Calculation (multiplier=1.0) ---")
+    pnl = calculate_portfolio_pnl_vectorized(
+        terminal_prices, strikes, option_types,
+        position_types, quantities, premiums, multiplier=1.0
+    )
+    for s, p in zip(terminal_prices, pnl):
+        print(f"  Spot={s:6.1f}: P&L=${p:+7.2f}")
+
+    # Expected: Max loss = -5, Max profit = +5, Breakeven = 100
+    assert pnl[0] == -5.0, f"Max loss should be -5, got {pnl[0]}"
+    assert pnl[-1] == 5.0, f"Max profit should be +5, got {pnl[-1]}"
+    print("  ✓ P&L values correct")
+
+    # Test with stock position
+    print("\n--- Covered Call (Long Stock + Short Call) ---")
+    call_strikes = np.array([105.0], dtype=np.float64)
+    call_types = np.array([1.0], dtype=np.float64)
+    call_positions = np.array([-1.0], dtype=np.float64)  # Short
+    call_quantities = np.array([100.0], dtype=np.float64)
+    call_premiums = np.array([3.0], dtype=np.float64)
+
+    pnl_covered = calculate_portfolio_pnl_with_stock(
+        terminal_prices, call_strikes, call_types, call_positions,
+        call_quantities, call_premiums,
+        stock_quantity=100.0, stock_entry_price=100.0, multiplier=1.0
+    )
+    for s, p in zip(terminal_prices, pnl_covered):
+        print(f"  Spot={s:6.1f}: P&L=${p:+9.2f}")
+    print("  ✓ Covered call P&L calculated")
+
+    # Test risk metrics
+    print("\n--- Risk Metrics (100K paths) ---")
+    np.random.seed(42)
+    simulated_pnl = np.random.normal(100, 500, 100000)
+
+    metrics = compute_risk_metrics(simulated_pnl)
+    print(f"  Mean P&L:   ${metrics.mean_pnl:+.2f}")
+    print(f"  Std P&L:    ${metrics.std_pnl:.2f}")
+    print(f"  VaR (95%):  ${metrics.var_95:.2f}")
+    print(f"  VaR (99%):  ${metrics.var_99:.2f}")
+    print(f"  CVaR (95%): ${metrics.cvar_95:.2f}")
+    print(f"  Prob Profit: {metrics.prob_profit:.1%}")
+    print(f"  Skewness:   {metrics.skewness:.4f}")
+    print(f"  Kurtosis:   {metrics.kurtosis:.4f}")
+    print("  ✓ Risk metrics computed")
+
+    # Test payoff curve
+    print("\n--- Payoff Curve ---")
+    spot_range = np.linspace(80, 120, 9)
+    payoff = compute_payoff_curve(
+        spot_range, strikes, option_types,
+        position_types, quantities, premiums, multiplier=1.0
+    )
+    print("  Spot    P&L")
+    for s, p in zip(spot_range, payoff):
+        print(f"  {s:5.1f}  ${p:+6.2f}")
+    print("  ✓ Payoff curve generated")
+
+    # Test breakeven finder
+    print("\n--- Breakeven Points ---")
+    breakevens = find_breakeven_points(payoff, spot_range)
+    print(f"  Found {len(breakevens)} breakeven(s): {breakevens}")
+    if len(breakevens) > 0:
+        assert abs(breakevens[0] - 100.0) < 1.0, "Breakeven should be ~$100"
+    print("  ✓ Breakeven detection works")
+
+    # Test JIT warmup
+    print("\n--- JIT Warmup ---")
+    warm_up_jit()
+    print("  ✓ JIT warmup completed")
+
+    print("\n" + "=" * 50)
+    print("P&L Engine smoke test passed")
+    print("=" * 50)
