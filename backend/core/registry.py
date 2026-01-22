@@ -21,10 +21,20 @@ class EngineRegistry:
     """
     Factory that automatically selects the optimal pricing engine.
 
-    Priority: ANALYTICAL > FFT > PDE > MONTE_CARLO
+    Priority: ANALYTICAL > FFT > MONTE_CARLO
 
     The registry maintains a mapping of (Model, Capability) -> Engine
     and selects the best available option.
+
+    Important
+    ---------
+    Registered engines are instantiated with no arguments, so they must
+    have sensible default parameters. For engines with specific configurations,
+    instantiate them directly rather than using the registry:
+
+        # Direct instantiation with custom parameters
+        engine = MonteCarloEngine(n_paths=100000, seed=42)
+        result = engine.price(option, model, market)
 
     Examples
     --------
@@ -39,7 +49,6 @@ class EngineRegistry:
     PRIORITY = [
         PricingCapability.ANALYTICAL,
         PricingCapability.FFT,
-        PricingCapability.PDE,
         PricingCapability.MONTE_CARLO,
     ]
 

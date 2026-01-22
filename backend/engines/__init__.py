@@ -61,9 +61,6 @@ from backend.engines.analytic_engine import BSAnalyticEngine
 from backend.engines.fft_engine import FFTEngine
 from backend.engines.mc_engine import MonteCarloEngine
 
-# PDE engine (stub)
-from backend.engines.pde.fd_engine import FDEngine
-
 # Configuration classes from underlying engines
 from backend.engines.fourier.carr_madan import FFTConfig
 from backend.engines.monte_carlo.mc_base import MCConfig, MCResult
@@ -88,8 +85,6 @@ __all__ = [
     "FFTEngine",
     # Monte Carlo engines
     "MonteCarloEngine",
-    # PDE engines
-    "FDEngine",
     # Configuration
     "FFTConfig",
     "MCConfig",

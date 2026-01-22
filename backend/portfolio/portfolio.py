@@ -452,16 +452,29 @@ class OptionsPortfolio:
         )
 
     def _compute_vega(self, market: MarketEnvironment, h: float) -> float:
-        """Compute vega by bumping model volatility."""
+        """
+        Compute vega by bumping model volatility.
+
+        Handles different volatility parameters:
+        - "sigma" for GBM and Merton models
+        - "v0" for Heston and Bates models
+        - "sigma0" for GARCH family models
+        """
+        import warnings
         params = self._model.get_parameters()
 
         if "sigma" in params:
-            # GBM model - bump sigma
-            from backend.models.gbm import GBMModel
+            # GBM/Merton models - bump sigma
+            model_class = type(self._model)
             sigma = params["sigma"]
 
-            model_up = GBMModel(sigma=sigma + h)
-            model_down = GBMModel(sigma=sigma - h)
+            params_up = dict(params)
+            params_down = dict(params)
+            params_up["sigma"] = sigma + h
+            params_down["sigma"] = max(sigma - h, 0.001)
+
+            model_up = model_class(**params_up)
+            model_down = model_class(**params_down)
 
             v_up = self._value_with_model(market, model_up)
             v_down = self._value_with_model(market, model_down)
@@ -472,7 +485,6 @@ class OptionsPortfolio:
             # Heston/Bates - bump v0
             v0 = params["v0"]
 
-            # Create bumped models
             model_class = type(self._model)
             params_up = dict(params)
             params_down = dict(params)
@@ -487,6 +499,31 @@ class OptionsPortfolio:
 
             return (v_up - v_down) / (2 * h * v0)
 
+        elif "sigma0" in params:
+            # GARCH family - bump sigma0 (initial volatility)
+            sigma0 = params["sigma0"]
+
+            model_class = type(self._model)
+            params_up = dict(params)
+            params_down = dict(params)
+            params_up["sigma0"] = sigma0 + h
+            params_down["sigma0"] = max(sigma0 - h, 0.001)
+
+            model_up = model_class(**params_up)
+            model_down = model_class(**params_down)
+
+            v_up = self._value_with_model(market, model_up)
+            v_down = self._value_with_model(market, model_down)
+
+            return (v_up - v_down) / (2 * h)
+
+        # Unknown model type - warn and return 0.0
+        warnings.warn(
+            f"Cannot compute vega for model '{self._model.name}': "
+            f"no recognized volatility parameter (sigma, v0, sigma0). "
+            f"Available parameters: {list(params.keys())}",
+            UserWarning
+        )
         return 0.0
 
     def _compute_theta(self, market: MarketEnvironment) -> float:

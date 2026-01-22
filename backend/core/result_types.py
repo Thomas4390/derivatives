@@ -31,7 +31,6 @@ class PricingCapability(Enum):
     """Type of pricing engine capability."""
     ANALYTICAL = auto()
     FFT = auto()
-    PDE = auto()
     MONTE_CARLO = auto()
 
 

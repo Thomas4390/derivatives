@@ -53,6 +53,20 @@ from backend.core.registry import (
     price,
 )
 
+# Black-Scholes formulas (single source of truth)
+from backend.core.bs_formulas import (
+    norm_cdf,
+    norm_pdf,
+    d1_d2,
+    bs_price,
+    bs_delta,
+    bs_gamma,
+    bs_vega,
+    bs_theta,
+    bs_rho,
+    bs_greeks,
+)
+
 
 __all__ = [
     # Types
@@ -70,6 +84,17 @@ __all__ = [
     # Registry
     "EngineRegistry",
     "price",
+    # Black-Scholes formulas
+    "norm_cdf",
+    "norm_pdf",
+    "d1_d2",
+    "bs_price",
+    "bs_delta",
+    "bs_gamma",
+    "bs_vega",
+    "bs_theta",
+    "bs_rho",
+    "bs_greeks",
 ]
 
 

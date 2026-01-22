@@ -83,6 +83,11 @@ class AllGreeks(NamedTuple):
 # =============================================================================
 # Core Building Blocks (Numba-optimized)
 # =============================================================================
+#
+# NOTE: These local functions duplicate logic from backend.core.bs_formulas.
+# They are kept here for Numba compilation compatibility (signature matching).
+# For new code, prefer using backend.core.bs_formulas as the single source of truth.
+# =============================================================================
 
 @njit(fastmath=True, cache=True)
 def _norm_cdf(x: float) -> float:

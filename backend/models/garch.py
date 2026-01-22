@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from typing import List, Dict, Any
 import numpy as np
 
+from backend.core.interfaces import Model
 from backend.core.result_types import PricingCapability
 from backend.simulation.models.garch import GARCHSimulator
 from backend.simulation.models.ngarch import NGARCHSimulator
@@ -31,7 +32,7 @@ from backend.engines.monte_carlo.garch_pricer import GARCHMCPricer, GARCHType
 # =============================================================================
 
 @dataclass(frozen=True)
-class GARCHModel:
+class GARCHModel(Model):
     """
     GARCH(1,1) Model.
 
@@ -183,7 +184,7 @@ class GARCHModel:
 # =============================================================================
 
 @dataclass(frozen=True)
-class NGARCHModel:
+class NGARCHModel(Model):
     """
     NGARCH (Nonlinear Asymmetric GARCH) Model.
 
@@ -315,7 +316,7 @@ class NGARCHModel:
 # =============================================================================
 
 @dataclass(frozen=True)
-class GJRGARCHModel:
+class GJRGARCHModel(Model):
     """
     GJR-GARCH Model.
 

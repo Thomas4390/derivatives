@@ -109,7 +109,6 @@ class HestonModel(Model):
         """Which pricing methods this model supports."""
         return [
             PricingCapability.FFT,
-            PricingCapability.PDE,
             PricingCapability.MONTE_CARLO,
         ]
 
