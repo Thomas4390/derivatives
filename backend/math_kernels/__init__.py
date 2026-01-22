@@ -2,15 +2,28 @@
 Math Kernels Package
 ====================
 
-ALTERNATIVE OPTIMIZATION LAYER - Not integrated into main pipeline.
+STANDALONE REFERENCE IMPLEMENTATIONS - Not integrated into main pipeline.
 
-This module contains low-level Numba-optimized kernels that can be used
-as building blocks for custom high-performance implementations.
+This module contains low-level Numba-optimized kernels that serve as:
+1. Reference implementations for mathematical algorithms
+2. Building blocks for custom high-performance code
+3. Testing/validation of the main simulation engine
 
-Current Status: STANDALONE - Not used by simulation/ or engines/ modules.
-The simulation/ module has its own integrated implementations.
+Architecture Decision
+---------------------
+This package is INTENTIONALLY SEPARATE from the main `simulation/` and
+`engines/` modules. The reasons are:
 
-Modules:
+1. **Separation of concerns**: Pure mathematical kernels vs. application logic
+2. **Flexibility**: Can be used independently for research/experimentation
+3. **Validation**: Reference implementations for testing the production code
+4. **No coupling**: Changes here don't affect the main pricing pipeline
+
+The main `simulation/` module has its own integrated, production-optimized
+implementations that are tightly coupled with the Model-Engine architecture.
+
+Modules
+-------
 - sde_kernels: Euler, Milstein, Heston QE discretization schemes
 - random: Correlated Brownian motion, antithetic variates
 - payoff_kernels: Vectorized payoff evaluation (vanilla, digital, Asian, barriers)
@@ -18,10 +31,28 @@ Modules:
 
 All functions are JIT-compiled with Numba for optimal performance.
 
-Use Cases:
-- Custom simulation implementations
+Use Cases
+---------
+- Custom simulation implementations outside the main framework
 - Performance-critical research code
-- American option pricing via regression
+- American option pricing via Longstaff-Schwartz regression
+- Algorithm prototyping and validation
+
+Example
+-------
+    from backend.math_kernels import gbm_exact_step, call_payoff_vec
+    import numpy as np
+
+    # Simulate GBM paths manually
+    dt = 1/252
+    paths = np.zeros((10000, 252))
+    paths[:, 0] = 100.0
+    for t in range(1, 252):
+        dW = np.random.randn(10000) * np.sqrt(dt)
+        paths[:, t] = gbm_exact_step(paths[:, t-1], 0.05, 0.2, dt, dW)
+
+    # Evaluate payoffs
+    payoffs = call_payoff_vec(paths[:, -1], 100.0)
 
 Author: Thomas
 Created: 2025

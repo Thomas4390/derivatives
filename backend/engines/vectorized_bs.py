@@ -32,6 +32,48 @@ from backend.utils.math import (
 
 
 # =============================================================================
+# GREEK INDEX MAPPING
+# =============================================================================
+# All functions return Greeks in this order (14 total):
+#
+# First-order Greeks (indices 0-5):
+#   0: price   - Option price
+#   1: delta   - ∂V/∂S (spot sensitivity)
+#   2: gamma   - ∂²V/∂S² (delta sensitivity to spot)
+#   3: vega    - ∂V/∂σ per 1% vol (volatility sensitivity)
+#   4: theta   - ∂V/∂t per day (time decay)
+#   5: rho     - ∂V/∂r per 1% rate (rate sensitivity)
+#
+# Second-order Greeks (indices 6-9):
+#   6: vanna   - ∂²V/∂S∂σ per 1% vol (delta-vol cross)
+#   7: volga   - ∂²V/∂σ² per 1%² vol (vega convexity)
+#   8: charm   - ∂²V/∂S∂t per day (delta decay)
+#   9: veta    - ∂²V/∂σ∂t per day per 1% vol (vega decay)
+#
+# Third-order Greeks (indices 10-13):
+#   10: speed  - ∂³V/∂S³ (gamma sensitivity to spot)
+#   11: zomma  - ∂³V/∂S²∂σ per 1% vol (gamma-vol cross)
+#   12: color  - ∂³V/∂S²∂t per day (gamma decay)
+#   13: ultima - ∂³V/∂σ³ per 1%³ vol (volga sensitivity to vol)
+
+# Greek indices for use with greek_index parameter
+GREEK_PRICE = 0
+GREEK_DELTA = 1
+GREEK_GAMMA = 2
+GREEK_VEGA = 3
+GREEK_THETA = 4
+GREEK_RHO = 5
+GREEK_VANNA = 6
+GREEK_VOLGA = 7
+GREEK_CHARM = 8
+GREEK_VETA = 9
+GREEK_SPEED = 10
+GREEK_ZOMMA = 11
+GREEK_COLOR = 12
+GREEK_ULTIMA = 13
+
+
+# =============================================================================
 # BLACK-SCHOLES FIRST-ORDER GREEKS
 # =============================================================================
 
@@ -45,10 +87,36 @@ def calculate_first_order_greeks(
     option_type: int
 ) -> Tuple[float, float, float, float, float, float]:
     """
-    Calculate first-order Greeks (Delta, Gamma, Vega, Theta, Rho).
+    Calculate first-order Black-Scholes Greeks.
 
-    Returns:
-        Tuple of (price, delta, gamma, vega, theta, rho)
+    Computes price and first-order sensitivities using closed-form formulas.
+    Handles expiration gracefully by returning intrinsic values.
+
+    Parameters
+    ----------
+    spot : float
+        Current underlying price (must be > 0)
+    strike : float
+        Strike price (must be > 0)
+    time_to_expiry : float
+        Time to expiration in years (0 = at expiry)
+    risk_free_rate : float
+        Annualized risk-free rate (decimal, e.g., 0.05 for 5%)
+    volatility : float
+        Annualized volatility (decimal, e.g., 0.20 for 20%)
+    option_type : int
+        Option type: 1 = call, 0 = put
+
+    Returns
+    -------
+    Tuple[float, float, float, float, float, float]
+        (price, delta, gamma, vega, theta, rho) where:
+        - price: Option price
+        - delta: ∂V/∂S (raw, not percentage)
+        - gamma: ∂²V/∂S² (raw)
+        - vega: ∂V/∂σ per 1% vol change (scaled by 1/100)
+        - theta: ∂V/∂t per calendar day (scaled by 1/365)
+        - rho: ∂V/∂r per 1% rate change (scaled by 1/100)
     """
     if time_to_expiry <= 0:
         if option_type == 1:  # Call

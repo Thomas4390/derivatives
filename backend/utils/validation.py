@@ -297,21 +297,44 @@ def validate_heston_parameters(
         Volatility of volatility
     rho : float
         Correlation between spot and variance
-    check_feller : bool
-        Check Feller condition (2*kappa*theta > xi^2)
+    check_feller : bool, default True
+        Check Feller condition (2*kappa*theta > xi^2).
+        **Strongly recommended to keep enabled.** The Feller condition
+        ensures variance stays positive in continuous-time limit.
+        Disabling may cause numerical instabilities in Monte Carlo.
 
     Raises
     ------
     ValidationError
         If parameters are invalid
     FellerConditionError
-        If Feller condition is violated
+        If Feller condition is violated and check_feller=True
+
+    Warnings
+    --------
+    UserWarning
+        If check_feller=False, warns about potential numerical issues
     """
+    import warnings
+
     validate_positive(v0, "Initial variance (v0)", strict=True)
     validate_positive(kappa, "Mean reversion (kappa)", strict=True)
     validate_positive(theta, "Long-run variance (theta)", strict=True)
     validate_positive(xi, "Vol of vol (xi)", strict=True)
     validate_correlation(rho)
+
+    if not check_feller:
+        # Warn when Feller check is disabled
+        feller_lhs = 2 * kappa * theta
+        feller_rhs = xi ** 2
+        if feller_lhs <= feller_rhs:
+            warnings.warn(
+                f"Feller condition is violated (2κθ={feller_lhs:.4f} <= ξ²={feller_rhs:.4f}) "
+                "and check_feller=False. This may cause negative variance in simulations. "
+                "Consider using truncation/reflection schemes or adjusting parameters.",
+                UserWarning,
+                stacklevel=2
+            )
 
     if check_feller:
         feller_lhs = 2 * kappa * theta
