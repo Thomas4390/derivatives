@@ -17,13 +17,32 @@ Author: Thomas
 Created: 2025
 """
 
-from .gbm import GBMSimulator
-from .heston import HestonSimulator
-from .merton import MertonSimulator
-from .bates import BatesSimulator
-from .garch import GARCHSimulator
-from .ngarch import NGARCHSimulator
-from .gjr_garch import GJRGARCHSimulator
+
+def __getattr__(name: str):
+    """Lazy import to avoid conflicts when running modules directly."""
+    if name == "GBMSimulator":
+        from .gbm import GBMSimulator
+        return GBMSimulator
+    elif name == "HestonSimulator":
+        from .heston import HestonSimulator
+        return HestonSimulator
+    elif name == "MertonSimulator":
+        from .merton import MertonSimulator
+        return MertonSimulator
+    elif name == "BatesSimulator":
+        from .bates import BatesSimulator
+        return BatesSimulator
+    elif name == "GARCHSimulator":
+        from .garch import GARCHSimulator
+        return GARCHSimulator
+    elif name == "NGARCHSimulator":
+        from .ngarch import NGARCHSimulator
+        return NGARCHSimulator
+    elif name == "GJRGARCHSimulator":
+        from .gjr_garch import GJRGARCHSimulator
+        return GJRGARCHSimulator
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 __all__ = [
     "GBMSimulator",

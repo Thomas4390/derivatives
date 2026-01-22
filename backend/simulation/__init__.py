@@ -30,84 +30,141 @@ Created: 2025
 """
 
 # =============================================================================
-# Core Classes
+# Core Classes (always loaded)
 # =============================================================================
 
 from .base import BaseSimulator, SimulationResult, StochasticVolatilityMixin
 
 # =============================================================================
-# Enumerations
+# Enumerations (always loaded)
 # =============================================================================
 
 from .enums import ModelType, DiscretizationScheme, Measure
 
-# =============================================================================
-# Model Implementations
-# =============================================================================
-
-from .models import (
-    GBMSimulator,
-    HestonSimulator,
-    MertonSimulator,
-    BatesSimulator,
-    GARCHSimulator,
-    NGARCHSimulator,
-    GJRGARCHSimulator,
-)
 
 # =============================================================================
-# Convenience Functions
+# Lazy imports to avoid conflicts when running modules directly with -m
 # =============================================================================
 
-from .models.gbm import simulate_gbm
-from .models.heston import simulate_heston
-from .models.merton import simulate_merton
-from .models.bates import simulate_bates
-from .models.garch import simulate_garch, estimate_garch_params
-from .models.ngarch import simulate_ngarch
-from .models.gjr_garch import simulate_gjr_garch
+def __getattr__(name: str):
+    """Lazy import for simulators and convenience functions."""
+    # Model Implementations
+    if name == "GBMSimulator":
+        from .models.gbm import GBMSimulator
+        return GBMSimulator
+    elif name == "HestonSimulator":
+        from .models.heston import HestonSimulator
+        return HestonSimulator
+    elif name == "MertonSimulator":
+        from .models.merton import MertonSimulator
+        return MertonSimulator
+    elif name == "BatesSimulator":
+        from .models.bates import BatesSimulator
+        return BatesSimulator
+    elif name == "GARCHSimulator":
+        from .models.garch import GARCHSimulator
+        return GARCHSimulator
+    elif name == "NGARCHSimulator":
+        from .models.ngarch import NGARCHSimulator
+        return NGARCHSimulator
+    elif name == "GJRGARCHSimulator":
+        from .models.gjr_garch import GJRGARCHSimulator
+        return GJRGARCHSimulator
 
-# =============================================================================
-# Factory Functions
-# =============================================================================
+    # Convenience Functions
+    elif name == "simulate_gbm":
+        from .models.gbm import simulate_gbm
+        return simulate_gbm
+    elif name == "simulate_heston":
+        from .models.heston import simulate_heston
+        return simulate_heston
+    elif name == "simulate_merton":
+        from .models.merton import simulate_merton
+        return simulate_merton
+    elif name == "simulate_bates":
+        from .models.bates import simulate_bates
+        return simulate_bates
+    elif name == "simulate_garch":
+        from .models.garch import simulate_garch
+        return simulate_garch
+    elif name == "estimate_garch_params":
+        from .models.garch import estimate_garch_params
+        return estimate_garch_params
+    elif name == "simulate_ngarch":
+        from .models.ngarch import simulate_ngarch
+        return simulate_ngarch
+    elif name == "simulate_gjr_garch":
+        from .models.gjr_garch import simulate_gjr_garch
+        return simulate_gjr_garch
 
-from .factory import (
-    create_simulator,
-    create_gbm,
-    create_heston,
-    create_merton,
-    create_bates,
-    create_garch,
-    create_ngarch,
-    create_gjr_garch,
-    list_models,
-    get_model_info,
-)
+    # Factory Functions
+    elif name == "create_simulator":
+        from .factory import create_simulator
+        return create_simulator
+    elif name == "create_gbm":
+        from .factory import create_gbm
+        return create_gbm
+    elif name == "create_heston":
+        from .factory import create_heston
+        return create_heston
+    elif name == "create_merton":
+        from .factory import create_merton
+        return create_merton
+    elif name == "create_bates":
+        from .factory import create_bates
+        return create_bates
+    elif name == "create_garch":
+        from .factory import create_garch
+        return create_garch
+    elif name == "create_ngarch":
+        from .factory import create_ngarch
+        return create_ngarch
+    elif name == "create_gjr_garch":
+        from .factory import create_gjr_garch
+        return create_gjr_garch
+    elif name == "list_models":
+        from .factory import list_models
+        return list_models
+    elif name == "get_model_info":
+        from .factory import get_model_info
+        return get_model_info
 
-# =============================================================================
-# P&L Engine (Re-exported from portfolio.pnl for backward compatibility)
-# NOTE: These functions have been moved to backend.portfolio.pnl
-#       Import directly from there for new code.
-# =============================================================================
+    # P&L Engine (Re-exported from portfolio.pnl for backward compatibility)
+    elif name == "RiskMetrics":
+        from backend.portfolio.pnl import RiskMetrics
+        return RiskMetrics
+    elif name == "calculate_portfolio_pnl_vectorized":
+        from backend.portfolio.pnl import calculate_portfolio_pnl_vectorized
+        return calculate_portfolio_pnl_vectorized
+    elif name == "calculate_portfolio_pnl_with_stock":
+        from backend.portfolio.pnl import calculate_portfolio_pnl_with_stock
+        return calculate_portfolio_pnl_with_stock
+    elif name == "compute_risk_metrics":
+        from backend.portfolio.pnl import compute_risk_metrics
+        return compute_risk_metrics
+    elif name == "compute_risk_metrics_core":
+        from backend.portfolio.pnl import compute_risk_metrics_core
+        return compute_risk_metrics_core
+    elif name == "compute_skewness_kurtosis":
+        from backend.portfolio.pnl import compute_skewness_kurtosis
+        return compute_skewness_kurtosis
+    elif name == "compute_percentiles":
+        from backend.portfolio.pnl import compute_percentiles
+        return compute_percentiles
+    elif name == "compute_payoff_curve":
+        from backend.portfolio.pnl import compute_payoff_curve
+        return compute_payoff_curve
+    elif name == "find_breakeven_points":
+        from backend.portfolio.pnl import find_breakeven_points
+        return find_breakeven_points
+    elif name == "prepare_position_arrays":
+        from backend.portfolio.pnl import prepare_position_arrays
+        return prepare_position_arrays
+    elif name == "warm_up_jit":
+        from backend.portfolio.pnl import warm_up_jit
+        return warm_up_jit
 
-from backend.portfolio.pnl import (
-    # Data classes
-    RiskMetrics,
-    # Core P&L calculation (Numba-optimized)
-    calculate_portfolio_pnl_vectorized,
-    calculate_portfolio_pnl_with_stock,
-    # Risk metrics
-    compute_risk_metrics,
-    compute_risk_metrics_core,
-    compute_skewness_kurtosis,
-    compute_percentiles,
-    # Payoff analysis
-    compute_payoff_curve,
-    find_breakeven_points,
-    # Utilities
-    prepare_position_arrays,
-    warm_up_jit,
-)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 # =============================================================================
 # Public API

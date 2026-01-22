@@ -351,7 +351,7 @@ if __name__ == "__main__":
     _ = simulate_gbm(s0, mu, sigma, t, n_paths=1000, n_steps=10, terminal_only=True)
 
     # Benchmark different path counts
-    path_counts = [10_000, 50_000, 100_000, 500_000, 1_000_000]
+    path_counts = [10_000, 50_000, 100_000, 500_000]
 
     print(f"\n{'Paths':>12} {'Time (ms)':>12} {'Paths/sec':>15}")
     print("-" * 42)
