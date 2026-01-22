@@ -21,7 +21,7 @@ from numba import njit, prange
 import time
 from typing import Optional, Dict, Any
 
-from ..base import BaseSimulator, SimulationResult
+from backend.simulation.base import BaseSimulator, SimulationResult
 
 
 # =============================================================================

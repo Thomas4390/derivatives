@@ -21,25 +21,25 @@ Created: 2025
 def __getattr__(name: str):
     """Lazy import to avoid conflicts when running modules directly."""
     if name == "GBMSimulator":
-        from .gbm import GBMSimulator
+        from backend.simulation.models.gbm import GBMSimulator
         return GBMSimulator
     elif name == "HestonSimulator":
-        from .heston import HestonSimulator
+        from backend.simulation.models.heston import HestonSimulator
         return HestonSimulator
     elif name == "MertonSimulator":
-        from .merton import MertonSimulator
+        from backend.simulation.models.merton import MertonSimulator
         return MertonSimulator
     elif name == "BatesSimulator":
-        from .bates import BatesSimulator
+        from backend.simulation.models.bates import BatesSimulator
         return BatesSimulator
     elif name == "GARCHSimulator":
-        from .garch import GARCHSimulator
+        from backend.simulation.models.garch import GARCHSimulator
         return GARCHSimulator
     elif name == "NGARCHSimulator":
-        from .ngarch import NGARCHSimulator
+        from backend.simulation.models.ngarch import NGARCHSimulator
         return NGARCHSimulator
     elif name == "GJRGARCHSimulator":
-        from .gjr_garch import GJRGARCHSimulator
+        from backend.simulation.models.gjr_garch import GJRGARCHSimulator
         return GJRGARCHSimulator
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 

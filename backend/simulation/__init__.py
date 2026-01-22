@@ -33,13 +33,13 @@ Created: 2025
 # Core Classes (always loaded)
 # =============================================================================
 
-from .base import BaseSimulator, SimulationResult, StochasticVolatilityMixin
+from backend.simulation.base import BaseSimulator, SimulationResult, StochasticVolatilityMixin
 
 # =============================================================================
 # Enumerations (always loaded)
 # =============================================================================
 
-from .enums import ModelType, DiscretizationScheme, Measure
+from backend.simulation.enums import ModelType, DiscretizationScheme, Measure
 
 
 # =============================================================================
@@ -50,83 +50,83 @@ def __getattr__(name: str):
     """Lazy import for simulators and convenience functions."""
     # Model Implementations
     if name == "GBMSimulator":
-        from .models.gbm import GBMSimulator
+        from backend.simulation.models.gbm import GBMSimulator
         return GBMSimulator
     elif name == "HestonSimulator":
-        from .models.heston import HestonSimulator
+        from backend.simulation.models.heston import HestonSimulator
         return HestonSimulator
     elif name == "MertonSimulator":
-        from .models.merton import MertonSimulator
+        from backend.simulation.models.merton import MertonSimulator
         return MertonSimulator
     elif name == "BatesSimulator":
-        from .models.bates import BatesSimulator
+        from backend.simulation.models.bates import BatesSimulator
         return BatesSimulator
     elif name == "GARCHSimulator":
-        from .models.garch import GARCHSimulator
+        from backend.simulation.models.garch import GARCHSimulator
         return GARCHSimulator
     elif name == "NGARCHSimulator":
-        from .models.ngarch import NGARCHSimulator
+        from backend.simulation.models.ngarch import NGARCHSimulator
         return NGARCHSimulator
     elif name == "GJRGARCHSimulator":
-        from .models.gjr_garch import GJRGARCHSimulator
+        from backend.simulation.models.gjr_garch import GJRGARCHSimulator
         return GJRGARCHSimulator
 
     # Convenience Functions
     elif name == "simulate_gbm":
-        from .models.gbm import simulate_gbm
+        from backend.simulation.models.gbm import simulate_gbm
         return simulate_gbm
     elif name == "simulate_heston":
-        from .models.heston import simulate_heston
+        from backend.simulation.models.heston import simulate_heston
         return simulate_heston
     elif name == "simulate_merton":
-        from .models.merton import simulate_merton
+        from backend.simulation.models.merton import simulate_merton
         return simulate_merton
     elif name == "simulate_bates":
-        from .models.bates import simulate_bates
+        from backend.simulation.models.bates import simulate_bates
         return simulate_bates
     elif name == "simulate_garch":
-        from .models.garch import simulate_garch
+        from backend.simulation.models.garch import simulate_garch
         return simulate_garch
     elif name == "estimate_garch_params":
-        from .models.garch import estimate_garch_params
+        from backend.simulation.models.garch import estimate_garch_params
         return estimate_garch_params
     elif name == "simulate_ngarch":
-        from .models.ngarch import simulate_ngarch
+        from backend.simulation.models.ngarch import simulate_ngarch
         return simulate_ngarch
     elif name == "simulate_gjr_garch":
-        from .models.gjr_garch import simulate_gjr_garch
+        from backend.simulation.models.gjr_garch import simulate_gjr_garch
         return simulate_gjr_garch
 
     # Factory Functions
     elif name == "create_simulator":
-        from .factory import create_simulator
+        from backend.simulation.factory import create_simulator
         return create_simulator
     elif name == "create_gbm":
-        from .factory import create_gbm
+        from backend.simulation.factory import create_gbm
         return create_gbm
     elif name == "create_heston":
-        from .factory import create_heston
+        from backend.simulation.factory import create_heston
         return create_heston
     elif name == "create_merton":
-        from .factory import create_merton
+        from backend.simulation.factory import create_merton
         return create_merton
     elif name == "create_bates":
-        from .factory import create_bates
+        from backend.simulation.factory import create_bates
         return create_bates
     elif name == "create_garch":
-        from .factory import create_garch
+        from backend.simulation.factory import create_garch
         return create_garch
     elif name == "create_ngarch":
-        from .factory import create_ngarch
+        from backend.simulation.factory import create_ngarch
         return create_ngarch
     elif name == "create_gjr_garch":
-        from .factory import create_gjr_garch
+        from backend.simulation.factory import create_gjr_garch
         return create_gjr_garch
     elif name == "list_models":
-        from .factory import list_models
+        from backend.simulation.factory import list_models
         return list_models
     elif name == "get_model_info":
-        from .factory import get_model_info
+        from backend.simulation.factory import get_model_info
         return get_model_info
 
     # P&L Engine (Re-exported from portfolio.pnl for backward compatibility)

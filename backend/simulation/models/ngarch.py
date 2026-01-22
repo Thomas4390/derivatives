@@ -33,7 +33,7 @@ from numba import njit, prange
 import time
 from typing import Optional, Dict, Any, Tuple
 
-from ..base import BaseSimulator, SimulationResult, StochasticVolatilityMixin
+from backend.simulation.base import BaseSimulator, SimulationResult, StochasticVolatilityMixin
 
 
 # =============================================================================
