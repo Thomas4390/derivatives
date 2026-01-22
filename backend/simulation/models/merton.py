@@ -24,18 +24,9 @@ Created: 2025
 import numpy as np
 from numba import njit, prange
 import time
-import sys
-from pathlib import Path
 from typing import Optional, Dict, Any
 
-# Handle both package import and direct script execution
-try:
-    from ..base import BaseSimulator, SimulationResult
-except ImportError:
-    _project_root = Path(__file__).resolve().parents[3]
-    if str(_project_root) not in sys.path:
-        sys.path.insert(0, str(_project_root))
-    from backend.simulation.base import BaseSimulator, SimulationResult
+from ..base import BaseSimulator, SimulationResult
 
 
 # =============================================================================
