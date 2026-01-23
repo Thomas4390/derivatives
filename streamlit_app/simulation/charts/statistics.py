@@ -21,6 +21,24 @@ from config.constants import (
 from config.styles import render_stats_row, stats_table_html
 
 
+def _get_param(params: Dict, *keys, default=None):
+    """Get parameter value with fallback for different naming conventions."""
+    for key in keys:
+        if key in params:
+            return params[key]
+    return default
+
+
+def _get_result_attr(result, *attrs, default=None):
+    """Get attribute from result with fallback for different interfaces."""
+    for attr in attrs:
+        if hasattr(result, attr):
+            val = getattr(result, attr)
+            if val is not None:
+                return val
+    return default
+
+
 def render_statistics_tab(
     simulation_result,
     params: Dict[str, Any],
@@ -60,12 +78,21 @@ def _render_summary_statistics(result, params: Dict[str, Any], result_type: str)
     """Render comprehensive summary statistics."""
     st.markdown("#### Simulation Summary")
 
+    # Get values with compatibility
+    n_paths = _get_result_attr(result, 'num_paths', default=result.price_paths.shape[0] if hasattr(result, 'price_paths') else 0)
+    n_steps = _get_result_attr(result, 'num_steps', default=result.price_paths.shape[1]-1 if hasattr(result, 'price_paths') else 0)
+    spot_price = _get_param(params, 'spot_price', 'spot', default=100.0)
+    risk_free_rate = _get_param(params, 'risk_free_rate', default=0.05)
+    volatility = _get_param(params, 'volatility', 'sigma', 'sigma0', default=0.20)
+    time_horizon = _get_param(params, 'time_horizon', default=1.0)
+    num_steps_param = _get_param(params, 'num_steps', 'n_steps', default=n_steps)
+
     # Simulation parameters with styled cards
     st.markdown("##### ⚡ Simulation Parameters")
     sim_stats = [
-        ("Paths", f"{result.num_paths:,}", "Number of simulations"),
-        ("Steps", f"{result.num_steps:,}", "Time discretization"),
-        ("Total Samples", f"{result.num_paths * result.num_steps:,}", "paths × steps"),
+        ("Paths", f"{n_paths:,}", "Number of simulations"),
+        ("Steps", f"{n_steps:,}", "Time discretization"),
+        ("Total Samples", f"{n_paths * n_steps:,}", "paths × steps"),
     ]
     render_stats_row(sim_stats, ["teal", "blue", "purple"])
 
@@ -74,9 +101,9 @@ def _render_summary_statistics(result, params: Dict[str, Any], result_type: str)
     # Market parameters with styled cards
     st.markdown("##### 📊 Market Parameters")
     market_stats = [
-        ("S₀ (Spot)", f"${params['spot_price']:.2f}", "Initial price"),
-        ("r (Risk-free)", f"{params['risk_free_rate']*100:.2f}%", "Annual rate"),
-        ("σ (Volatility)", f"{params['volatility']*100:.1f}%", "Annual vol"),
+        ("S₀ (Spot)", f"${spot_price:.2f}", "Initial price"),
+        ("r (Risk-free)", f"{risk_free_rate*100:.2f}%", "Annual rate"),
+        ("σ (Volatility)", f"{volatility*100:.1f}%", "Annual vol"),
     ]
     render_stats_row(market_stats, ["green", "blue", "amber"])
 
@@ -85,8 +112,8 @@ def _render_summary_statistics(result, params: Dict[str, Any], result_type: str)
     # Time parameters with styled cards
     st.markdown("##### ⏱️ Time Parameters")
     time_stats = [
-        ("T (Horizon)", f"{params['time_horizon']:.2f} yr", "Simulation period"),
-        ("dt (Step size)", f"{params['time_horizon']/params['num_steps']:.6f}", "Time increment"),
+        ("T (Horizon)", f"{time_horizon:.2f} yr", "Simulation period"),
+        ("dt (Step size)", f"{time_horizon/num_steps_param:.6f}", "Time increment"),
         ("Seed", f"{params.get('seed', 'Random')}", "Random state"),
     ]
     render_stats_row(time_stats, ["slate", "purple", "teal"])
@@ -95,11 +122,15 @@ def _render_summary_statistics(result, params: Dict[str, Any], result_type: str)
 
     # Terminal value statistics
     if result_type == "price":
-        terminal = result.terminal_values
+        terminal = _get_result_attr(result, 'terminal_prices', 'terminal_values')
         name = "Terminal Price"
         unit = "$"
     else:
-        terminal = result.terminal_volatility * 100
+        vol_paths = _get_result_attr(result, 'volatility_paths')
+        if vol_paths is not None:
+            terminal = vol_paths[:, -1] * 100
+        else:
+            terminal = _get_result_attr(result, 'terminal_volatility', default=np.array([0])) * 100
         name = "Terminal Volatility"
         unit = "%"
 
@@ -137,7 +168,16 @@ def _render_summary_statistics(result, params: Dict[str, Any], result_type: str)
     # Path statistics over time
     st.markdown("#### Path Evolution Statistics")
 
-    paths = result.paths if result_type == "price" else result.volatility_paths * 100
+    if result_type == "price":
+        paths = _get_result_attr(result, 'price_paths', 'paths')
+    else:
+        vol_paths = _get_result_attr(result, 'volatility_paths')
+        paths = vol_paths * 100 if vol_paths is not None else None
+
+    if paths is None:
+        st.warning("Path data not available for evolution statistics.")
+        return
+
     time_grid = result.time_grid
 
     # Sample points for statistics
@@ -194,12 +234,20 @@ def _render_convergence_analysis(result, params: Dict[str, Any], result_type: st
     """Analyze Monte Carlo convergence."""
     st.markdown("#### Monte Carlo Convergence Analysis")
 
+    spot_price = _get_param(params, 'spot_price', 'spot', default=100.0)
+    risk_free_rate = _get_param(params, 'risk_free_rate', default=0.05)
+    time_horizon = _get_param(params, 'time_horizon', default=1.0)
+
     if result_type == "price":
-        terminal = result.terminal_values
-        true_mean = params['spot_price'] * np.exp(params['risk_free_rate'] * params['time_horizon'])
+        terminal = _get_result_attr(result, 'terminal_prices', 'terminal_values')
+        true_mean = spot_price * np.exp(risk_free_rate * time_horizon)
         name = "Terminal Price"
     else:
-        terminal = result.terminal_volatility
+        vol_paths = _get_result_attr(result, 'volatility_paths')
+        if vol_paths is not None:
+            terminal = vol_paths[:, -1]
+        else:
+            terminal = _get_result_attr(result, 'terminal_volatility', default=np.array([0]))
         true_mean = None  # No closed-form for GARCH
         name = "Terminal Volatility"
 
@@ -320,9 +368,14 @@ def _render_performance_metrics(result, params: Dict[str, Any]) -> None:
     """Render computation performance metrics."""
     st.markdown("#### Computation Performance")
 
-    comp_time = result.computation_time
-    n_paths = result.num_paths
-    n_steps = result.num_steps
+    comp_time = _get_result_attr(result, 'computation_time', default=0.0)
+    if comp_time == 0:
+        # Fallback: try to get from session state
+        import streamlit as st
+        comp_time = st.session_state.get('execution_time', 0.001)
+
+    n_paths = _get_result_attr(result, 'num_paths', default=result.price_paths.shape[0] if hasattr(result, 'price_paths') else 1000)
+    n_steps = _get_result_attr(result, 'num_steps', default=result.price_paths.shape[1]-1 if hasattr(result, 'price_paths') else 252)
     total_samples = n_paths * n_steps
 
     paths_per_sec = n_paths / comp_time

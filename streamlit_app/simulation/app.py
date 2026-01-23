@@ -1,15 +1,18 @@
 """
-Monte Carlo Simulation Explorer - Main Application
+Unified Monte Carlo Simulation Explorer
 
-A high-performance educational tool for Monte Carlo simulation of price paths
-and volatility dynamics. Features multiple stochastic models including GBM,
-Heston, SABR, and GARCH-family volatility models.
+A comprehensive educational tool for Monte Carlo simulation featuring:
+- 7 stochastic models (GBM, Heston, Merton, Bates, GARCH, NGARCH, GJR-GARCH)
+- Unified price and volatility path visualization
+- Pricing comparison (MC vs Analytical/FFT)
+- Option P&L analysis
 
 Author: Thomas Vaudescal
 """
 
 import sys
 from pathlib import Path
+import time
 
 # Add paths for imports
 app_dir = Path(__file__).parent
@@ -21,55 +24,87 @@ import streamlit as st
 import numpy as np
 
 # Backend imports
-from backend.simulation.simulate_paths import SimulationResult
-from backend.simulation.simulate_volatility import VolatilitySimulationResult
-from backend.portfolio.pnl import RiskMetrics
+from backend.simulation.base import SimulationResult
 
-# Local imports
+# Local config and components
 from config.styles import (
     inject_styles,
     render_compact_header,
     footer_html,
-    stale_results_warning_html,
     metric_card_html
 )
-from config.constants import (
-    PRICE_MODELS,
-    VOLATILITY_MODELS,
-    MODEL_DESCRIPTIONS,
-    STATIONARITY_CONDITIONS,
-    DEFAULT_SPOT_PRICE,
-    DEFAULT_RISK_FREE_RATE,
-    DEFAULT_VOLATILITY,
-    DEFAULT_TIME_HORIZON,
-    DEFAULT_NUM_PATHS,
-    DEFAULT_NUM_STEPS,
-    DEFAULT_EXPECTED_RETURN
-)
-from charts.price_paths import render_price_paths_tab
-from charts.volatility_paths import render_volatility_paths_tab
-from charts.distributions import render_distributions_tab
-from charts.statistics import render_statistics_tab
-from charts.interactive_path import render_interactive_path_tab
-from charts.pnl_distribution import render_pnl_distribution_tab, render_risk_metrics_tab
-from charts.scenario_analysis import render_scenario_analysis_tab
-from services.state_manager import (
-    init_session_state,
-    mark_results_current,
-    are_results_stale,
-    check_params_changed
-)
-from services.simulation_runner import (
-    run_price_simulation,
-    run_volatility_simulation,
-    calculate_pnl_from_paths
+from config.model_registry import (
+    MODEL_REGISTRY,
+    MODEL_DISPLAY_ORDER,
+    get_model,
+    PricingMethod,
 )
 
-# Black-Scholes for premium calculation
-from backend.option_pricing.options_calculator import (
-    black_scholes_call_price,
-    black_scholes_put_price
+# Components
+from components.model_selector import render_model_selector, render_model_comparison_table
+from components.parameter_panel import (
+    render_market_parameters,
+    render_model_parameters,
+    render_simulation_settings,
+    render_option_parameters,
 )
+from components.pricing_comparison import (
+    render_pricing_comparison,
+    render_convergence_guide,
+)
+from components.results_summary import (
+    render_results_summary,
+    render_simulation_info,
+    render_model_equations,
+    render_percentile_table,
+)
+
+# Charts
+from charts.unified_paths import (
+    render_unified_paths,
+    render_price_paths_only,
+    render_volatility_paths_only,
+    render_path_controls,
+)
+from charts.pricing_comparison_chart import (
+    render_pricing_comparison_chart,
+    render_single_price_comparison,
+)
+from charts.distributions import render_distributions_tab
+from charts.statistics import render_statistics_tab
+
+# Services
+from services.simulation_service import (
+    run_simulation,
+    get_model_characteristics,
+    check_model_conditions,
+    MODEL_NAMES,
+)
+from services.pricing_service import (
+    compare_pricing,
+    price_multiple_strikes,
+    get_available_pricing_methods,
+    compute_option_pnl,
+)
+
+# Black-Scholes functions for premium calculation
+from scipy.stats import norm
+
+def black_scholes_call_price(S: float, K: float, T: float, r: float, sigma: float) -> float:
+    """Calculate Black-Scholes call price."""
+    if T <= 0:
+        return max(S - K, 0)
+    d1 = (np.log(S / K) + (r + 0.5 * sigma**2) * T) / (sigma * np.sqrt(T))
+    d2 = d1 - sigma * np.sqrt(T)
+    return S * norm.cdf(d1) - K * np.exp(-r * T) * norm.cdf(d2)
+
+def black_scholes_put_price(S: float, K: float, T: float, r: float, sigma: float) -> float:
+    """Calculate Black-Scholes put price."""
+    if T <= 0:
+        return max(K - S, 0)
+    d1 = (np.log(S / K) + (r + 0.5 * sigma**2) * T) / (sigma * np.sqrt(T))
+    d2 = d1 - sigma * np.sqrt(T)
+    return K * np.exp(-r * T) * norm.cdf(-d2) - S * norm.cdf(-d1)
 
 
 # =============================================================================
@@ -87,789 +122,538 @@ st.set_page_config(
 inject_styles()
 
 # Initialize session state
-init_session_state()
+if "selected_model" not in st.session_state:
+    st.session_state.selected_model = "gbm"
+if "simulation_result" not in st.session_state:
+    st.session_state.simulation_result = None
+if "all_params" not in st.session_state:
+    st.session_state.all_params = {}
 
 
 # =============================================================================
-# HEADER (Compact)
+# HEADER
 # =============================================================================
 
 render_compact_header(
     title="Monte Carlo Simulation Explorer",
-    subtitle="Interactive visualization of stochastic price and volatility simulations",
+    subtitle="Unified visualization of 7 stochastic models",
     badge="Educational Tool"
 )
 
 
 # =============================================================================
-# MAIN TABS NAVIGATION
+# SIDEBAR - UNIFIED CONFIGURATION
 # =============================================================================
 
-tab_price, tab_volatility = st.tabs([
-    "📈 Price & Option P&L",
-    "📊 Volatility Paths"
+with st.sidebar:
+    # Model Selection
+    model_key = render_model_selector()
+
+    st.markdown("---")
+
+    # Market Parameters
+    market_params = render_market_parameters()
+
+    st.markdown("---")
+
+    # Model-Specific Parameters
+    model_params = render_model_parameters(model_key)
+
+    st.markdown("---")
+
+    # Simulation Settings
+    sim_settings = render_simulation_settings()
+
+    st.markdown("---")
+
+    # Option Parameters (for pricing comparison)
+    option_params = render_option_parameters()
+
+    st.markdown("---")
+
+    # Combine all parameters
+    all_params = {
+        **market_params,
+        **model_params,
+        **sim_settings,
+        **option_params,
+        "model": model_key,
+    }
+    st.session_state.all_params = all_params
+
+    # Model condition check
+    conditions = check_model_conditions(model_key, all_params)
+    if not conditions["is_valid"]:
+        for cond in conditions["conditions"]:
+            if not cond["satisfied"]:
+                st.warning(f"⚠️ {cond['name']}: {cond['message']}")
+
+    # Run Simulation Button
+    st.markdown("---")
+    run_clicked = st.button(
+        "▶️ Run Simulation",
+        type="primary",
+        use_container_width=True,
+        key="run_simulation_btn"
+    )
+
+    if run_clicked:
+        with st.spinner("Running simulation..."):
+            start_time = time.time()
+            try:
+                result = run_simulation(model_key, all_params)
+                execution_time = time.time() - start_time
+                st.session_state.simulation_result = result
+                st.session_state.execution_time = execution_time
+                st.session_state.simulation_model = model_key
+                st.session_state.simulation_params = all_params.copy()
+                st.success(f"✓ Completed in {execution_time*1000:.0f}ms")
+            except Exception as e:
+                st.error(f"Error: {str(e)}")
+                st.exception(e)
+
+
+# =============================================================================
+# MAIN CONTENT - TABS
+# =============================================================================
+
+tab_sim, tab_pricing, tab_pnl, tab_edu = st.tabs([
+    "📈 Simulation",
+    "💰 Pricing Comparison",
+    "📊 Option P&L",
+    "📚 Education"
 ])
 
 
 # =============================================================================
-# SIDEBAR CONFIGURATION FUNCTIONS
+# TAB 1: SIMULATION
 # =============================================================================
 
-def render_market_params(key_prefix: str, include_expected_return: bool = False) -> dict:
-    """Render market parameters with unique keys."""
-    params = {}
+with tab_sim:
+    result = st.session_state.get("simulation_result")
 
-    st.markdown("### 📊 Market Parameters")
+    if result is None:
+        st.info("👈 Configure parameters in the sidebar and click **Run Simulation**")
 
-    col1, col2 = st.columns(2)
-    with col1:
-        spot_price = st.number_input(
-            "S₀ (Spot)",
-            min_value=1.0,
-            max_value=10000.0,
-            value=DEFAULT_SPOT_PRICE,
-            step=1.0,
-            format="%.2f",
-            key=f"{key_prefix}_spot"
-        )
-    with col2:
-        volatility = st.number_input(
-            "σ (Volatility)",
-            min_value=0.01,
-            max_value=1.0,
-            value=DEFAULT_VOLATILITY,
-            step=0.01,
-            format="%.2f",
-            key=f"{key_prefix}_vol"
-        )
+        # Show model comparison table
+        with st.expander("📋 Model Comparison", expanded=True):
+            render_model_comparison_table()
+    else:
+        # Get stored model and params
+        sim_model = st.session_state.get("simulation_model", model_key)
+        sim_params = st.session_state.get("simulation_params", all_params)
+        exec_time = st.session_state.get("execution_time", 0)
 
-    col1, col2 = st.columns(2)
-    with col1:
-        time_horizon = st.number_input(
-            "T (Years)",
-            min_value=0.1,
-            max_value=10.0,
-            value=DEFAULT_TIME_HORIZON,
-            step=0.1,
-            format="%.1f",
-            key=f"{key_prefix}_time"
-        )
-    with col2:
-        risk_free_rate = st.number_input(
-            "r (Risk-free)",
-            min_value=0.0,
-            max_value=0.20,
-            value=DEFAULT_RISK_FREE_RATE,
-            step=0.005,
-            format="%.3f",
-            key=f"{key_prefix}_rate"
-        )
-
-    # Expected return (only for price simulation)
-    if include_expected_return:
-        expected_return = st.number_input(
-            "μ (Expected Return)",
-            min_value=-0.20,
-            max_value=0.50,
-            value=DEFAULT_EXPECTED_RETURN,
-            step=0.01,
-            format="%.2f",
-            help="Annual expected return under P-measure",
-            key=f"{key_prefix}_mu"
-        )
-        params['expected_return'] = expected_return
-
-    params.update({
-        'spot_price': spot_price,
-        'volatility': volatility,
-        'time_horizon': time_horizon,
-        'risk_free_rate': risk_free_rate
-    })
-
-    return params
-
-
-def render_simulation_settings(key_prefix: str) -> dict:
-    """Render simulation settings with unique keys."""
-    st.markdown("### ⚡ Simulation Settings")
-
-    col1, col2 = st.columns(2)
-    with col1:
-        num_paths = st.number_input(
-            "Paths",
-            min_value=10,
-            max_value=100000,
-            value=DEFAULT_NUM_PATHS,
-            step=100,
-            key=f"{key_prefix}_paths"
-        )
-    with col2:
-        num_steps = st.number_input(
-            "Steps",
-            min_value=10,
-            max_value=1000,
-            value=DEFAULT_NUM_STEPS,
-            step=10,
-            key=f"{key_prefix}_steps"
-        )
-
-    seed = st.number_input(
-        "Random Seed",
-        min_value=0,
-        max_value=99999,
-        value=42,
-        step=1,
-        key=f"{key_prefix}_seed"
-    )
-
-    return {
-        'num_paths': int(num_paths),
-        'num_steps': int(num_steps),
-        'seed': int(seed)
-    }
-
-
-def render_price_model_config(base_volatility: float, key_prefix: str) -> dict:
-    """Render price model configuration with unique keys."""
-    params = {}
-
-    st.markdown("### 🔬 Price Model")
-
-    price_model = st.selectbox(
-        "Select Model",
-        options=list(PRICE_MODELS.keys()),
-        format_func=lambda x: PRICE_MODELS[x],
-        key=f"{key_prefix}_model_select"
-    )
-    params['price_model'] = price_model
-
-    # Model-specific parameters
-    if price_model == "heston":
-        with st.expander("Heston Parameters", expanded=True):
-            col1, col2 = st.columns(2)
-            with col1:
-                params['heston_v0'] = st.number_input(
-                    "V₀", min_value=0.001, max_value=1.0,
-                    value=base_volatility ** 2, step=0.01, format="%.4f",
-                    key=f"{key_prefix}_h_v0"
-                )
-                params['heston_kappa'] = st.number_input(
-                    "κ (Mean Rev.)", min_value=0.1, max_value=10.0,
-                    value=2.0, step=0.1, format="%.2f", key=f"{key_prefix}_h_kappa"
-                )
-            with col2:
-                params['heston_theta'] = st.number_input(
-                    "θ (Long-term)", min_value=0.001, max_value=1.0,
-                    value=base_volatility ** 2, step=0.01, format="%.4f",
-                    key=f"{key_prefix}_h_theta"
-                )
-                params['heston_xi'] = st.number_input(
-                    "ξ (Vol of Vol)", min_value=0.01, max_value=1.0,
-                    value=0.3, step=0.05, format="%.2f", key=f"{key_prefix}_h_xi"
-                )
-            params['heston_rho'] = st.slider(
-                "ρ (Correlation)", -0.99, 0.99, -0.7, 0.01, key=f"{key_prefix}_h_rho"
-            )
-            if abs(params['heston_rho']) > 0.95:
-                st.info("ℹ️ Extreme correlation may cause numerical instability")
-            feller = 2 * params['heston_kappa'] * params['heston_theta'] / (params['heston_xi'] ** 2)
-            if feller < 1:
-                st.warning(f"⚠️ Feller: {feller:.2f} < 1")
-
-    elif price_model == "merton":
-        with st.expander("Merton Jump Parameters", expanded=True):
-            col1, col2 = st.columns(2)
-            with col1:
-                params['merton_lambda'] = st.number_input(
-                    "λ (Intensity)", min_value=0.0, max_value=5.0,
-                    value=0.5, step=0.1, format="%.2f", key=f"{key_prefix}_m_lambda"
-                )
-                params['merton_mu_j'] = st.number_input(
-                    "μⱼ (Mean)", min_value=-0.5, max_value=0.5,
-                    value=-0.1, step=0.01, format="%.3f", key=f"{key_prefix}_m_mu_j"
-                )
-            with col2:
-                params['merton_sigma_j'] = st.number_input(
-                    "σⱼ (Vol)", min_value=0.01, max_value=0.5,
-                    value=0.2, step=0.01, format="%.2f", key=f"{key_prefix}_m_sigma_j"
-                )
-
-    elif price_model == "bates":
-        with st.expander("Bates Parameters", expanded=True):
-            st.markdown("**Stochastic Vol**")
-            col1, col2 = st.columns(2)
-            with col1:
-                params['bates_v0'] = st.number_input(
-                    "V₀", min_value=0.001, max_value=1.0,
-                    value=base_volatility ** 2, step=0.01, format="%.4f",
-                    key=f"{key_prefix}_b_v0"
-                )
-                params['bates_kappa'] = st.number_input(
-                    "κ", min_value=0.1, max_value=10.0,
-                    value=2.0, step=0.1, format="%.2f", key=f"{key_prefix}_b_kappa"
-                )
-            with col2:
-                params['bates_theta'] = st.number_input(
-                    "θ", min_value=0.001, max_value=1.0,
-                    value=base_volatility ** 2, step=0.01, format="%.4f",
-                    key=f"{key_prefix}_b_theta"
-                )
-                params['bates_xi'] = st.number_input(
-                    "ξ", min_value=0.01, max_value=1.0,
-                    value=0.3, step=0.05, format="%.2f", key=f"{key_prefix}_b_xi"
-                )
-            params['bates_rho'] = st.slider(
-                "ρ", -0.99, 0.99, -0.7, 0.01, key=f"{key_prefix}_b_rho"
-            )
-            if abs(params['bates_rho']) > 0.95:
-                st.info("ℹ️ Extreme correlation may cause numerical instability")
-            feller = 2 * params['bates_kappa'] * params['bates_theta'] / (params['bates_xi'] ** 2)
-            if feller < 1:
-                st.warning(f"⚠️ Feller: {feller:.2f} < 1")
-
-            st.markdown("**Jumps**")
-            col1, col2 = st.columns(2)
-            with col1:
-                params['bates_lambda'] = st.number_input(
-                    "λ", min_value=0.0, max_value=5.0,
-                    value=0.5, step=0.1, format="%.2f", key=f"{key_prefix}_b_lambda"
-                )
-                params['bates_mu_j'] = st.number_input(
-                    "μⱼ", min_value=-0.5, max_value=0.5,
-                    value=-0.1, step=0.01, format="%.3f", key=f"{key_prefix}_b_mu_j"
-                )
-            with col2:
-                params['bates_sigma_j'] = st.number_input(
-                    "σⱼ", min_value=0.01, max_value=0.5,
-                    value=0.2, step=0.01, format="%.2f", key=f"{key_prefix}_b_sigma_j"
-                )
-
-    elif price_model == "sabr":
-        with st.expander("SABR Parameters", expanded=True):
-            params['sabr_beta'] = st.slider(
-                "β (CEV)", 0.0, 1.0, 0.5, 0.1, key=f"{key_prefix}_s_beta",
-                help="0=Normal, 1=Lognormal"
-            )
-            col1, col2 = st.columns(2)
-            with col1:
-                params['sabr_nu'] = st.number_input(
-                    "ν (Vol of Vol)", min_value=0.01, max_value=1.0,
-                    value=0.4, step=0.05, format="%.2f", key=f"{key_prefix}_s_nu"
-                )
-            with col2:
-                params['sabr_rho'] = st.slider(
-                    "ρ", -0.99, 0.99, -0.3, 0.01, key=f"{key_prefix}_s_rho"
-                )
-            if abs(params['sabr_rho']) > 0.95:
-                st.info("ℹ️ Extreme correlation may cause numerical instability")
-
-    return params
-
-
-def render_volatility_model_config(base_volatility: float, key_prefix: str) -> dict:
-    """Render volatility model configuration with unique keys."""
-    params = {}
-
-    st.markdown("### 🔬 Volatility Model")
-
-    vol_model = st.selectbox(
-        "Select Model",
-        options=list(VOLATILITY_MODELS.keys()),
-        format_func=lambda x: VOLATILITY_MODELS[x],
-        key=f"{key_prefix}_vol_model_select"
-    )
-    params['vol_model'] = vol_model
-
-    with st.expander(f"{VOLATILITY_MODELS[vol_model]} Parameters", expanded=True):
-        col1, col2 = st.columns(2)
+        # Summary metrics
+        col1, col2, col3, col4 = st.columns(4)
         with col1:
-            params['garch_alpha'] = st.number_input(
-                "α (ARCH)", min_value=0.001, max_value=0.5,
-                value=0.05, step=0.01, format="%.3f", key=f"{key_prefix}_g_alpha"
+            st.markdown(metric_card_html(
+                "Model",
+                MODEL_NAMES.get(sim_model, sim_model)
+            ), unsafe_allow_html=True)
+        with col2:
+            st.markdown(metric_card_html(
+                "Paths",
+                f"{int(sim_params.get('n_paths', 10000)):,}"
+            ), unsafe_allow_html=True)
+        with col3:
+            st.markdown(metric_card_html(
+                "Steps",
+                f"{int(sim_params.get('n_steps', 252)):,}"
+            ), unsafe_allow_html=True)
+        with col4:
+            st.markdown(metric_card_html(
+                "Time",
+                f"{exec_time*1000:.0f} ms"
+            ), unsafe_allow_html=True)
+
+        st.markdown("---")
+
+        # Visualization controls
+        with st.expander("🎨 Visualization Options", expanded=False):
+            viz_opts = render_path_controls()
+
+        # Unified paths chart
+        render_unified_paths(
+            result=result,
+            model_key=sim_model,
+            params=sim_params,
+            n_sample_paths=viz_opts.get("n_sample_paths", 100),
+            show_percentiles=viz_opts.get("show_percentiles", True),
+            show_mean=viz_opts.get("show_mean", True),
+        )
+
+        # Results summary
+        render_results_summary(result, sim_model, sim_params)
+
+        # Detailed tabs
+        detail_tabs = st.tabs(["📊 Distribution", "📋 Statistics", "📐 Percentiles"])
+
+        with detail_tabs[0]:
+            render_distributions_tab(
+                simulation_result=result,
+                params=sim_params,
+                result_type="price"
+            )
+
+        with detail_tabs[1]:
+            render_statistics_tab(
+                simulation_result=result,
+                params=sim_params,
+                result_type="price"
+            )
+
+        with detail_tabs[2]:
+            render_percentile_table(result)
+
+
+# =============================================================================
+# TAB 2: PRICING COMPARISON
+# =============================================================================
+
+with tab_pricing:
+    result = st.session_state.get("simulation_result")
+
+    if result is None:
+        st.info("👈 Run a simulation first to compare pricing methods")
+        render_convergence_guide()
+    else:
+        sim_model = st.session_state.get("simulation_model", model_key)
+        sim_params = st.session_state.get("simulation_params", all_params)
+
+        # Available methods
+        available_methods = get_available_pricing_methods(sim_model)
+        st.caption(f"Available methods for {MODEL_NAMES.get(sim_model, sim_model)}: {', '.join(m.upper() for m in available_methods)}")
+
+        # Single strike comparison
+        st.subheader("Single Strike Comparison")
+
+        # Option configuration with option_pricer style
+        st.markdown("""
+        <div style="background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%); border: 1px solid #e2e8f0; border-radius: 10px; padding: 1rem; margin-bottom: 1rem;">
+            <div style="font-size: 0.75rem; font-weight: 700; color: #475569; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.75rem;">
+                📜 Option Configuration
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            strike = st.number_input(
+                "Strike ($)",
+                value=sim_params.get("strike", 100.0),
+                min_value=1.0,
+                step=1.0,
+                format="%.2f",
+                key="pricing_strike"
             )
         with col2:
-            params['garch_beta'] = st.number_input(
-                "β (GARCH)", min_value=0.0, max_value=0.99,
-                value=0.90, step=0.01, format="%.3f", key=f"{key_prefix}_g_beta"
-            )
+            is_call = st.selectbox(
+                "Type",
+                options=["call", "put"],
+                format_func=lambda x: f"{'📈' if x == 'call' else '📉'} {x.upper()}",
+                key="pricing_type"
+            ) == "call"
+        with col3:
+            time_to_mat = sim_params.get("time_horizon", 1.0)
+            st.metric("Maturity", f"{time_to_mat:.2f} years")
 
-        if vol_model == "ngarch":
-            params['ngarch_theta'] = st.number_input(
-                "θ (Leverage)", min_value=0.0, max_value=2.0,
-                value=0.5, step=0.1, format="%.2f", key=f"{key_prefix}_ng_theta"
-            )
-            persistence = params['garch_alpha'] * (1 + params['ngarch_theta'] ** 2) + params['garch_beta']
-            if persistence >= 1:
-                st.error(f"Non-stationary: {persistence:.3f} ≥ 1")
-            else:
-                st.success(f"Stationary: {persistence:.3f}")
+        # Run pricing comparison
+        if st.button("Compare Pricing", key="compare_pricing_btn"):
+            with st.spinner("Computing prices..."):
+                comparison = compare_pricing(
+                    model_key=sim_model,
+                    params=sim_params,
+                    terminal_prices=result.terminal_prices,
+                    strike=strike,
+                    time_to_maturity=time_to_mat,
+                    spot=sim_params.get("spot", 100.0),
+                    risk_free_rate=sim_params.get("risk_free_rate", 0.05),
+                    is_call=is_call
+                )
+                st.session_state.pricing_comparison = comparison
 
-        elif vol_model == "gjr_garch":
-            params['gjr_gamma'] = st.number_input(
-                "γ (Asymmetry)", min_value=0.0, max_value=0.3,
-                value=0.05, step=0.01, format="%.3f", key=f"{key_prefix}_gjr_gamma"
-            )
-            persistence = params['garch_alpha'] + params['garch_beta'] + 0.5 * params['gjr_gamma']
-            if persistence >= 1:
-                st.error(f"Non-stationary: {persistence:.3f} ≥ 1")
-            else:
-                st.success(f"Stationary: {persistence:.3f}")
+        comparison = st.session_state.get("pricing_comparison")
+        if comparison:
+            render_pricing_comparison(comparison)
+            render_single_price_comparison(comparison)
 
-        elif vol_model == "egarch":
-            params['egarch_gamma'] = st.number_input(
-                "γ (Asymmetry)", min_value=-0.5, max_value=0.5,
-                value=-0.1, step=0.01, format="%.3f", key=f"{key_prefix}_eg_gamma"
-            )
-            if abs(params['garch_beta']) >= 1:
-                st.error(f"Non-stationary: |β| ≥ 1")
-            else:
-                st.success(f"Stationary: |β| = {abs(params['garch_beta']):.3f}")
-
-        else:  # Standard GARCH
-            persistence = params['garch_alpha'] + params['garch_beta']
-            if persistence >= 1:
-                st.error(f"Non-stationary: {persistence:.3f} ≥ 1")
-            else:
-                st.success(f"Stationary: {persistence:.3f}")
-
-        # Compute omega
-        alpha_beta = params['garch_alpha'] + params['garch_beta']
-        if alpha_beta < 1:
-            params['garch_omega'] = base_volatility ** 2 * (1 - alpha_beta)
-
-    return params
-
-
-def render_strategy_builder_sidebar(
-    spot_price: float,
-    risk_free_rate: float,
-    time_horizon: float,
-    volatility: float
-) -> dict:
-    """Render strategy builder in sidebar."""
-    from components.strategy_builder import (
-        render_strategy_builder,
-        export_positions_for_pnl_engine
-    )
-
-    st.markdown("### 🎯 Option Strategy")
-
-    def bs_price(s, k, r, t, sigma, opt_type):
-        if opt_type == 'call':
-            return black_scholes_call_price(s, k, t, r, sigma)
-        else:
-            return black_scholes_put_price(s, k, t, r, sigma)
-
-    positions, stock_position = render_strategy_builder(
-        spot_price=spot_price,
-        risk_free_rate=risk_free_rate,
-        time_to_expiry=time_horizon,
-        volatility=volatility,
-        bs_price_function=bs_price
-    )
-
-    position_arrays = export_positions_for_pnl_engine(positions, stock_position)
-
-    return {
-        'option_positions': positions,
-        'stock_position': stock_position,
-        'position_arrays': position_arrays
-    }
-
-
-def render_visualization_options(key_prefix: str) -> dict:
-    """Render visualization options with unique keys."""
-    st.markdown("### 🎨 Visualization")
-
-    show_percentiles = st.checkbox("Percentile bands", value=True, key=f"{key_prefix}_viz_percentiles")
-    show_mean = st.checkbox("Mean path", value=True, key=f"{key_prefix}_viz_mean")
-    max_display = st.slider("Max paths", 10, 200, 50, 10, key=f"{key_prefix}_viz_max_paths")
-
-    return {
-        'show_percentiles': show_percentiles,
-        'show_mean': show_mean,
-        'max_display_paths': max_display
-    }
-
-
-# =============================================================================
-# SIDEBAR - COMMON FOR BOTH TABS (rendered once)
-# =============================================================================
-
-with st.sidebar:
-    # Market parameters with expected return
-    market_params = render_market_params("price", include_expected_return=True)
-
-    # Simulation settings
-    sim_params = render_simulation_settings("sim")
-
-    # Price model configuration
-    price_model_params = render_price_model_config(market_params['volatility'], "price")
-
-    # Strategy builder
-    strategy_params = render_strategy_builder_sidebar(
-        market_params['spot_price'],
-        market_params['risk_free_rate'],
-        market_params['time_horizon'],
-        market_params['volatility']
-    )
-
-    st.markdown("---")
-
-    # Volatility model configuration
-    vol_model_params = render_volatility_model_config(market_params['volatility'], "vol")
-
-    st.markdown("---")
-
-    # Visualization options
-    viz_params = render_visualization_options("viz")
-
-    # Combine params for price tab
-    price_params = {
-        **market_params,
-        **sim_params,
-        **price_model_params,
-        **strategy_params,
-        **viz_params
-    }
-    st.session_state.price_params = price_params
-
-    # Combine params for volatility tab
-    vol_params = {
-        **market_params,
-        **sim_params,
-        **vol_model_params,
-        **viz_params
-    }
-    st.session_state.vol_params = vol_params
-
-    check_params_changed(price_params)
-
-
-# =============================================================================
-# PRICE & OPTION P&L TAB
-# =============================================================================
-
-with tab_price:
-    params = st.session_state.get('price_params', {})
-
-    # Check for stale results
-    price_result = st.session_state.get('price_result')
-    is_stale = price_result is not None and are_results_stale('price')
-
-    if is_stale:
-        st.markdown(stale_results_warning_html(), unsafe_allow_html=True)
-
-    # Run button
-    col1, col2, col3 = st.columns([1, 2, 1])
-    with col2:
-        run_sim = st.button(
-            "🚀 Run Simulation",
-            type="primary",
-            width="stretch",
-            key="run_price_pnl"
-        )
-
-    if run_sim:
-        with st.spinner('Running simulation...'):
-            try:
-                result = run_price_simulation(params)
-                st.session_state.price_result = result
-                mark_results_current('price')
-                price_result = result
-
-                # Also calculate P&L if strategy is defined
-                pnl_result = calculate_pnl_from_paths(result, params)
-                if pnl_result is not None:
-                    st.session_state.pnl_result = pnl_result
-                    mark_results_current('pnl')
-
-                st.success(f"Simulation completed in {result.computation_time*1000:.1f} ms")
-            except Exception as e:
-                st.error(f"Simulation error: {str(e)}")
-                st.exception(e)
-
-    if price_result is not None:
-        # Summary metrics with styled cards
         st.markdown("---")
-        mc1, mc2, mc3, mc4 = st.columns(4)
-        with mc1:
-            st.markdown(metric_card_html(
-                "Model",
-                PRICE_MODELS.get(params.get('price_model', 'gbm'), 'GBM')
-            ), unsafe_allow_html=True)
-        with mc2:
-            st.markdown(metric_card_html(
-                "Paths",
-                f"{price_result.num_paths:,}"
-            ), unsafe_allow_html=True)
-        with mc3:
-            st.markdown(metric_card_html(
-                "Steps",
-                f"{price_result.num_steps:,}"
-            ), unsafe_allow_html=True)
-        with mc4:
-            st.markdown(metric_card_html(
-                "Computation Time",
-                f"{price_result.computation_time*1000:.1f} ms"
-            ), unsafe_allow_html=True)
 
-        # Check if we have option positions for P&L tab
-        has_positions = len(params.get('option_positions', [])) > 0
-        pnl_result = st.session_state.get('pnl_result')
+        # Multi-strike comparison
+        st.subheader("Multi-Strike Analysis")
 
-        show_variance = params.get('price_model') in ['heston', 'sabr', 'bates']
+        col1, col2 = st.columns(2)
+        with col1:
+            strike_min = st.number_input("Min Strike", value=80.0, key="strike_min")
+        with col2:
+            strike_max = st.number_input("Max Strike", value=120.0, key="strike_max")
 
-        # Sub-tabs based on whether we have P&L data
-        if has_positions and pnl_result is not None:
-            sub_tabs = st.tabs([
-                "🎛️ Interactive",
-                "📈 Price Paths",
-                "📊 Distribution",
-                "📋 Statistics",
-                "💰 P&L Distribution",
-                "📋 Risk Metrics",
-                "🎯 Scenarios"
-            ])
+        n_strikes = st.slider("Number of Strikes", 5, 20, 11, key="n_strikes")
 
-            with sub_tabs[0]:
-                render_interactive_path_tab(params=params, key_prefix="price_pnl")
+        if st.button("Run Multi-Strike Analysis", key="multi_strike_btn"):
+            strikes = np.linspace(strike_min, strike_max, n_strikes)
 
-            with sub_tabs[1]:
-                render_price_paths_tab(
-                    simulation_result=price_result,
-                    params=params,
-                    show_variance_paths=show_variance
+            with st.spinner("Computing prices across strikes..."):
+                multi_result = price_multiple_strikes(
+                    model_key=sim_model,
+                    params=sim_params,
+                    simulation_result=result,
+                    strikes=strikes,
+                    time_to_maturity=time_to_mat,
+                    spot=sim_params.get("spot", 100.0),
+                    risk_free_rate=sim_params.get("risk_free_rate", 0.05),
+                    is_call=is_call
                 )
+                st.session_state.multi_strike_result = multi_result
 
-            with sub_tabs[2]:
-                render_distributions_tab(
-                    simulation_result=price_result,
-                    params=params,
-                    result_type="price"
-                )
+        multi_result = st.session_state.get("multi_strike_result")
+        if multi_result:
+            render_pricing_comparison_chart(
+                strikes=multi_result["strikes"],
+                mc_prices=multi_result["mc_prices"],
+                mc_errors=multi_result["mc_errors"],
+                analytical_prices=multi_result.get("analytical_prices"),
+                fft_prices=multi_result.get("fft_prices"),
+                spot=sim_params.get("spot", 100.0),
+                is_call=is_call
+            )
 
-            with sub_tabs[3]:
-                render_statistics_tab(
-                    simulation_result=price_result,
-                    params=params,
-                    result_type="price"
-                )
+        # Convergence guide
+        with st.expander("📚 Understanding MC Convergence"):
+            render_convergence_guide()
 
-            with sub_tabs[4]:
-                render_pnl_distribution_tab(
-                    pnl_values=pnl_result['pnl_values'],
-                    risk_metrics=pnl_result['risk_metrics'],
-                    params=params
-                )
 
-            with sub_tabs[5]:
-                render_risk_metrics_tab(
-                    metrics=pnl_result['risk_metrics'],
-                    params=params
-                )
+# =============================================================================
+# TAB 3: OPTION P&L
+# =============================================================================
 
-            with sub_tabs[6]:
-                render_scenario_analysis_tab(
-                    terminal_prices=pnl_result['terminal_prices'],
-                    pnl_values=pnl_result['pnl_values'],
-                    position_arrays=params.get('position_arrays', {}),
-                    risk_metrics=pnl_result['risk_metrics'],
-                    params=params
-                )
+with tab_pnl:
+    result = st.session_state.get("simulation_result")
+
+    if result is None:
+        st.info("👈 Run a simulation first to analyze option P&L")
+    else:
+        sim_model = st.session_state.get("simulation_model", model_key)
+        sim_params = st.session_state.get("simulation_params", all_params)
+
+        st.subheader("Option P&L Analysis")
+
+        # Option configuration
+        col1, col2, col3, col4 = st.columns(4)
+
+        with col1:
+            strike = st.number_input(
+                "Strike Price",
+                value=sim_params.get("strike", 100.0),
+                min_value=1.0,
+                key="pnl_strike"
+            )
+
+        with col2:
+            is_call = st.selectbox(
+                "Option Type",
+                options=["call", "put"],
+                format_func=lambda x: f"{'📈' if x == 'call' else '📉'} {x.upper()}",
+                key="pnl_type"
+            ) == "call"
+
+        with col3:
+            is_long = st.selectbox(
+                "Position",
+                options=["long", "short"],
+                format_func=lambda x: f"{'🟢' if x == 'long' else '🔴'} {x.upper()}",
+                key="pnl_position"
+            ) == "long"
+
+        with col4:
+            quantity = st.number_input(
+                "Contracts",
+                value=1,
+                min_value=1,
+                max_value=1000,
+                key="pnl_quantity"
+            )
+
+        # Premium calculation
+        spot = sim_params.get("spot", 100.0)
+        rate = sim_params.get("risk_free_rate", 0.05)
+        time_to_mat = sim_params.get("time_horizon", 1.0)
+
+        # Get volatility for BS pricing
+        char = get_model_characteristics(sim_model)
+        if char["volatility_type"] == "constant":
+            vol = sim_params.get("sigma", 0.20)
         else:
-            # No P&L - just price tabs
-            sub_tabs = st.tabs([
-                "🎛️ Interactive",
-                "📈 Price Paths",
-                "📊 Distribution",
-                "📋 Statistics"
-            ])
+            vol = np.sqrt(sim_params.get("v0", 0.04)) if "v0" in sim_params else sim_params.get("sigma0", 0.20)
 
-            with sub_tabs[0]:
-                render_interactive_path_tab(params=params, key_prefix="price_only")
+        # Calculate premium
+        if is_call:
+            premium = black_scholes_call_price(spot, strike, time_to_mat, rate, vol)
+        else:
+            premium = black_scholes_put_price(spot, strike, time_to_mat, rate, vol)
 
-            with sub_tabs[1]:
-                render_price_paths_tab(
-                    simulation_result=price_result,
-                    params=params,
-                    show_variance_paths=show_variance
-                )
+        st.metric("Option Premium (BS)", f"${premium:.2f}")
 
-            with sub_tabs[2]:
-                render_distributions_tab(
-                    simulation_result=price_result,
-                    params=params,
-                    result_type="price"
-                )
-
-            with sub_tabs[3]:
-                render_statistics_tab(
-                    simulation_result=price_result,
-                    params=params,
-                    result_type="price"
-                )
-
-            if has_positions:
-                st.info("💡 Option strategy defined. Run simulation to see P&L analysis.")
-    else:
-        st.info("Configure parameters in the sidebar and click **Run Simulation**.")
-
-        # Show strategy summary if defined
-        positions = params.get('option_positions', [])
-        if len(positions) > 0:
-            from streamlit_app.option_pricer.config.constants import CONTRACT_MULTIPLIER
-
-            total_net = 0.0
-            for pos in positions:
-                cost = pos.premium * pos.quantity * CONTRACT_MULTIPLIER
-                if pos.position_type == 'long':
-                    total_net -= cost
-                else:
-                    total_net += cost
-
-            st.markdown(
-                f"**Strategy configured:** {len(positions)} leg(s) | "
-                f"Net: {'+'if total_net >= 0 else ''}${total_net:,.0f}"
+        if st.button("Calculate P&L", key="calc_pnl_btn"):
+            pnl = compute_option_pnl(
+                price_paths=result.price_paths,
+                strike=strike,
+                premium=premium,
+                is_call=is_call,
+                is_long=is_long,
+                quantity=quantity
             )
+            st.session_state.pnl_result = pnl
+
+        pnl = st.session_state.get("pnl_result")
+        if pnl is not None:
+            st.markdown("---")
+
+            # P&L Statistics
+            col1, col2, col3, col4 = st.columns(4)
+
+            with col1:
+                st.metric("Mean P&L", f"${np.mean(pnl):,.2f}")
+            with col2:
+                st.metric("Median P&L", f"${np.median(pnl):,.2f}")
+            with col3:
+                st.metric("Max P&L", f"${np.max(pnl):,.2f}")
+            with col4:
+                st.metric("Min P&L", f"${np.min(pnl):,.2f}")
+
+            # P&L Distribution
+            import plotly.graph_objects as go
+
+            fig = go.Figure()
+            fig.add_trace(go.Histogram(
+                x=pnl,
+                nbinsx=50,
+                marker_color="rgba(31, 119, 180, 0.7)",
+                name="P&L"
+            ))
+            fig.add_vline(x=0, line_dash="dash", line_color="red")
+            fig.add_vline(x=np.mean(pnl), line_dash="solid", line_color="green",
+                         annotation_text=f"Mean: ${np.mean(pnl):.2f}")
+
+            fig.update_layout(
+                title="<b>P&L Distribution</b>",
+                xaxis_title="P&L ($)",
+                yaxis_title="Count",
+                height=400
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+            # Risk metrics
+            with st.expander("📊 Risk Metrics", expanded=True):
+                col1, col2 = st.columns(2)
+
+                with col1:
+                    st.markdown("**Value at Risk**")
+                    var_95 = np.percentile(pnl, 5)
+                    var_99 = np.percentile(pnl, 1)
+                    st.metric("VaR 95%", f"${var_95:,.2f}")
+                    st.metric("VaR 99%", f"${var_99:,.2f}")
+
+                with col2:
+                    st.markdown("**Additional Stats**")
+                    win_rate = np.mean(pnl > 0) * 100
+                    st.metric("Win Rate", f"{win_rate:.1f}%")
+                    st.metric("Std Dev", f"${np.std(pnl):,.2f}")
 
 
 # =============================================================================
-# VOLATILITY PATHS TAB
+# TAB 4: EDUCATION
 # =============================================================================
 
-with tab_volatility:
-    vol_params = st.session_state.get('vol_params', {})
+with tab_edu:
+    st.subheader("📚 Model Education")
 
-    # Check for stale results
-    vol_result = st.session_state.get('vol_result')
-    is_stale = vol_result is not None and are_results_stale('volatility')
+    # Model selector for education
+    edu_model = st.selectbox(
+        "Select Model to Learn About",
+        options=MODEL_DISPLAY_ORDER,
+        format_func=lambda x: f"{MODEL_REGISTRY[x].short_name} - {MODEL_REGISTRY[x].name}",
+        key="edu_model_select"
+    )
 
-    if is_stale:
-        st.markdown(stale_results_warning_html(), unsafe_allow_html=True)
+    model_spec = get_model(edu_model)
 
-    # Run button
-    col1, col2, col3 = st.columns([1, 2, 1])
-    with col2:
-        run_vol = st.button(
-            "🚀 Run Volatility Simulation",
-            type="primary",
-            width="stretch",
-            key="run_vol"
-        )
-
-    if run_vol:
-        with st.spinner('Running volatility simulation...'):
-            try:
-                result = run_volatility_simulation(vol_params)
-                st.session_state.vol_result = result
-                mark_results_current('volatility')
-                vol_result = result
-                st.success(f"Simulation completed in {result.computation_time*1000:.1f} ms")
-            except Exception as e:
-                st.error(f"Simulation error: {str(e)}")
-                st.exception(e)
-
-    if vol_result is not None:
-        # Summary metrics with styled cards
-        st.markdown("---")
-        mc1, mc2, mc3, mc4 = st.columns(4)
-        with mc1:
-            st.markdown(metric_card_html(
-                "Model",
-                VOLATILITY_MODELS.get(vol_params.get('vol_model', 'garch'), 'GARCH')
-            ), unsafe_allow_html=True)
-        with mc2:
-            st.markdown(metric_card_html(
-                "Paths",
-                f"{vol_result.num_paths:,}"
-            ), unsafe_allow_html=True)
-        with mc3:
-            st.markdown(metric_card_html(
-                "Steps",
-                f"{vol_result.num_steps:,}"
-            ), unsafe_allow_html=True)
-        with mc4:
-            st.markdown(metric_card_html(
-                "Computation Time",
-                f"{vol_result.computation_time*1000:.1f} ms"
-            ), unsafe_allow_html=True)
-
-        sub_tabs = st.tabs([
-            "🎛️ Interactive",
-            "📈 Volatility Paths",
-            "📊 Distribution",
-            "📋 Statistics"
-        ])
-
-        with sub_tabs[0]:
-            render_interactive_path_tab(params=vol_params, key_prefix="vol")
-
-        with sub_tabs[1]:
-            render_volatility_paths_tab(
-                simulation_result=vol_result,
-                params=vol_params
-            )
-
-        with sub_tabs[2]:
-            render_distributions_tab(
-                simulation_result=vol_result,
-                params=vol_params,
-                result_type="volatility"
-            )
-
-        with sub_tabs[3]:
-            render_statistics_tab(
-                simulation_result=vol_result,
-                params=vol_params,
-                result_type="volatility"
-            )
-    else:
-        st.info("Configure parameters in the sidebar and click **Run Volatility Simulation**.")
-
-
-# =============================================================================
-# MODEL EQUATIONS (Expander)
-# =============================================================================
-
-with st.expander("ℹ️ Model Equations", expanded=False):
-    col1, col2 = st.columns(2)
+    # Model overview
+    col1, col2 = st.columns([2, 1])
 
     with col1:
-        st.markdown("### Price Models")
+        st.markdown(f"### {model_spec.name}")
+        st.markdown(model_spec.description)
 
-        st.markdown("**GBM**")
-        st.latex(r"dS_t = \mu S_t dt + \sigma S_t dW_t")
+        # Equations
+        st.markdown("#### Model Equations")
+        st.latex(model_spec.equation_main)
 
-        st.markdown("**Heston**")
-        st.latex(r"dS_t = \mu S_t dt + \sqrt{v_t} S_t dW_t^{(1)}")
-        st.latex(r"dv_t = \kappa(\theta - v_t)dt + \xi\sqrt{v_t}dW_t^{(2)}")
+        if model_spec.equation_vol:
+            st.markdown("*Volatility dynamics:*")
+            st.latex(model_spec.equation_vol)
 
-        st.markdown("**Merton Jump-Diffusion**")
-        st.latex(r"dS_t = (\mu - \lambda\bar{k})S_t dt + \sigma S_t dW_t + S_t dJ_t")
-
-        st.markdown("**Bates**")
-        st.latex(r"dS_t = (\mu - \lambda\bar{k})S_t dt + \sqrt{v_t} S_t dW_t^{(1)} + S_t dJ_t")
-        st.latex(r"dv_t = \kappa(\theta - v_t)dt + \xi\sqrt{v_t}dW_t^{(2)}")
-
-        st.markdown("**SABR**")
-        st.latex(r"dF_t = \sigma_t F_t^\beta dW_t^{(1)}")
-        st.latex(r"d\sigma_t = \nu \sigma_t dW_t^{(2)}")
+        if model_spec.equation_jump:
+            st.markdown("*Jump distribution:*")
+            st.latex(model_spec.equation_jump)
 
     with col2:
-        st.markdown("### Volatility Models")
+        st.markdown("#### Characteristics")
 
-        st.markdown("**GARCH(1,1)**")
-        st.latex(r"\sigma_t^2 = \omega + \alpha \epsilon_{t-1}^2 + \beta \sigma_{t-1}^2")
+        # Feature badges
+        if model_spec.has_stochastic_vol:
+            st.success("✓ Stochastic Volatility")
+        else:
+            st.info("○ Constant Volatility")
 
-        st.markdown("**NGARCH**")
-        st.latex(r"\sigma_t^2 = \omega + \alpha(\epsilon_{t-1} - \theta\sigma_{t-1})^2 + \beta \sigma_{t-1}^2")
+        if model_spec.has_jumps:
+            st.success("✓ Jump Component")
+        else:
+            st.info("○ No Jumps")
 
-        st.markdown("**GJR-GARCH**")
-        st.latex(r"\sigma_t^2 = \omega + \alpha \epsilon_{t-1}^2 + \gamma \epsilon_{t-1}^2 \mathbf{1}_{(\epsilon<0)} + \beta \sigma_{t-1}^2")
+        st.markdown("**Pricing Methods:**")
+        for method in model_spec.pricing_methods:
+            if method == PricingMethod.ANALYTICAL:
+                st.markdown("- 🎯 Black-Scholes (Analytical)")
+            elif method == PricingMethod.FFT:
+                st.markdown("- 📊 FFT (Carr-Madan)")
+            elif method == PricingMethod.MONTE_CARLO:
+                st.markdown("- 🎲 Monte Carlo")
 
-        st.markdown("**EGARCH**")
-        st.latex(r"\ln(\sigma_t^2) = \omega + \alpha|z_{t-1}| + \gamma z_{t-1} + \beta \ln(\sigma_{t-1}^2)")
+    # Conditions
+    if model_spec.feller_condition or model_spec.stationarity_condition:
+        st.markdown("---")
+        st.markdown("#### Model Conditions")
+
+        if model_spec.feller_condition:
+            st.info(f"**Feller Condition:** ${model_spec.feller_condition}$\n\nEnsures variance stays positive in Heston-type models.")
+
+        if model_spec.stationarity_condition:
+            st.info(f"**Stationarity Condition:** ${model_spec.stationarity_condition}$\n\nEnsures volatility mean-reverts to long-run level.")
+
+    # Parameters
+    st.markdown("---")
+    st.markdown("#### Parameters")
+
+    import pandas as pd
+    param_data = []
+    for p in model_spec.parameters:
+        param_data.append({
+            "Parameter": p.display_name,
+            "Symbol": p.name,
+            "Default": p.default,
+            "Range": f"[{p.min_value}, {p.max_value}]",
+            "Description": p.description
+        })
+
+    if param_data:
+        st.dataframe(pd.DataFrame(param_data), use_container_width=True, hide_index=True)
+
+    # Model comparison
+    st.markdown("---")
+    st.markdown("#### All Models Comparison")
+    render_model_comparison_table()
 
 
 # =============================================================================

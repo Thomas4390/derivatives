@@ -28,6 +28,34 @@ from config.styles import (
 )
 
 
+def _get_terminal_values(result, result_type: str = "price"):
+    """Get terminal values with compatibility for old and new interfaces."""
+    if result_type == "price":
+        # Try new interface first, then old
+        if hasattr(result, 'terminal_prices'):
+            return result.terminal_prices
+        elif hasattr(result, 'terminal_values'):
+            return result.terminal_values
+        else:
+            raise AttributeError("Result has no terminal_prices or terminal_values")
+    else:
+        # Volatility
+        if hasattr(result, 'volatility_paths') and result.volatility_paths is not None:
+            return result.volatility_paths[:, -1] * 100
+        elif hasattr(result, 'terminal_volatility'):
+            return result.terminal_volatility * 100
+        else:
+            raise AttributeError("Result has no volatility data")
+
+
+def _get_param(params: Dict, *keys, default=None):
+    """Get parameter value with fallback for different naming conventions."""
+    for key in keys:
+        if key in params:
+            return params[key]
+    return default
+
+
 def render_distributions_tab(
     simulation_result,
     params: Dict[str, Any],
@@ -47,12 +75,12 @@ def render_distributions_tab(
 
     if result_type == "price":
         st.markdown("### Terminal Price Distribution")
-        terminal_values = simulation_result.terminal_values
+        terminal_values = _get_terminal_values(simulation_result, "price")
         value_name = "Price"
         unit = "$"
     else:
         st.markdown("### Terminal Volatility Distribution")
-        terminal_values = simulation_result.terminal_volatility * 100
+        terminal_values = _get_terminal_values(simulation_result, "volatility")
         value_name = "Volatility"
         unit = "%"
 
@@ -244,11 +272,11 @@ def _render_distribution_analysis(
 
 def _render_theoretical_comparison(values: np.ndarray, params: Dict[str, Any]) -> None:
     """Compare simulated distribution with theoretical (for price models)."""
-    model = params.get('price_model', 'gbm')
-    S0 = params['spot_price']
-    r = params['risk_free_rate']
-    sigma = params['volatility']
-    T = params['time_horizon']
+    model = _get_param(params, 'price_model', 'model', default='gbm')
+    S0 = _get_param(params, 'spot_price', 'spot', default=100.0)
+    r = _get_param(params, 'risk_free_rate', default=0.05)
+    sigma = _get_param(params, 'volatility', 'sigma', default=0.20)
+    T = _get_param(params, 'time_horizon', default=1.0)
 
     fig = go.Figure()
 
@@ -357,12 +385,12 @@ def _render_risk_metrics(
     st.markdown("#### Risk Metrics")
 
     if result_type == "price":
-        S0 = params['spot_price']
+        S0 = _get_param(params, 'spot_price', 'spot', default=100.0)
         # Returns for risk calculations
         returns = (values - S0) / S0
         log_returns = np.log(values / S0)
     else:
-        initial_vol = params['volatility'] * 100
+        initial_vol = _get_param(params, 'volatility', 'sigma', 'sigma0', default=0.20) * 100
         returns = (values - initial_vol) / initial_vol
         log_returns = returns
 
@@ -450,7 +478,8 @@ def _render_risk_metrics(
         variants.append("amber")
 
     if returns.std() > 0:
-        sharpe = returns.mean() / returns.std() * np.sqrt(252 / params['num_steps'])
+        n_steps = _get_param(params, 'num_steps', 'n_steps', default=252)
+        sharpe = returns.mean() / returns.std() * np.sqrt(252 / n_steps)
         sharpe_variant = "green" if sharpe > 0 else "red"
         additional_stats.append(("Return/Risk Ratio", f"{sharpe:.3f}", "Annualized"))
         variants.append(sharpe_variant)
