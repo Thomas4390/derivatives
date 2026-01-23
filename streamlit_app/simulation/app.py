@@ -328,17 +328,41 @@ with tab_pricing:
         # Single strike comparison
         st.subheader("Single Strike Comparison")
 
+        # Get current values for styling
+        pricing_type_val = st.session_state.get("pricing_type", "call")
+        is_call_display = pricing_type_val == "call"
+
+        # Dynamic styling based on option type
+        border_color = "#10b981" if is_call_display else "#ef4444"
+        bg_gradient = "linear-gradient(135deg, #f0fdf4 0%, #ecfdf5 100%)" if is_call_display else "linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%)"
+        type_badge_bg = "#d1fae5" if is_call_display else "#fee2e2"
+        type_badge_color = "#047857" if is_call_display else "#b91c1c"
+        type_label = "CALL" if is_call_display else "PUT"
+
         # Option configuration with option_pricer style
-        st.markdown("""
-        <div style="background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%); border: 1px solid #e2e8f0; border-radius: 10px; padding: 1rem; margin-bottom: 1rem;">
-            <div style="font-size: 0.75rem; font-weight: 700; color: #475569; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.75rem;">
-                📜 Option Configuration
+        st.markdown(f"""
+        <div style="background: {bg_gradient}; border: 1px solid {border_color}40; border-left: 4px solid {border_color}; border-radius: 8px; padding: 0.75rem; margin-bottom: 0.625rem;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <div style="display: flex; align-items: center; gap: 0.5rem;">
+                    <span style="font-size: 1rem;">📜</span>
+                    <span style="font-size: 0.7rem; font-weight: 700; color: #475569; text-transform: uppercase;">Option Configuration</span>
+                </div>
+                <span style="background: {type_badge_bg}; color: {type_badge_color}; font-size: 0.65rem; font-weight: 700; padding: 0.2rem 0.5rem; border-radius: 4px; text-transform: uppercase;">{type_label}</span>
             </div>
         </div>
         """, unsafe_allow_html=True)
 
-        col1, col2, col3 = st.columns(3)
+        col1, col2 = st.columns(2)
         with col1:
+            option_type = st.selectbox(
+                "Type",
+                options=["call", "put"],
+                format_func=lambda x: f"{'📈' if x == 'call' else '📉'} {x.upper()}",
+                key="pricing_type"
+            )
+            is_call = option_type == "call"
+
+        with col2:
             strike = st.number_input(
                 "Strike ($)",
                 value=sim_params.get("strike", 100.0),
@@ -347,16 +371,33 @@ with tab_pricing:
                 format="%.2f",
                 key="pricing_strike"
             )
-        with col2:
-            is_call = st.selectbox(
-                "Type",
-                options=["call", "put"],
-                format_func=lambda x: f"{'📈' if x == 'call' else '📉'} {x.upper()}",
-                key="pricing_type"
-            ) == "call"
-        with col3:
-            time_to_mat = sim_params.get("time_horizon", 1.0)
-            st.metric("Maturity", f"{time_to_mat:.2f} years")
+
+        time_to_mat = sim_params.get("time_horizon", 1.0)
+
+        # Premium display styled like option_pricer
+        spot = sim_params.get("spot", 100.0)
+        rate = sim_params.get("risk_free_rate", 0.05)
+        char = get_model_characteristics(sim_model)
+        if char["volatility_type"] == "constant":
+            vol = sim_params.get("sigma", 0.20)
+        else:
+            vol = np.sqrt(sim_params.get("v0", 0.04)) if "v0" in sim_params else sim_params.get("sigma0", 0.20)
+
+        if is_call:
+            premium = black_scholes_call_price(spot, strike, time_to_mat, rate, vol)
+        else:
+            premium = black_scholes_put_price(spot, strike, time_to_mat, rate, vol)
+
+        st.markdown(f"""
+        <div style="display: flex; justify-content: space-between; align-items: center; padding: 0.5rem 0.75rem; background: #ffffff; border-radius: 6px; border: 1px solid #e2e8f0; margin-bottom: 0.5rem;">
+            <span style="color: #64748b; font-size: 0.8rem;">
+                Premium (BS): <span style="font-family: 'JetBrains Mono', monospace; font-weight: 500;">${premium:.2f}</span>
+            </span>
+            <span style="color: #64748b; font-size: 0.8rem;">
+                Maturity: <span style="font-family: 'JetBrains Mono', monospace; font-weight: 500;">{time_to_mat:.2f}y</span>
+            </span>
+        </div>
+        """, unsafe_allow_html=True)
 
         # Run pricing comparison
         if st.button("Compare Pricing", key="compare_pricing_btn"):
@@ -439,32 +480,64 @@ with tab_pnl:
 
         st.subheader("Option P&L Analysis")
 
-        # Option configuration
-        col1, col2, col3, col4 = st.columns(4)
+        # Get current values for styling
+        pnl_type_val = st.session_state.get("pnl_type", "call")
+        pnl_position_val = st.session_state.get("pnl_position", "long")
+        is_call_display = pnl_type_val == "call"
+        is_long_display = pnl_position_val == "long"
+
+        # Dynamic styling based on position (long = green, short = red)
+        border_color = "#10b981" if is_long_display else "#ef4444"
+        bg_gradient = "linear-gradient(135deg, #f0fdf4 0%, #ecfdf5 100%)" if is_long_display else "linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%)"
+        position_badge_bg = "#d1fae5" if is_long_display else "#fee2e2"
+        position_badge_color = "#047857" if is_long_display else "#b91c1c"
+
+        # Option configuration styled container
+        st.markdown(f"""
+        <div style="background: {bg_gradient}; border: 1px solid {border_color}40; border-left: 4px solid {border_color}; border-radius: 8px; padding: 0.75rem; margin-bottom: 0.625rem;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <div style="display: flex; align-items: center; gap: 0.5rem;">
+                    <span style="font-size: 1rem;">💰</span>
+                    <span style="font-size: 0.7rem; font-weight: 700; color: #475569; text-transform: uppercase;">P&L Configuration</span>
+                </div>
+                <span style="background: {position_badge_bg}; color: {position_badge_color}; font-size: 0.65rem; font-weight: 700; padding: 0.2rem 0.5rem; border-radius: 4px; text-transform: uppercase;">{pnl_position_val.upper()}</span>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        # Row 1: Type and Direction
+        col1, col2 = st.columns(2)
 
         with col1:
-            strike = st.number_input(
-                "Strike Price",
-                value=sim_params.get("strike", 100.0),
-                min_value=1.0,
-                key="pnl_strike"
-            )
-
-        with col2:
-            is_call = st.selectbox(
-                "Option Type",
+            option_type = st.selectbox(
+                "Type",
                 options=["call", "put"],
                 format_func=lambda x: f"{'📈' if x == 'call' else '📉'} {x.upper()}",
                 key="pnl_type"
-            ) == "call"
+            )
+            is_call = option_type == "call"
 
-        with col3:
-            is_long = st.selectbox(
-                "Position",
+        with col2:
+            position_type = st.selectbox(
+                "Direction",
                 options=["long", "short"],
                 format_func=lambda x: f"{'🟢' if x == 'long' else '🔴'} {x.upper()}",
                 key="pnl_position"
-            ) == "long"
+            )
+            is_long = position_type == "long"
+
+        # Row 2: Strike and Contracts
+        col3, col4 = st.columns(2)
+
+        with col3:
+            strike = st.number_input(
+                "Strike ($)",
+                value=sim_params.get("strike", 100.0),
+                min_value=1.0,
+                step=1.0,
+                format="%.2f",
+                key="pnl_strike"
+            )
 
         with col4:
             quantity = st.number_input(
@@ -472,6 +545,7 @@ with tab_pnl:
                 value=1,
                 min_value=1,
                 max_value=1000,
+                step=1,
                 key="pnl_quantity"
             )
 
@@ -493,7 +567,22 @@ with tab_pnl:
         else:
             premium = black_scholes_put_price(spot, strike, time_to_mat, rate, vol)
 
-        st.metric("Option Premium (BS)", f"${premium:.2f}")
+        total_cost = premium * quantity * 100  # 100 shares per contract
+        cost_color = "#dc2626" if is_long else "#059669"
+        cost_prefix = "-" if is_long else "+"
+        cost_label = "Debit" if is_long else "Credit"
+
+        # Premium display styled like option_pricer
+        st.markdown(f"""
+        <div style="display: flex; justify-content: space-between; align-items: center; padding: 0.5rem 0.75rem; background: #ffffff; border-radius: 6px; border: 1px solid #e2e8f0; margin-bottom: 0.5rem;">
+            <span style="color: #64748b; font-size: 0.8rem;">
+                Premium: <span style="font-family: 'JetBrains Mono', monospace; font-weight: 500;">${premium:.2f}</span>
+            </span>
+            <span style="color: {cost_color}; font-weight: 700; font-size: 0.85rem; font-family: 'JetBrains Mono', monospace;">
+                {cost_prefix}${total_cost:,.2f}
+            </span>
+        </div>
+        """, unsafe_allow_html=True)
 
         if st.button("Calculate P&L", key="calc_pnl_btn"):
             pnl = compute_option_pnl(
