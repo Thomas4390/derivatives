@@ -1,18 +1,27 @@
 """
 Pricing Adapter for Streamlit App
 
-This module provides array-based pricing functions that use the new backend architecture.
+This module provides array-based pricing functions that use the backend architecture.
 These functions are specific to the Streamlit app's needs for vectorized calculations.
 
 Performance: Uses Numba-compiled vectorized functions for fast bulk calculations.
+
+Functions available:
+- calculate_all_greeks: Calculate all 14 Greeks for a single option
+- calculate_pnl_at_expiry_arrays: Calculate portfolio P&L at expiration
+- find_breakeven_points: Find breakeven points and max profit/loss
+- calculate_portfolio_greeks_3d_dte: 3D Greek surface (spot x DTE)
+- calculate_portfolio_greeks_3d_iv: 3D Greek surface (spot x IV)
+- calculate_greeks_3d_strike: 3D Greek surface (spot x strike)
+- calculate_option_premium: Calculate option premium using Black-Scholes
 
 Author: Thomas Vaudescal
 """
 
 import numpy as np
 import json
-from typing import Optional
 from dataclasses import dataclass
+from typing import Optional
 
 # Import Numba-optimized functions for performance
 from backend.engines.vectorized_bs import (
@@ -25,19 +34,6 @@ from backend.portfolio.greeks_surfaces import (
     calculate_portfolio_pnl_at_expiry as _calculate_pnl_numba,
     calculate_pnl_curve,
 )
-
-# Import from new backend architecture (for OptionPosition premium calculation)
-from backend.instruments.options import VanillaOption
-from backend.models.gbm import GBMModel
-from backend.engines import BSAnalyticEngine
-from backend.core.market import MarketEnvironment
-
-
-# =============================================================================
-# GLOBAL ENGINE (singleton for premium calculations)
-# =============================================================================
-
-_engine = BSAnalyticEngine()
 
 
 # =============================================================================
@@ -52,6 +48,40 @@ class BreakevenResult:
     max_profit_spot: float
     max_loss: float
     max_loss_spot: float
+
+
+# =============================================================================
+# PREMIUM CALCULATION
+# =============================================================================
+
+def calculate_option_premium(
+    spot: float,
+    strike: float,
+    dte_days: int,
+    risk_free_rate: float,
+    volatility: float,
+    option_type: str  # 'call' or 'put'
+) -> float:
+    """
+    Calculate option premium using Black-Scholes.
+
+    Args:
+        spot: Current spot price
+        strike: Strike price
+        dte_days: Days to expiration
+        risk_free_rate: Risk-free rate (decimal)
+        volatility: Implied volatility (decimal)
+        option_type: 'call' or 'put'
+
+    Returns:
+        Option premium per share
+    """
+    time_to_expiry = dte_days / 365.0
+    opt_type_int = 1 if option_type == 'call' else 0
+    greeks = _calculate_all_greeks_numba(
+        spot, strike, time_to_expiry, risk_free_rate, volatility, opt_type_int
+    )
+    return greeks[0]  # Price is index 0
 
 
 # =============================================================================
@@ -349,96 +379,3 @@ def calculate_greeks_3d_strike(
         spot_range, strike_range, base_dte, risk_free_rate, base_iv,
         option_type, position_type, quantity, greek_index
     )
-
-
-# =============================================================================
-# LEGACY POSITION CLASSES FOR FRONTEND
-# =============================================================================
-
-class OptionPosition:
-    """
-    Option position for the Streamlit app.
-
-    This is a frontend-specific class that mirrors the old API
-    but uses the new backend for calculations.
-    """
-
-    def __init__(
-        self,
-        option_type: str,  # 'call' or 'put'
-        position_type: str,  # 'long' or 'short'
-        strike: float,
-        quantity: int = 1,
-        premium_paid: Optional[float] = None,  # If provided, use this instead of calculating
-        dte_days: int = 30,
-        volatility: float = 0.25,
-        spot_price: float = 100.0,
-        risk_free_rate: float = 0.05
-    ):
-        self.option_type = option_type
-        self.position_type = position_type
-        self.strike = strike
-        self.quantity = quantity
-        self.dte_days = dte_days
-        self.volatility = volatility
-
-        if premium_paid is not None:
-            # Use provided premium
-            self.premium_paid = premium_paid
-        else:
-            # Calculate premium using Numba function (faster)
-            opt_type = 1 if option_type == 'call' else 0
-            greeks = _calculate_all_greeks_numba(
-                spot_price, strike, dte_days/365.0,
-                risk_free_rate, volatility, opt_type
-            )
-            self.premium_paid = greeks[0]  # Price is index 0
-
-    def __repr__(self):
-        return (f"OptionPosition({self.option_type}, {self.position_type}, "
-                f"K={self.strike}, qty={self.quantity})")
-
-
-class StockPosition:
-    """Stock position for the Streamlit app."""
-
-    def __init__(
-        self,
-        position_type: str,  # 'long' or 'short'
-        quantity: int,
-        entry_price: float
-    ):
-        self.position_type = position_type
-        self.quantity = quantity
-        self.entry_price = entry_price
-
-    def __repr__(self):
-        return f"StockPosition({self.position_type}, qty={self.quantity}, entry={self.entry_price})"
-
-
-class OptionsPortfolio:
-    """
-    Portfolio class for the Streamlit app.
-
-    This mimics the old API but provides a simpler implementation
-    for the frontend's needs.
-    """
-
-    def __init__(self, spot_price: float = 100.0, risk_free_rate: float = 0.05):
-        self.spot_price = spot_price
-        self.risk_free_rate = risk_free_rate
-        self.options: list[OptionPosition] = []
-        self.stock: Optional[StockPosition] = None
-
-    def add_option(self, position: OptionPosition):
-        """Add an option position."""
-        self.options.append(position)
-
-    def add_stock(self, position: StockPosition):
-        """Add a stock position."""
-        self.stock = position
-
-    def clear(self):
-        """Clear all positions."""
-        self.options.clear()
-        self.stock = None

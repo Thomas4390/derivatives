@@ -633,10 +633,10 @@ def render_pnl_tab(
     # Get position details for strike variation
     if positions:
         pos = positions[0]
-        option_type = pos.option_type
-        position_type = pos.position_type
-        quantity = pos.quantity
-        base_strike = pos.strike
+        option_type = pos['option_type']
+        position_type = pos['position_type']
+        quantity = pos['quantity']
+        base_strike = pos['strike']
     else:
         # Default position
         option_type = 'call'

@@ -20,12 +20,10 @@ import streamlit as st
 import numpy as np
 import json
 
-# Pricing functions (using new backend architecture)
+# Pricing functions (using backend architecture, no classes)
 from services.pricing_adapter import (
-    OptionsPortfolio,
-    OptionPosition,
-    StockPosition,
     calculate_all_greeks,
+    calculate_option_premium,
     calculate_pnl_at_expiry_arrays as calculate_portfolio_pnl_at_expiry,
     find_breakeven_points,
     calculate_portfolio_greeks_3d_dte,
@@ -83,10 +81,7 @@ init_session_state()
 
 spot_price, risk_free_rate = render_sidebar(
     positions=st.session_state.positions,
-    stock_position=st.session_state.stock_position,
-    portfolio_class=OptionsPortfolio,
-    option_position_class=OptionPosition,
-    stock_position_class=StockPosition
+    stock_position=st.session_state.stock_position
 )
 
 
@@ -106,11 +101,15 @@ render_header(
 # =============================================================================
 
 def get_default_premium() -> float:
-    """Calculate default premium for a long call ATM."""
-    default_portfolio = OptionsPortfolio(spot_price, risk_free_rate)
-    default_position = OptionPosition('call', 'long', spot_price, 1)
-    default_portfolio.add_option(default_position)
-    return default_position.premium_paid
+    """Calculate default premium for a long call ATM using Black-Scholes."""
+    return calculate_option_premium(
+        spot=spot_price,
+        strike=spot_price,
+        dte_days=DEFAULT_DTE,
+        risk_free_rate=risk_free_rate,
+        volatility=DEFAULT_IV / 100,  # Convert from percentage
+        option_type='call'
+    )
 
 
 def get_portfolio_json() -> str:

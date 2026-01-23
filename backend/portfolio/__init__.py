@@ -85,6 +85,7 @@ from backend.portfolio.greeks_surfaces import (
     get_greek_name,
     # P&L functions (Numba-optimized)
     calculate_pnl_curve,
+    calculate_portfolio_pnl_at_expiry,
     # Greek indices
     GREEK_PRICE,
     GREEK_DELTA,
@@ -100,6 +101,19 @@ from backend.portfolio.greeks_surfaces import (
     GREEK_ZOMMA,
     GREEK_COLOR,
     GREEK_ULTIMA,
+)
+
+# =============================================================================
+# Risk Analysis
+# =============================================================================
+
+from backend.portfolio.risk_analysis import (
+    RiskProfile,
+    check_unlimited_risk,
+    check_unlimited_risk_from_portfolio,
+    analyze_portfolio_risk,
+    analyze_portfolio_risk_from_portfolio,
+    get_risk_summary,
 )
 
 
@@ -135,6 +149,13 @@ __all__ = [
     "find_breakevens",
     "find_breakevens_from_portfolio",
     "calculate_portfolio_pnl_at_expiry",
+    # Risk Analysis
+    "RiskProfile",
+    "check_unlimited_risk",
+    "check_unlimited_risk_from_portfolio",
+    "analyze_portfolio_risk",
+    "analyze_portfolio_risk_from_portfolio",
+    "get_risk_summary",
     # Greeks surfaces
     "portfolio_greeks_surface_dte",
     "portfolio_greeks_surface_iv",

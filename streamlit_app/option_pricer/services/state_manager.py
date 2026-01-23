@@ -2,10 +2,30 @@
 State management for Options Greeks Explorer.
 
 This module provides a centralized interface for managing Streamlit session state.
+Uses simple dicts for positions to avoid serialization issues and improve maintainability.
+
+Position dict formats:
+    Option:
+        {
+            'option_type': 'call' | 'put',
+            'position_type': 'long' | 'short',
+            'strike': float,
+            'quantity': int,
+            'premium_paid': float,
+            'dte_days': int (optional),
+            'volatility': float (optional)
+        }
+
+    Stock:
+        {
+            'position_type': 'long' | 'short',
+            'quantity': int,
+            'entry_price': float
+        }
 """
 
 import streamlit as st
-from typing import Any
+from typing import Any, Optional
 
 
 def init_session_state() -> None:
@@ -17,32 +37,37 @@ def init_session_state() -> None:
         st.session_state.stock_position = None
 
 
-def get_positions() -> list:
+def get_positions() -> list[dict]:
     """
     Get the current list of option positions.
 
     Returns:
-        List of OptionPosition objects
+        List of option position dicts
     """
     return st.session_state.get('positions', [])
 
 
-def get_stock_position():
+def get_stock_position() -> Optional[dict]:
     """
     Get the current stock position.
 
     Returns:
-        StockPosition object or None
+        Stock position dict or None
     """
     return st.session_state.get('stock_position', None)
 
 
-def add_position(position) -> None:
+def add_position(position: dict) -> None:
     """
     Add an option position to the portfolio.
 
     Args:
-        position: OptionPosition object to add
+        position: Option position dict with keys:
+            - option_type: 'call' or 'put'
+            - position_type: 'long' or 'short'
+            - strike: float
+            - quantity: int
+            - premium_paid: float
     """
     if 'positions' not in st.session_state:
         st.session_state.positions = []
@@ -62,12 +87,15 @@ def remove_last_position() -> bool:
     return False
 
 
-def set_stock_position(stock_position) -> None:
+def set_stock_position(stock_position: Optional[dict]) -> None:
     """
     Set the stock position.
 
     Args:
-        stock_position: StockPosition object or None
+        stock_position: Stock position dict or None with keys:
+            - position_type: 'long' or 'short'
+            - quantity: int
+            - entry_price: float
     """
     st.session_state.stock_position = stock_position
 
@@ -110,13 +138,78 @@ def get_position_count() -> tuple[int, bool]:
     return option_count, has_stock
 
 
-def set_positions_from_strategy(positions: list, stock_position) -> None:
+def set_positions_from_strategy(positions: list[dict], stock_position: Optional[dict]) -> None:
     """
     Set positions from a predefined strategy.
 
     Args:
-        positions: List of OptionPosition objects
-        stock_position: StockPosition object or None
+        positions: List of option position dicts
+        stock_position: Stock position dict or None
     """
     st.session_state.positions = positions
     st.session_state.stock_position = stock_position
+
+
+# =============================================================================
+# Position Factory Functions
+# =============================================================================
+
+def create_option_position(
+    option_type: str,
+    position_type: str,
+    strike: float,
+    quantity: int,
+    premium_paid: float,
+    dte_days: Optional[int] = None,
+    volatility: Optional[float] = None
+) -> dict:
+    """
+    Create an option position dict.
+
+    Args:
+        option_type: 'call' or 'put'
+        position_type: 'long' or 'short'
+        strike: Strike price
+        quantity: Number of contracts
+        premium_paid: Premium per share
+        dte_days: Days to expiration (optional)
+        volatility: Implied volatility (optional)
+
+    Returns:
+        Option position dict
+    """
+    position = {
+        'option_type': option_type,
+        'position_type': position_type,
+        'strike': strike,
+        'quantity': quantity,
+        'premium_paid': premium_paid
+    }
+    if dte_days is not None:
+        position['dte_days'] = dte_days
+    if volatility is not None:
+        position['volatility'] = volatility
+    return position
+
+
+def create_stock_position(
+    position_type: str,
+    quantity: int,
+    entry_price: float
+) -> dict:
+    """
+    Create a stock position dict.
+
+    Args:
+        position_type: 'long' or 'short'
+        quantity: Number of shares
+        entry_price: Entry price per share
+
+    Returns:
+        Stock position dict
+    """
+    return {
+        'position_type': position_type,
+        'quantity': quantity,
+        'entry_price': entry_price
+    }

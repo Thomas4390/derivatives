@@ -285,9 +285,9 @@ def render_3d_tab(
     # Get position details for strike variation
     if positions:
         pos = positions[0]
-        option_type = pos.option_type
-        position_type = pos.position_type
-        quantity = pos.quantity
+        option_type = pos['option_type']
+        position_type = pos['position_type']
+        quantity = pos['quantity']
     else:
         # Default position
         option_type = 'call'

@@ -3,6 +3,7 @@ Sidebar component for Options Greeks Explorer.
 
 Modern, clean design with improved user experience.
 Strategy-first approach with editable legs.
+Uses dict-based positions for simplicity.
 """
 
 import streamlit as st
@@ -10,6 +11,8 @@ from config.constants import (
     CONTRACT_MULTIPLIER,
     DEFAULT_SPOT_PRICE,
     DEFAULT_RISK_FREE_RATE,
+    DEFAULT_DTE,
+    DEFAULT_IV,
     AVAILABLE_STRATEGIES,
     STRATEGY_DISPLAY_NAMES,
     STRATEGY_LEGS,
@@ -21,17 +24,23 @@ from config.styles import (
     position_item_html,
     stock_position_html
 )
+from services.pricing_adapter import calculate_option_premium
+from services.state_manager import create_option_position, create_stock_position
 
 
 def render_sidebar(
     positions: list,
-    stock_position,
-    portfolio_class,
-    option_position_class,
-    stock_position_class
+    stock_position
 ) -> tuple[float, float]:
     """
     Render the complete sidebar with all controls.
+
+    Args:
+        positions: List of option position dicts
+        stock_position: Stock position dict or None
+
+    Returns:
+        Tuple of (spot_price, risk_free_rate)
     """
     with st.sidebar:
         # Logo/Brand section
@@ -47,13 +56,7 @@ def render_sidebar(
         spot_price, risk_free_rate = _render_market_params()
 
         # Strategy Builder
-        _render_strategy_builder(
-            spot_price,
-            risk_free_rate,
-            portfolio_class,
-            option_position_class,
-            stock_position_class
-        )
+        _render_strategy_builder(spot_price, risk_free_rate)
 
         # Current Positions
         _render_positions_section(positions, stock_position)
@@ -97,10 +100,7 @@ def _render_market_params() -> tuple[float, float]:
 
 def _render_strategy_builder(
     spot_price: float,
-    risk_free_rate: float,
-    portfolio_class,
-    option_position_class,
-    stock_position_class
+    risk_free_rate: float
 ) -> None:
     """Render the strategy builder section with editable legs."""
 
@@ -208,16 +208,12 @@ def _render_strategy_builder(
 
     # Initialize session state and check if auto-apply is needed
     should_auto_apply = _initialize_strategy_state(
-        selected_strategy, strategy_legs, has_stock, spot_price,
-        portfolio_class, option_position_class, stock_position_class, risk_free_rate
+        selected_strategy, strategy_legs, has_stock, spot_price, risk_free_rate
     )
 
     # Auto-apply strategy when newly selected or spot price changes
     if should_auto_apply and not is_custom:
-        _apply_strategy(
-            spot_price, risk_free_rate, strategy_legs, has_stock,
-            portfolio_class, option_position_class, stock_position_class
-        )
+        _apply_strategy(spot_price, risk_free_rate, strategy_legs, has_stock)
 
     # Strategy info header
     strategy_name = STRATEGY_DISPLAY_NAMES.get(selected_strategy, "Custom Strategy" if is_custom else selected_strategy)
@@ -284,9 +280,7 @@ def _render_strategy_builder(
         allow_remove = is_custom or is_additional_leg
 
         leg_cost, should_remove = _render_leg_editor(
-            i, leg, spot_price, risk_free_rate,
-            portfolio_class, option_position_class,
-            num_legs,
+            i, leg, spot_price, risk_free_rate, num_legs,
             allow_remove=allow_remove,
             is_additional=is_additional_leg and not is_custom
         )
@@ -358,10 +352,7 @@ def _render_strategy_builder(
                     'entry_price': st.session_state[stock_entry_key]
                 }
 
-        _apply_strategy(
-            spot_price, risk_free_rate, strategy_legs, has_stock,
-            portfolio_class, option_position_class, stock_position_class
-        )
+        _apply_strategy(spot_price, risk_free_rate, strategy_legs, has_stock)
 
 
 def _initialize_strategy_state(
@@ -369,9 +360,6 @@ def _initialize_strategy_state(
     strategy_legs: list,
     has_stock: bool,
     spot_price: float,
-    portfolio_class=None,
-    option_position_class=None,
-    stock_position_class=None,
     risk_free_rate: float = 0.05
 ) -> bool:
     """
@@ -520,8 +508,6 @@ def _render_leg_editor(
     leg_config: dict,
     spot_price: float,
     risk_free_rate: float,
-    portfolio_class,
-    option_position_class,
     total_legs: int,
     allow_remove: bool = False,
     is_additional: bool = False
@@ -622,14 +608,15 @@ def _render_leg_editor(
         'quantity': new_quantity
     }
 
-    # Calculate premium
-    portfolio_temp = portfolio_class(spot_price, risk_free_rate)
-    position_temp = option_position_class(
-        new_option_type, new_position_type, new_strike, new_quantity,
-        spot_price=spot_price, risk_free_rate=risk_free_rate
+    # Calculate premium using Black-Scholes
+    premium = calculate_option_premium(
+        spot=spot_price,
+        strike=new_strike,
+        dte_days=DEFAULT_DTE,
+        risk_free_rate=risk_free_rate,
+        volatility=DEFAULT_IV / 100,  # Convert from percentage
+        option_type=new_option_type
     )
-    portfolio_temp.add_option(position_temp)
-    premium = position_temp.premium_paid
     total_cost = premium * new_quantity * CONTRACT_MULTIPLIER
 
     # Cost display
@@ -782,35 +769,31 @@ def _apply_strategy(
     spot_price: float,
     risk_free_rate: float,
     strategy_legs: list,
-    has_stock: bool,
-    portfolio_class,
-    option_position_class,
-    stock_position_class
+    has_stock: bool
 ) -> None:
-    """Apply the configured strategy to positions."""
+    """Apply the configured strategy to positions using dict-based storage."""
     new_positions = []
 
     for i, _ in enumerate(strategy_legs):
         leg_state = st.session_state.strategy_legs_state.get(i, {})
         if leg_state:
-            portfolio_temp = portfolio_class(spot_price, risk_free_rate)
-            position_temp = option_position_class(
-                leg_state['option_type'],
-                leg_state['position_type'],
-                leg_state['strike'],
-                leg_state['quantity'],
-                spot_price=spot_price,
-                risk_free_rate=risk_free_rate
+            # Calculate premium using Black-Scholes
+            premium = calculate_option_premium(
+                spot=spot_price,
+                strike=leg_state['strike'],
+                dte_days=DEFAULT_DTE,
+                risk_free_rate=risk_free_rate,
+                volatility=DEFAULT_IV / 100,  # Convert from percentage
+                option_type=leg_state['option_type']
             )
-            portfolio_temp.add_option(position_temp)
-            premium = position_temp.premium_paid
 
-            position = option_position_class(
-                leg_state['option_type'],
-                leg_state['position_type'],
-                leg_state['strike'],
-                leg_state['quantity'],
-                premium
+            # Create dict-based position
+            position = create_option_position(
+                option_type=leg_state['option_type'],
+                position_type=leg_state['position_type'],
+                strike=leg_state['strike'],
+                quantity=leg_state['quantity'],
+                premium_paid=premium
             )
             new_positions.append(position)
 
@@ -818,10 +801,10 @@ def _apply_strategy(
     if has_stock:
         stock_state = st.session_state.strategy_legs_state.get('stock')
         if stock_state:
-            new_stock_position = stock_position_class(
-                stock_state['position_type'],
-                stock_state['quantity'],
-                stock_state['entry_price']
+            new_stock_position = create_stock_position(
+                position_type=stock_state['position_type'],
+                quantity=stock_state['quantity'],
+                entry_price=stock_state['entry_price']
             )
 
     st.session_state.positions = new_positions
@@ -854,35 +837,35 @@ def _render_positions_section(positions: list, stock_position) -> None:
     net_amount = _calculate_net_position(positions, stock_position)
     st.markdown(net_position_card_html("", net_amount), unsafe_allow_html=True)
 
-    # Stock position
+    # Stock position (now a dict)
     if stock_position:
-        stock_cost = stock_position.entry_price * stock_position.quantity
+        stock_cost = stock_position['entry_price'] * stock_position['quantity']
         st.markdown(
             stock_position_html(
-                quantity=stock_position.quantity,
-                position_type=stock_position.position_type,
-                entry_price=stock_position.entry_price,
+                quantity=stock_position['quantity'],
+                position_type=stock_position['position_type'],
+                entry_price=stock_position['entry_price'],
                 stock_cost=stock_cost
             ),
             unsafe_allow_html=True
         )
 
-    # Option positions
+    # Option positions (now dicts)
     for i, pos in enumerate(positions):
-        total_amount = pos.premium_paid * pos.quantity * CONTRACT_MULTIPLIER
-        shares_controlled = pos.quantity * CONTRACT_MULTIPLIER
+        total_amount = pos['premium_paid'] * pos['quantity'] * CONTRACT_MULTIPLIER
+        shares_controlled = pos['quantity'] * CONTRACT_MULTIPLIER
 
         st.markdown(
             position_item_html(
                 index=i + 1,
-                quantity=pos.quantity,
-                position_type=pos.position_type,
-                option_type=pos.option_type,
-                strike=pos.strike,
-                premium=pos.premium_paid,
+                quantity=pos['quantity'],
+                position_type=pos['position_type'],
+                option_type=pos['option_type'],
+                strike=pos['strike'],
+                premium=pos['premium_paid'],
                 total_amount=total_amount,
                 shares_controlled=shares_controlled,
-                is_long=(pos.position_type == 'long')
+                is_long=(pos['position_type'] == 'long')
             ),
             unsafe_allow_html=True
         )
@@ -919,18 +902,18 @@ def _render_positions_section(positions: list, stock_position) -> None:
 
 
 def _calculate_net_position(positions: list, stock_position=None) -> float:
-    """Calculate the net debit/credit position including stock."""
+    """Calculate the net debit/credit position including stock (dict-based)."""
     net = sum(
-        -pos.premium_paid * pos.quantity * CONTRACT_MULTIPLIER
-        if pos.position_type == 'long'
-        else pos.premium_paid * pos.quantity * CONTRACT_MULTIPLIER
+        -pos['premium_paid'] * pos['quantity'] * CONTRACT_MULTIPLIER
+        if pos['position_type'] == 'long'
+        else pos['premium_paid'] * pos['quantity'] * CONTRACT_MULTIPLIER
         for pos in positions
     )
 
     if stock_position:
-        if stock_position.position_type == 'long':
-            net -= stock_position.entry_price * stock_position.quantity
+        if stock_position['position_type'] == 'long':
+            net -= stock_position['entry_price'] * stock_position['quantity']
         else:
-            net += stock_position.entry_price * stock_position.quantity
+            net += stock_position['entry_price'] * stock_position['quantity']
 
     return net

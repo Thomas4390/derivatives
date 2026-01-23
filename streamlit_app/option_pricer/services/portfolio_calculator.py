@@ -43,8 +43,8 @@ def prepare_portfolio_data(
     Prepare portfolio data dictionary from positions.
 
     Args:
-        positions: List of OptionPosition objects
-        stock_position: StockPosition object or None
+        positions: List of option position dicts
+        stock_position: Stock position dict or None
         spot_price: Current spot price
 
     Returns:
@@ -56,25 +56,25 @@ def prepare_portfolio_data(
         'stock': None
     }
 
-    # Add option positions
+    # Add option positions (positions are already dicts)
     if positions:
         portfolio_data['options'] = [
             {
-                'option_type': str(pos.option_type),
-                'position_type': str(pos.position_type),
-                'strike': pos.strike,
-                'quantity': pos.quantity,
-                'premium_paid': pos.premium_paid
+                'option_type': str(pos['option_type']),
+                'position_type': str(pos['position_type']),
+                'strike': pos['strike'],
+                'quantity': pos['quantity'],
+                'premium_paid': pos['premium_paid']
             }
             for pos in positions
         ]
 
-    # Add stock position
+    # Add stock position (stock_position is already a dict)
     if stock_position:
         portfolio_data['stock'] = {
-            'position_type': str(stock_position.position_type),
-            'quantity': stock_position.quantity,
-            'entry_price': stock_position.entry_price
+            'position_type': str(stock_position['position_type']),
+            'quantity': stock_position['quantity'],
+            'entry_price': stock_position['entry_price']
         }
 
     return portfolio_data

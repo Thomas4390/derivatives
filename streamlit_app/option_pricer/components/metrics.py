@@ -149,7 +149,7 @@ def render_position_info_banner(
             <div style="font-size: 1.25rem;">📈</div>
             <div>
                 <div style="font-weight: 600; color: #0c4a6e; font-size: 0.9rem;">
-                    {stock_position.quantity:,} shares {stock_position.position_type.upper()} @ ${stock_position.entry_price:,.2f}
+                    {stock_position['quantity']:,} shares {stock_position['position_type'].upper()} @ ${stock_position['entry_price']:,.2f}
                 </div>
                 <div style="color: #0369a1; font-size: 0.8rem;">Stock position only - add options to create a strategy</div>
             </div>

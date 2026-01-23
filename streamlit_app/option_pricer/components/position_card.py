@@ -2,6 +2,8 @@
 Position card components for Options Greeks Explorer.
 
 This module provides components for displaying option and stock positions.
+Positions are stored as dicts with keys: option_type, position_type, strike,
+quantity, premium_paid, etc.
 """
 
 import streamlit as st
@@ -35,48 +37,49 @@ def render_net_position(net_amount: float) -> None:
     )
 
 
-def render_stock_position(stock_position) -> None:
+def render_stock_position(stock_position: dict) -> None:
     """
     Render a stock position card.
 
     Args:
-        stock_position: StockPosition object
+        stock_position: Stock position dict with keys: position_type, quantity, entry_price
     """
-    stock_cost = stock_position.entry_price * stock_position.quantity
+    stock_cost = stock_position['entry_price'] * stock_position['quantity']
 
     st.markdown(
         stock_position_html(
-            quantity=stock_position.quantity,
-            position_type=stock_position.position_type,
-            entry_price=stock_position.entry_price,
+            quantity=stock_position['quantity'],
+            position_type=stock_position['position_type'],
+            entry_price=stock_position['entry_price'],
             stock_cost=stock_cost
         ),
         unsafe_allow_html=True
     )
 
 
-def render_option_position(position, index: int) -> None:
+def render_option_position(position: dict, index: int) -> None:
     """
     Render an option position card.
 
     Args:
-        position: OptionPosition object
+        position: Option position dict with keys: option_type, position_type,
+                  strike, quantity, premium_paid
         index: Position index (0-based, will be displayed as 1-based)
     """
-    total_amount = position.premium_paid * position.quantity * CONTRACT_MULTIPLIER
-    shares_controlled = position.quantity * CONTRACT_MULTIPLIER
+    total_amount = position['premium_paid'] * position['quantity'] * CONTRACT_MULTIPLIER
+    shares_controlled = position['quantity'] * CONTRACT_MULTIPLIER
 
     st.markdown(
         position_item_html(
             index=index + 1,
-            quantity=position.quantity,
-            position_type=position.position_type,
-            option_type=position.option_type,
-            strike=position.strike,
-            premium=position.premium_paid,
+            quantity=position['quantity'],
+            position_type=position['position_type'],
+            option_type=position['option_type'],
+            strike=position['strike'],
+            premium=position['premium_paid'],
             total_amount=total_amount,
             shares_controlled=shares_controlled,
-            is_long=(position.position_type == 'long')
+            is_long=(position['position_type'] == 'long')
         ),
         unsafe_allow_html=True
     )
@@ -84,7 +87,7 @@ def render_option_position(position, index: int) -> None:
 
 def render_positions_list(
     positions: list,
-    stock_position,
+    stock_position: dict,
     net_amount: float,
     on_clear_all: callable = None,
     on_remove_last: callable = None
@@ -93,8 +96,8 @@ def render_positions_list(
     Render the complete positions list with controls.
 
     Args:
-        positions: List of OptionPosition objects
-        stock_position: StockPosition object or None
+        positions: List of option position dicts
+        stock_position: Stock position dict or None
         net_amount: Net position value
         on_clear_all: Callback for clear all button (optional)
         on_remove_last: Callback for remove last button (optional)
@@ -130,29 +133,29 @@ def render_positions_list(
             st.rerun()
 
 
-def calculate_net_position(positions: list, stock_position=None) -> float:
+def calculate_net_position(positions: list, stock_position: dict = None) -> float:
     """
     Calculate the net debit/credit position including stock.
 
     Args:
-        positions: List of OptionPosition objects
-        stock_position: StockPosition object or None
+        positions: List of option position dicts
+        stock_position: Stock position dict or None
 
     Returns:
         Net position value (positive = credit, negative = debit)
     """
     net = sum(
-        -pos.premium_paid * pos.quantity * CONTRACT_MULTIPLIER
-        if pos.position_type == 'long'
-        else pos.premium_paid * pos.quantity * CONTRACT_MULTIPLIER
+        -pos['premium_paid'] * pos['quantity'] * CONTRACT_MULTIPLIER
+        if pos['position_type'] == 'long'
+        else pos['premium_paid'] * pos['quantity'] * CONTRACT_MULTIPLIER
         for pos in positions
     )
 
     # Add stock cost if present
     if stock_position:
-        if stock_position.position_type == 'long':
-            net -= stock_position.entry_price * stock_position.quantity
+        if stock_position['position_type'] == 'long':
+            net -= stock_position['entry_price'] * stock_position['quantity']
         else:  # short stock
-            net += stock_position.entry_price * stock_position.quantity
+            net += stock_position['entry_price'] * stock_position['quantity']
 
     return net
