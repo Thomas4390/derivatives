@@ -1,6 +1,6 @@
 # Backend Module Documentation
 
-**Version**: 5.0.0
+**Version**: 5.1.0
 **Author**: Thomas
 **Created**: 2025
 
@@ -239,6 +239,9 @@ backend/
 │   ├── portfolio.py         # OptionsPortfolio
 │   ├── positions.py         # PortfolioPosition, StockPosition
 │   ├── breakeven.py         # BreakevenCalculator
+│   ├── risk_analysis.py     # RiskProfile, check_unlimited_risk
+│   ├── greeks_surfaces.py   # 3D Greeks surfaces (Numba-optimized)
+│   ├── pnl.py               # P&L calculations, RiskMetrics
 │   └── factory.py           # long_call, short_put, etc.
 ├── utils/                   # Utility functions
 │   ├── __init__.py
@@ -707,6 +710,16 @@ Portfolio management with P&L analysis and breakeven calculation.
 | `PortfolioPosition` | Option position |
 | `StockPosition` | Stock/underlying position |
 | `BreakevenCalculator` | Find breakeven prices |
+| `RiskProfile` | Risk analysis results (NamedTuple) |
+
+### Risk Analysis Functions
+
+| Function | Description |
+|----------|-------------|
+| `check_unlimited_risk()` | Detect unlimited profit/loss from positions |
+| `check_unlimited_risk_from_portfolio()` | Same, from OptionsPortfolio |
+| `analyze_portfolio_risk()` | Full risk analysis returning RiskProfile |
+| `get_risk_summary()` | Human-readable risk summary |
 
 ### Factory Functions
 
@@ -758,6 +771,179 @@ portfolio.add_position(long_call(strike=110, expiry=0.25, premium=1.00))
 # Net credit received
 net_premium = portfolio.total_premium()
 print(f"Net credit: ${net_premium:.2f}")
+```
+
+### Risk Analysis
+
+**Location**: `backend/portfolio/risk_analysis.py`
+
+The risk analysis module provides tools to detect unlimited profit/loss potential and perform comprehensive risk assessment on portfolios.
+
+#### RiskProfile
+
+A named tuple containing complete risk analysis results:
+
+```python
+class RiskProfile(NamedTuple):
+    has_unlimited_profit: bool      # True if profit is theoretically unlimited
+    has_unlimited_loss: bool        # True if loss is theoretically unlimited
+    max_profit: Optional[float]     # Maximum profit (None if unknown, inf if unlimited)
+    max_loss: Optional[float]       # Maximum loss (None if unknown, -inf if unlimited)
+    max_profit_spot: Optional[float]  # Spot price at max profit
+    max_loss_spot: Optional[float]    # Spot price at max loss
+```
+
+#### Risk Detection Functions
+
+| Function | Input | Description |
+|----------|-------|-------------|
+| `check_unlimited_risk(positions, stock)` | `List[PortfolioPosition]`, `StockPosition` | Detect unlimited risk from position objects |
+| `check_unlimited_risk_from_portfolio(portfolio)` | `OptionsPortfolio` | Convenience wrapper for OptionsPortfolio |
+| `check_unlimited_risk_arrays(...)` | NumPy arrays | Numba-optimized for direct array inputs |
+| `analyze_portfolio_risk(...)` | Positions + breakeven data | Full risk analysis returning `RiskProfile` |
+| `analyze_portfolio_risk_from_portfolio(...)` | `OptionsPortfolio` | Convenience wrapper for full analysis |
+| `get_risk_summary(risk_profile)` | `RiskProfile` | Human-readable risk summary dict |
+
+#### Unlimited Risk Logic
+
+The module uses the following logic to detect unlimited risk:
+
+- **Stock Positions**:
+  - Long stock → Unlimited profit (price can rise indefinitely), limited loss (max loss = entry price)
+  - Short stock → Limited profit (max = entry price), unlimited loss (price can rise indefinitely)
+
+- **Option Positions**:
+  - Net long calls > net short calls → Unlimited profit potential
+  - Net short calls > net long calls → Unlimited loss potential (naked short calls)
+  - Puts alone → Always limited in both directions
+
+#### Example: Basic Risk Detection
+
+```python
+from backend.portfolio import (
+    check_unlimited_risk,
+    long_call, short_call, long_put, short_put,
+    long_stock, short_stock
+)
+
+# Long call: unlimited profit, limited loss
+positions = [long_call(strike=100, maturity=0.5)]
+unlimited_profit, unlimited_loss = check_unlimited_risk(positions)
+print(f"Long Call - Unlimited Profit: {unlimited_profit}")  # True
+print(f"Long Call - Unlimited Loss: {unlimited_loss}")      # False
+
+# Short call (naked): limited profit, unlimited loss
+positions = [short_call(strike=100, maturity=0.5)]
+unlimited_profit, unlimited_loss = check_unlimited_risk(positions)
+print(f"Short Call - Unlimited Profit: {unlimited_profit}") # False
+print(f"Short Call - Unlimited Loss: {unlimited_loss}")     # True
+
+# Bull call spread: limited both ways
+positions = [
+    long_call(strike=100, maturity=0.5),
+    short_call(strike=110, maturity=0.5)
+]
+unlimited_profit, unlimited_loss = check_unlimited_risk(positions)
+print(f"Spread - Unlimited Profit: {unlimited_profit}")     # False
+print(f"Spread - Unlimited Loss: {unlimited_loss}")         # False
+```
+
+#### Example: With Stock Position
+
+```python
+from backend.portfolio import check_unlimited_risk, long_call, long_stock
+
+# Covered call (long stock + short call)
+positions = [short_call(strike=110, maturity=0.5)]
+stock = long_stock(quantity=100, entry_price=100)
+
+unlimited_profit, unlimited_loss = check_unlimited_risk(positions, stock)
+print(f"Covered Call - Unlimited Profit: {unlimited_profit}") # True (from stock)
+print(f"Covered Call - Unlimited Loss: {unlimited_loss}")     # False
+```
+
+#### Example: Using OptionsPortfolio
+
+```python
+from backend.portfolio import (
+    OptionsPortfolio,
+    check_unlimited_risk_from_portfolio,
+    long_call, short_call
+)
+from backend.models import GBMModel
+
+# Build portfolio
+portfolio = OptionsPortfolio(GBMModel(sigma=0.2))
+portfolio.add(long_call(strike=100, maturity=0.5))
+portfolio.add(short_call(strike=110, maturity=0.5))
+
+# Check risk
+unlimited_profit, unlimited_loss = check_unlimited_risk_from_portfolio(portfolio)
+print(f"Portfolio risk: profit={unlimited_profit}, loss={unlimited_loss}")
+```
+
+#### Example: Full Risk Analysis
+
+```python
+from backend.portfolio import (
+    OptionsPortfolio,
+    analyze_portfolio_risk_from_portfolio,
+    find_breakevens_from_portfolio,
+    calculate_portfolio_pnl_at_expiry,
+    get_risk_summary,
+    long_call, short_put
+)
+from backend.models import GBMModel
+import numpy as np
+
+# Build portfolio
+portfolio = OptionsPortfolio(GBMModel(sigma=0.2))
+portfolio.add(long_call(strike=100, maturity=0.5))
+portfolio.add(short_put(strike=95, maturity=0.5))
+
+# Calculate supporting data
+spot_range = np.linspace(70, 130, 200)
+breakeven_result = find_breakevens_from_portfolio(portfolio, spot_range=(70, 130))
+expiry_pnl = calculate_portfolio_pnl_at_expiry(portfolio, spot_range)
+
+# Full risk analysis
+risk_profile = analyze_portfolio_risk_from_portfolio(
+    portfolio, breakeven_result, expiry_pnl
+)
+
+print(f"Unlimited Profit: {risk_profile.has_unlimited_profit}")
+print(f"Unlimited Loss: {risk_profile.has_unlimited_loss}")
+print(f"Max Profit: ${risk_profile.max_profit:.2f}" if risk_profile.max_profit != float('inf') else "Unlimited")
+print(f"Max Loss: ${abs(risk_profile.max_loss):.2f}" if risk_profile.max_loss != float('-inf') else "Unlimited")
+
+# Human-readable summary
+summary = get_risk_summary(risk_profile)
+print(f"\nRisk Level: {summary['risk_level']}")
+print(f"Profit Potential: {summary['profit_potential']}")
+print(f"Loss Potential: {summary['loss_potential']}")
+for warning in summary['warnings']:
+    print(f"⚠️ {warning}")
+```
+
+#### Example: Numba-Optimized Array API
+
+For maximum performance when processing many portfolios:
+
+```python
+from backend.portfolio.risk_analysis import check_unlimited_risk_arrays
+import numpy as np
+
+# Arrays representing portfolio positions
+# option_types: 1.0 = call, -1.0 = put
+# position_types: 1.0 = long, -1.0 = short
+option_types = np.array([1.0, 1.0, -1.0])   # call, call, put
+position_types = np.array([1.0, -1.0, 1.0])  # long, short, long
+quantities = np.array([1.0, 1.0, 1.0])
+
+unlimited_profit, unlimited_loss = check_unlimited_risk_arrays(
+    option_types, position_types, quantities,
+    has_stock=False, stock_is_long=True
+)
 ```
 
 ---
@@ -1118,6 +1304,7 @@ pytest tests/ -v
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 5.1.0 | 2025 | Added risk_analysis module with RiskProfile, check_unlimited_risk |
 | 5.0.0 | 2025 | Three Pillars Architecture, unified API |
 | 4.0.0 | 2025 | Added GARCH family models |
 | 3.0.0 | 2025 | Added portfolio management |
