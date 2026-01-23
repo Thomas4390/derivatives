@@ -371,7 +371,6 @@ def _render_performance_metrics(result, params: Dict[str, Any]) -> None:
     comp_time = _get_result_attr(result, 'computation_time', default=0.0)
     if comp_time == 0:
         # Fallback: try to get from session state
-        import streamlit as st
         comp_time = st.session_state.get('execution_time', 0.001)
 
     n_paths = _get_result_attr(result, 'num_paths', default=result.price_paths.shape[0] if hasattr(result, 'price_paths') else 1000)

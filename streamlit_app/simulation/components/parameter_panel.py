@@ -548,38 +548,59 @@ def render_simulation_settings(key_prefix: str = "sim") -> Dict[str, Any]:
 
 def render_option_parameters(key_prefix: str = "option") -> Dict[str, Any]:
     """
-    Render option parameters for pricing comparison.
+    Render option parameters for pricing comparison with option_pricer style.
 
     Returns:
         Dictionary of option parameters
     """
-    st.subheader("📜 Option Parameters")
+    # Get current values for styling
+    current_type = st.session_state.get(f"{key_prefix}_type", "call")
+    is_call_display = current_type == "call"
+
+    # Dynamic styling based on option type
+    border_color = "#10b981" if is_call_display else "#ef4444"
+    bg_gradient = "linear-gradient(135deg, #f0fdf4 0%, #ecfdf5 100%)" if is_call_display else "linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%)"
+    type_badge_bg = "#d1fae5" if is_call_display else "#fee2e2"
+    type_badge_color = "#047857" if is_call_display else "#b91c1c"
+    type_label = "CALL" if is_call_display else "PUT"
+
+    # Styled header like option_pricer
+    st.markdown(f"""
+    <div style="background: {bg_gradient}; border: 1px solid {border_color}40; border-left: 4px solid {border_color}; border-radius: 8px; padding: 0.75rem; margin-bottom: 0.625rem;">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+            <div style="display: flex; align-items: center; gap: 0.5rem;">
+                <span style="font-size: 1rem;">📜</span>
+                <span style="font-size: 0.7rem; font-weight: 700; color: #475569; text-transform: uppercase;">Option Parameters</span>
+            </div>
+            <span style="background: {type_badge_bg}; color: {type_badge_color}; font-size: 0.65rem; font-weight: 700; padding: 0.2rem 0.5rem; border-radius: 4px; text-transform: uppercase;">{type_label}</span>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
 
     params = {}
 
-    col1, col2 = st.columns(2)
+    # Option type selector with emoji format
+    option_type = st.selectbox(
+        "Type",
+        options=["call", "put"],
+        format_func=lambda x: f"{'📈' if x == 'call' else '📉'} {x.upper()}",
+        index=0 if st.session_state.get(f"{key_prefix}_type", "call") == "call" else 1,
+        key=f"{key_prefix}_type",
+    )
+    params["is_call"] = option_type == "call"
 
-    with col1:
-        params["strike"] = st.number_input(
-            "Strike Price (K)",
-            min_value=1.0,
-            max_value=10000.0,
-            value=st.session_state.get(f"{key_prefix}_strike", 100.0),
-            step=1.0,
-            key=f"{key_prefix}_strike_input",
-            help="Option strike price"
-        )
-        st.session_state[f"{key_prefix}_strike"] = params["strike"]
-
-    with col2:
-        params["is_call"] = st.selectbox(
-            "Option Type",
-            options=[True, False],
-            format_func=lambda x: "Call" if x else "Put",
-            index=0 if st.session_state.get(f"{key_prefix}_is_call", True) else 1,
-            key=f"{key_prefix}_type_input",
-        )
-        st.session_state[f"{key_prefix}_is_call"] = params["is_call"]
+    # Strike price
+    params["strike"] = st.number_input(
+        "Strike ($)",
+        min_value=1.0,
+        max_value=10000.0,
+        value=st.session_state.get(f"{key_prefix}_strike", 100.0),
+        step=1.0,
+        format="%.2f",
+        key=f"{key_prefix}_strike_input",
+        help="Option strike price"
+    )
+    st.session_state[f"{key_prefix}_strike"] = params["strike"]
 
     return params
 
