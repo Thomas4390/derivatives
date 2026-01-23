@@ -21,7 +21,7 @@ from config.constants import (
     PNL_KDE_POINTS
 )
 from config.styles import render_stats_row
-from backend.simulation import RiskMetrics
+from backend.portfolio.pnl import RiskMetrics
 
 
 def render_pnl_distribution_tab(

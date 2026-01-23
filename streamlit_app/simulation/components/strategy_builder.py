@@ -15,15 +15,27 @@ import numpy as np
 from dataclasses import dataclass
 from typing import List, Dict, Any, Optional, Tuple
 
-# Import strategy definitions from option_pricer
-from streamlit_app.option_pricer.config.constants import (
-    STRATEGY_LEGS,
-    STRATEGY_DISPLAY_NAMES,
-    STRATEGIES_WITH_STOCK,
-    STRATEGY_STOCK_POSITION,
-    CONTRACT_MULTIPLIER
-)
+# Import strategy definitions from option_pricer using importlib
+import sys
+from pathlib import Path
+import importlib.util
 
+# Import option_pricer constants explicitly from file path
+_option_pricer_path = Path(__file__).parent.parent.parent / "option_pricer"
+_constants_path = _option_pricer_path / "config" / "constants.py"
+
+# Load option_pricer constants module with explicit path
+_spec = importlib.util.spec_from_file_location("option_pricer_constants", _constants_path)
+_option_pricer_constants = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_option_pricer_constants)
+
+STRATEGY_LEGS = _option_pricer_constants.STRATEGY_LEGS
+STRATEGY_DISPLAY_NAMES = _option_pricer_constants.STRATEGY_DISPLAY_NAMES
+STRATEGIES_WITH_STOCK = _option_pricer_constants.STRATEGIES_WITH_STOCK
+STRATEGY_STOCK_POSITION = _option_pricer_constants.STRATEGY_STOCK_POSITION
+CONTRACT_MULTIPLIER = _option_pricer_constants.CONTRACT_MULTIPLIER
+
+# Import local simulation state manager
 from services.state_manager import (
     get_strategy_expanded,
     set_strategy_expanded,

@@ -4,8 +4,8 @@ Unified Monte Carlo Simulation Explorer
 A comprehensive educational tool for Monte Carlo simulation featuring:
 - 7 stochastic models (GBM, Heston, Merton, Bates, GARCH, NGARCH, GJR-GARCH)
 - Unified price and volatility path visualization
-- Pricing comparison (MC vs Analytical/FFT)
-- Option P&L analysis
+- Option Strategy P&L analysis with full strategy builder
+- Risk metrics (VaR, CVaR, skewness, kurtosis)
 
 Author: Thomas Vaudescal
 """
@@ -25,6 +25,7 @@ import numpy as np
 
 # Backend imports
 from backend.simulation.base import SimulationResult
+from backend.portfolio.pnl import RiskMetrics
 
 # Local config and components
 from config.styles import (
@@ -46,11 +47,10 @@ from components.parameter_panel import (
     render_market_parameters,
     render_model_parameters,
     render_simulation_settings,
-    render_option_parameters,
 )
-from components.pricing_comparison import (
-    render_pricing_comparison,
-    render_convergence_guide,
+from components.strategy_builder import (
+    render_strategy_builder,
+    export_positions_for_pnl_engine
 )
 from components.results_summary import (
     render_results_summary,
@@ -66,12 +66,9 @@ from charts.unified_paths import (
     render_volatility_paths_only,
     render_path_controls,
 )
-from charts.pricing_comparison_chart import (
-    render_pricing_comparison_chart,
-    render_single_price_comparison,
-)
 from charts.distributions import render_distributions_tab
 from charts.statistics import render_statistics_tab
+from charts.pnl_distribution import render_pnl_distribution_tab, render_risk_metrics_tab
 
 # Services
 from services.simulation_service import (
@@ -80,15 +77,14 @@ from services.simulation_service import (
     check_model_conditions,
     MODEL_NAMES,
 )
-from services.pricing_service import (
-    compare_pricing,
-    price_multiple_strikes,
-    get_available_pricing_methods,
-    compute_option_pnl,
+from services.simulation_runner import (
+    run_price_simulation,
+    calculate_pnl_from_paths,
 )
 
 # Black-Scholes functions for premium calculation
 from scipy.stats import norm
+
 
 def black_scholes_call_price(S: float, K: float, T: float, r: float, sigma: float) -> float:
     """Calculate Black-Scholes call price."""
@@ -97,6 +93,7 @@ def black_scholes_call_price(S: float, K: float, T: float, r: float, sigma: floa
     d1 = (np.log(S / K) + (r + 0.5 * sigma**2) * T) / (sigma * np.sqrt(T))
     d2 = d1 - sigma * np.sqrt(T)
     return S * norm.cdf(d1) - K * np.exp(-r * T) * norm.cdf(d2)
+
 
 def black_scholes_put_price(S: float, K: float, T: float, r: float, sigma: float) -> float:
     """Calculate Black-Scholes put price."""
@@ -126,6 +123,8 @@ if "selected_model" not in st.session_state:
     st.session_state.selected_model = "gbm"
 if "simulation_result" not in st.session_state:
     st.session_state.simulation_result = None
+if "pnl_result" not in st.session_state:
+    st.session_state.pnl_result = None
 if "all_params" not in st.session_state:
     st.session_state.all_params = {}
 
@@ -136,7 +135,7 @@ if "all_params" not in st.session_state:
 
 render_compact_header(
     title="Monte Carlo Simulation Explorer",
-    subtitle="Unified visualization of 7 stochastic models",
+    subtitle="Option Strategy P&L Analysis with 7 Stochastic Models",
     badge="Educational Tool"
 )
 
@@ -166,8 +165,24 @@ with st.sidebar:
 
     st.markdown("---")
 
-    # Option Parameters (for pricing comparison)
-    option_params = render_option_parameters()
+    # Strategy Builder
+    st.markdown("### 🎯 Option Strategy")
+
+    def bs_price(s, k, r, t, sigma, opt_type):
+        if opt_type == 'call':
+            return black_scholes_call_price(s, k, t, r, sigma)
+        else:
+            return black_scholes_put_price(s, k, t, r, sigma)
+
+    positions, stock_position = render_strategy_builder(
+        spot_price=market_params.get('spot', 100.0),
+        risk_free_rate=market_params.get('risk_free_rate', 0.05),
+        time_to_expiry=market_params.get('time_horizon', 1.0),
+        volatility=market_params.get('sigma', 0.20),
+        bs_price_function=bs_price
+    )
+
+    position_arrays = export_positions_for_pnl_engine(positions, stock_position)
 
     st.markdown("---")
 
@@ -176,8 +191,11 @@ with st.sidebar:
         **market_params,
         **model_params,
         **sim_settings,
-        **option_params,
         "model": model_key,
+        "price_model": model_key,
+        "option_positions": positions,
+        "stock_position": stock_position,
+        "position_arrays": position_arrays,
     }
     st.session_state.all_params = all_params
 
@@ -189,7 +207,6 @@ with st.sidebar:
                 st.warning(f"⚠️ {cond['name']}: {cond['message']}")
 
     # Run Simulation Button
-    st.markdown("---")
     run_clicked = st.button(
         "▶️ Run Simulation",
         type="primary",
@@ -207,6 +224,14 @@ with st.sidebar:
                 st.session_state.execution_time = execution_time
                 st.session_state.simulation_model = model_key
                 st.session_state.simulation_params = all_params.copy()
+
+                # Calculate P&L if strategy is defined
+                if len(position_arrays.get('strikes', [])) > 0:
+                    pnl_result = calculate_pnl_from_paths(result, all_params)
+                    st.session_state.pnl_result = pnl_result
+                else:
+                    st.session_state.pnl_result = None
+
                 st.success(f"✓ Completed in {execution_time*1000:.0f}ms")
             except Exception as e:
                 st.error(f"Error: {str(e)}")
@@ -217,12 +242,24 @@ with st.sidebar:
 # MAIN CONTENT - TABS
 # =============================================================================
 
-tab_sim, tab_pricing, tab_pnl, tab_edu = st.tabs([
-    "📈 Simulation",
-    "💰 Pricing Comparison",
-    "📊 Option P&L",
-    "📚 Education"
-])
+# Check if P&L analysis is available
+pnl_result = st.session_state.get("pnl_result")
+has_pnl = pnl_result is not None
+
+if has_pnl:
+    tab_sim, tab_pnl, tab_risk, tab_edu = st.tabs([
+        "📈 Simulation",
+        "💰 P&L Distribution",
+        "📊 Risk Metrics",
+        "📚 Education"
+    ])
+else:
+    tab_sim, tab_edu = st.tabs([
+        "📈 Simulation",
+        "📚 Education"
+    ])
+    tab_pnl = None
+    tab_risk = None
 
 
 # =============================================================================
@@ -233,7 +270,24 @@ with tab_sim:
     result = st.session_state.get("simulation_result")
 
     if result is None:
-        st.info("👈 Configure parameters in the sidebar and click **Run Simulation**")
+        st.info("👈 Configure parameters and strategy in the sidebar, then click **Run Simulation**")
+
+        # Show strategy summary if defined
+        if len(positions) > 0:
+            from streamlit_app.option_pricer.config.constants import CONTRACT_MULTIPLIER
+
+            total_net = 0.0
+            for pos in positions:
+                cost = pos.premium * pos.quantity * CONTRACT_MULTIPLIER
+                if pos.position_type == 'long':
+                    total_net -= cost
+                else:
+                    total_net += cost
+
+            st.markdown(
+                f"**Strategy configured:** {len(positions)} leg(s) | "
+                f"Net: {'+'if total_net >= 0 else ''}${total_net:,.0f}"
+            )
 
         # Show model comparison table
         with st.expander("📋 Model Comparison", expanded=True):
@@ -308,351 +362,44 @@ with tab_sim:
 
 
 # =============================================================================
-# TAB 2: PRICING COMPARISON
+# TAB 2: P&L DISTRIBUTION (Only shown when strategy is defined)
 # =============================================================================
 
-with tab_pricing:
-    result = st.session_state.get("simulation_result")
-
-    if result is None:
-        st.info("👈 Run a simulation first to compare pricing methods")
-        render_convergence_guide()
-    else:
-        sim_model = st.session_state.get("simulation_model", model_key)
+if tab_pnl is not None:
+    with tab_pnl:
+        pnl_result = st.session_state.get("pnl_result")
         sim_params = st.session_state.get("simulation_params", all_params)
 
-        # Available methods
-        available_methods = get_available_pricing_methods(sim_model)
-        st.caption(f"Available methods for {MODEL_NAMES.get(sim_model, sim_model)}: {', '.join(m.upper() for m in available_methods)}")
-
-        # Single strike comparison
-        st.subheader("Single Strike Comparison")
-
-        # Get current values for styling
-        pricing_type_val = st.session_state.get("pricing_type", "call")
-        is_call_display = pricing_type_val == "call"
-
-        # Dynamic styling based on option type
-        border_color = "#10b981" if is_call_display else "#ef4444"
-        bg_gradient = "linear-gradient(135deg, #f0fdf4 0%, #ecfdf5 100%)" if is_call_display else "linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%)"
-        type_badge_bg = "#d1fae5" if is_call_display else "#fee2e2"
-        type_badge_color = "#047857" if is_call_display else "#b91c1c"
-        type_label = "CALL" if is_call_display else "PUT"
-
-        # Option configuration with option_pricer style
-        st.markdown(f"""
-        <div style="background: {bg_gradient}; border: 1px solid {border_color}40; border-left: 4px solid {border_color}; border-radius: 8px; padding: 0.75rem; margin-bottom: 0.625rem;">
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-                <div style="display: flex; align-items: center; gap: 0.5rem;">
-                    <span style="font-size: 1rem;">📜</span>
-                    <span style="font-size: 0.7rem; font-weight: 700; color: #475569; text-transform: uppercase;">Option Configuration</span>
-                </div>
-                <span style="background: {type_badge_bg}; color: {type_badge_color}; font-size: 0.65rem; font-weight: 700; padding: 0.2rem 0.5rem; border-radius: 4px; text-transform: uppercase;">{type_label}</span>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-
-        col1, col2 = st.columns(2)
-        with col1:
-            option_type = st.selectbox(
-                "Type",
-                options=["call", "put"],
-                format_func=lambda x: f"{'📈' if x == 'call' else '📉'} {x.upper()}",
-                key="pricing_type"
+        if pnl_result is not None:
+            render_pnl_distribution_tab(
+                pnl_values=pnl_result['pnl_values'],
+                risk_metrics=pnl_result['risk_metrics'],
+                params=sim_params
             )
-            is_call = option_type == "call"
-
-        with col2:
-            strike = st.number_input(
-                "Strike ($)",
-                value=sim_params.get("strike", 100.0),
-                min_value=1.0,
-                step=1.0,
-                format="%.2f",
-                key="pricing_strike"
-            )
-
-        time_to_mat = sim_params.get("time_horizon", 1.0)
-
-        # Premium display styled like option_pricer
-        spot = sim_params.get("spot", 100.0)
-        rate = sim_params.get("risk_free_rate", 0.05)
-        char = get_model_characteristics(sim_model)
-        if char["volatility_type"] == "constant":
-            vol = sim_params.get("sigma", 0.20)
         else:
-            vol = np.sqrt(sim_params.get("v0", 0.04)) if "v0" in sim_params else sim_params.get("sigma0", 0.20)
-
-        if is_call:
-            premium = black_scholes_call_price(spot, strike, time_to_mat, rate, vol)
-        else:
-            premium = black_scholes_put_price(spot, strike, time_to_mat, rate, vol)
-
-        st.markdown(f"""
-        <div style="display: flex; justify-content: space-between; align-items: center; padding: 0.5rem 0.75rem; background: #ffffff; border-radius: 6px; border: 1px solid #e2e8f0; margin-bottom: 0.5rem;">
-            <span style="color: #64748b; font-size: 0.8rem;">
-                Premium (BS): <span style="font-family: 'JetBrains Mono', monospace; font-weight: 500;">${premium:.2f}</span>
-            </span>
-            <span style="color: #64748b; font-size: 0.8rem;">
-                Maturity: <span style="font-family: 'JetBrains Mono', monospace; font-weight: 500;">{time_to_mat:.2f}y</span>
-            </span>
-        </div>
-        """, unsafe_allow_html=True)
-
-        # Run pricing comparison
-        if st.button("Compare Pricing", key="compare_pricing_btn"):
-            with st.spinner("Computing prices..."):
-                comparison = compare_pricing(
-                    model_key=sim_model,
-                    params=sim_params,
-                    terminal_prices=result.terminal_prices,
-                    strike=strike,
-                    time_to_maturity=time_to_mat,
-                    spot=sim_params.get("spot", 100.0),
-                    risk_free_rate=sim_params.get("risk_free_rate", 0.05),
-                    is_call=is_call
-                )
-                st.session_state.pricing_comparison = comparison
-
-        comparison = st.session_state.get("pricing_comparison")
-        if comparison:
-            render_pricing_comparison(comparison)
-            render_single_price_comparison(comparison)
-
-        st.markdown("---")
-
-        # Multi-strike comparison
-        st.subheader("Multi-Strike Analysis")
-
-        col1, col2 = st.columns(2)
-        with col1:
-            strike_min = st.number_input("Min Strike", value=80.0, key="strike_min")
-        with col2:
-            strike_max = st.number_input("Max Strike", value=120.0, key="strike_max")
-
-        n_strikes = st.slider("Number of Strikes", 5, 20, 11, key="n_strikes")
-
-        if st.button("Run Multi-Strike Analysis", key="multi_strike_btn"):
-            strikes = np.linspace(strike_min, strike_max, n_strikes)
-
-            with st.spinner("Computing prices across strikes..."):
-                multi_result = price_multiple_strikes(
-                    model_key=sim_model,
-                    params=sim_params,
-                    simulation_result=result,
-                    strikes=strikes,
-                    time_to_maturity=time_to_mat,
-                    spot=sim_params.get("spot", 100.0),
-                    risk_free_rate=sim_params.get("risk_free_rate", 0.05),
-                    is_call=is_call
-                )
-                st.session_state.multi_strike_result = multi_result
-
-        multi_result = st.session_state.get("multi_strike_result")
-        if multi_result:
-            render_pricing_comparison_chart(
-                strikes=multi_result["strikes"],
-                mc_prices=multi_result["mc_prices"],
-                mc_errors=multi_result["mc_errors"],
-                analytical_prices=multi_result.get("analytical_prices"),
-                fft_prices=multi_result.get("fft_prices"),
-                spot=sim_params.get("spot", 100.0),
-                is_call=is_call
-            )
-
-        # Convergence guide
-        with st.expander("📚 Understanding MC Convergence"):
-            render_convergence_guide()
+            st.info("👈 Define an option strategy and run simulation to see P&L distribution.")
 
 
 # =============================================================================
-# TAB 3: OPTION P&L
+# TAB 3: RISK METRICS (Only shown when strategy is defined)
 # =============================================================================
 
-with tab_pnl:
-    result = st.session_state.get("simulation_result")
-
-    if result is None:
-        st.info("👈 Run a simulation first to analyze option P&L")
-    else:
-        sim_model = st.session_state.get("simulation_model", model_key)
+if tab_risk is not None:
+    with tab_risk:
+        pnl_result = st.session_state.get("pnl_result")
         sim_params = st.session_state.get("simulation_params", all_params)
 
-        st.subheader("Option P&L Analysis")
-
-        # Get current values for styling
-        pnl_type_val = st.session_state.get("pnl_type", "call")
-        pnl_position_val = st.session_state.get("pnl_position", "long")
-        is_call_display = pnl_type_val == "call"
-        is_long_display = pnl_position_val == "long"
-
-        # Dynamic styling based on position (long = green, short = red)
-        border_color = "#10b981" if is_long_display else "#ef4444"
-        bg_gradient = "linear-gradient(135deg, #f0fdf4 0%, #ecfdf5 100%)" if is_long_display else "linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%)"
-        position_badge_bg = "#d1fae5" if is_long_display else "#fee2e2"
-        position_badge_color = "#047857" if is_long_display else "#b91c1c"
-
-        # Option configuration styled container
-        st.markdown(f"""
-        <div style="background: {bg_gradient}; border: 1px solid {border_color}40; border-left: 4px solid {border_color}; border-radius: 8px; padding: 0.75rem; margin-bottom: 0.625rem;">
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-                <div style="display: flex; align-items: center; gap: 0.5rem;">
-                    <span style="font-size: 1rem;">💰</span>
-                    <span style="font-size: 0.7rem; font-weight: 700; color: #475569; text-transform: uppercase;">P&L Configuration</span>
-                </div>
-                <span style="background: {position_badge_bg}; color: {position_badge_color}; font-size: 0.65rem; font-weight: 700; padding: 0.2rem 0.5rem; border-radius: 4px; text-transform: uppercase;">{pnl_position_val.upper()}</span>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-
-        # Row 1: Type and Direction
-        col1, col2 = st.columns(2)
-
-        with col1:
-            option_type = st.selectbox(
-                "Type",
-                options=["call", "put"],
-                format_func=lambda x: f"{'📈' if x == 'call' else '📉'} {x.upper()}",
-                key="pnl_type"
+        if pnl_result is not None:
+            render_risk_metrics_tab(
+                metrics=pnl_result['risk_metrics'],
+                params=sim_params
             )
-            is_call = option_type == "call"
-
-        with col2:
-            position_type = st.selectbox(
-                "Direction",
-                options=["long", "short"],
-                format_func=lambda x: f"{'🟢' if x == 'long' else '🔴'} {x.upper()}",
-                key="pnl_position"
-            )
-            is_long = position_type == "long"
-
-        # Row 2: Strike and Contracts
-        col3, col4 = st.columns(2)
-
-        with col3:
-            strike = st.number_input(
-                "Strike ($)",
-                value=sim_params.get("strike", 100.0),
-                min_value=1.0,
-                step=1.0,
-                format="%.2f",
-                key="pnl_strike"
-            )
-
-        with col4:
-            quantity = st.number_input(
-                "Contracts",
-                value=1,
-                min_value=1,
-                max_value=1000,
-                step=1,
-                key="pnl_quantity"
-            )
-
-        # Premium calculation
-        spot = sim_params.get("spot", 100.0)
-        rate = sim_params.get("risk_free_rate", 0.05)
-        time_to_mat = sim_params.get("time_horizon", 1.0)
-
-        # Get volatility for BS pricing
-        char = get_model_characteristics(sim_model)
-        if char["volatility_type"] == "constant":
-            vol = sim_params.get("sigma", 0.20)
         else:
-            vol = np.sqrt(sim_params.get("v0", 0.04)) if "v0" in sim_params else sim_params.get("sigma0", 0.20)
-
-        # Calculate premium
-        if is_call:
-            premium = black_scholes_call_price(spot, strike, time_to_mat, rate, vol)
-        else:
-            premium = black_scholes_put_price(spot, strike, time_to_mat, rate, vol)
-
-        total_cost = premium * quantity * 100  # 100 shares per contract
-        cost_color = "#dc2626" if is_long else "#059669"
-        cost_prefix = "-" if is_long else "+"
-        cost_label = "Debit" if is_long else "Credit"
-
-        # Premium display styled like option_pricer
-        st.markdown(f"""
-        <div style="display: flex; justify-content: space-between; align-items: center; padding: 0.5rem 0.75rem; background: #ffffff; border-radius: 6px; border: 1px solid #e2e8f0; margin-bottom: 0.5rem;">
-            <span style="color: #64748b; font-size: 0.8rem;">
-                Premium: <span style="font-family: 'JetBrains Mono', monospace; font-weight: 500;">${premium:.2f}</span>
-            </span>
-            <span style="color: {cost_color}; font-weight: 700; font-size: 0.85rem; font-family: 'JetBrains Mono', monospace;">
-                {cost_prefix}${total_cost:,.2f}
-            </span>
-        </div>
-        """, unsafe_allow_html=True)
-
-        if st.button("Calculate P&L", key="calc_pnl_btn"):
-            pnl = compute_option_pnl(
-                price_paths=result.price_paths,
-                strike=strike,
-                premium=premium,
-                is_call=is_call,
-                is_long=is_long,
-                quantity=quantity
-            )
-            st.session_state.pnl_result = pnl
-
-        pnl = st.session_state.get("pnl_result")
-        if pnl is not None:
-            st.markdown("---")
-
-            # P&L Statistics
-            col1, col2, col3, col4 = st.columns(4)
-
-            with col1:
-                st.metric("Mean P&L", f"${np.mean(pnl):,.2f}")
-            with col2:
-                st.metric("Median P&L", f"${np.median(pnl):,.2f}")
-            with col3:
-                st.metric("Max P&L", f"${np.max(pnl):,.2f}")
-            with col4:
-                st.metric("Min P&L", f"${np.min(pnl):,.2f}")
-
-            # P&L Distribution
-            import plotly.graph_objects as go
-
-            fig = go.Figure()
-            fig.add_trace(go.Histogram(
-                x=pnl,
-                nbinsx=50,
-                marker_color="rgba(31, 119, 180, 0.7)",
-                name="P&L"
-            ))
-            fig.add_vline(x=0, line_dash="dash", line_color="red")
-            fig.add_vline(x=np.mean(pnl), line_dash="solid", line_color="green",
-                         annotation_text=f"Mean: ${np.mean(pnl):.2f}")
-
-            fig.update_layout(
-                title="<b>P&L Distribution</b>",
-                xaxis_title="P&L ($)",
-                yaxis_title="Count",
-                height=400
-            )
-            st.plotly_chart(fig, use_container_width=True)
-
-            # Risk metrics
-            with st.expander("📊 Risk Metrics", expanded=True):
-                col1, col2 = st.columns(2)
-
-                with col1:
-                    st.markdown("**Value at Risk**")
-                    var_95 = np.percentile(pnl, 5)
-                    var_99 = np.percentile(pnl, 1)
-                    st.metric("VaR 95%", f"${var_95:,.2f}")
-                    st.metric("VaR 99%", f"${var_99:,.2f}")
-
-                with col2:
-                    st.markdown("**Additional Stats**")
-                    win_rate = np.mean(pnl > 0) * 100
-                    st.metric("Win Rate", f"{win_rate:.1f}%")
-                    st.metric("Std Dev", f"${np.std(pnl):,.2f}")
+            st.info("👈 Define an option strategy and run simulation to see risk metrics.")
 
 
 # =============================================================================
-# TAB 4: EDUCATION
+# TAB: EDUCATION (Always shown)
 # =============================================================================
 
 with tab_edu:
