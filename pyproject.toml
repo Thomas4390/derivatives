@@ -12,6 +12,11 @@ dependencies = [
     "scipy-stubs~=1.17.0",
 ]
 
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
