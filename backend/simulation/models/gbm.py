@@ -16,6 +16,7 @@ Author: Thomas
 Created: 2025
 """
 
+import warnings
 import numpy as np
 from numba import njit, prange
 import time
@@ -215,6 +216,17 @@ class GBMSimulator(BaseSimulator):
         """
         self.validate_inputs(s0, mu, t, n_paths, n_steps)
 
+        # Warn and adjust if antithetic is on with odd n_paths (but keep at least 2)
+        if self._antithetic and n_paths % 2 != 0:
+            adjusted_paths = max(n_paths - 1, 2)
+            if adjusted_paths != n_paths:
+                warnings.warn(
+                    f"Antithetic sampling requires even n_paths. "
+                    f"Using {adjusted_paths} instead of {n_paths}.",
+                    UserWarning
+                )
+                n_paths = adjusted_paths
+
         if seed is not None:
             np.random.seed(seed)
 
@@ -273,6 +285,17 @@ class GBMSimulator(BaseSimulator):
             Terminal prices S(T), shape (n_paths,)
         """
         self.validate_inputs(s0, mu, t, n_paths, n_steps)
+
+        # Warn and adjust if antithetic is on with odd n_paths (but keep at least 2)
+        if self._antithetic and n_paths % 2 != 0:
+            adjusted_paths = max(n_paths - 1, 2)
+            if adjusted_paths != n_paths:
+                warnings.warn(
+                    f"Antithetic sampling requires even n_paths. "
+                    f"Using {adjusted_paths} instead of {n_paths}.",
+                    UserWarning
+                )
+                n_paths = adjusted_paths
 
         if seed is not None:
             np.random.seed(seed)

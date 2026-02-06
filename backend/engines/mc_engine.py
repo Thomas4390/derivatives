@@ -19,7 +19,7 @@ import numpy as np
 from backend.core.interfaces import PricingEngine, Instrument, Model
 from backend.core.market import MarketEnvironment
 from backend.core.result_types import (
-    PricingResult, PricingCapability, ExerciseStyle
+    PricingResult, PricingCapability, ExerciseStyle, GreeksResult
 )
 from backend.instruments.options import VanillaOption
 from backend.instruments.payoffs import VanillaCallPayoff, VanillaPutPayoff
@@ -109,9 +109,15 @@ class MonteCarloEngine(PricingEngine):
 
         MonteCarloEngine requires:
         - European exercise style (for now)
+        - Instrument with fixed strike (for now - path-dependent options need special handling)
         - Model supports Monte Carlo
         """
         if instrument.exercise_style != ExerciseStyle.EUROPEAN:
+            return False
+
+        # For now, MC requires a fixed strike
+        # TODO: Support path-dependent options (lookback, asian) with full path simulation
+        if not hasattr(instrument, 'strike'):
             return False
 
         if PricingCapability.MONTE_CARLO not in model.supported_engines:
@@ -170,6 +176,47 @@ class MonteCarloEngine(PricingEngine):
             engine="MonteCarloEngine",
             model=model.name,
             error=result.std_error
+        )
+
+    def greeks(
+        self,
+        instrument: Instrument,
+        model: Model,
+        market: MarketEnvironment,
+    ) -> GreeksResult:
+        """
+        Calculate Greeks via numerical finite differences.
+
+        Note: MonteCarloEngine returns only first-order Greeks (delta, gamma, vega,
+        theta, rho). For higher-order Greeks, use the GreeksCalculator class which
+        can compute second-order (vanna, volga, charm, veta) and third-order
+        (speed, zomma, color, ultima) Greeks numerically.
+
+        Parameters
+        ----------
+        instrument : Instrument
+            The option to calculate Greeks for
+        model : Model
+            The stochastic model
+        market : MarketEnvironment
+            Current market conditions
+
+        Returns
+        -------
+        GreeksResult
+            First-order Greeks only (delta, gamma, vega, theta, rho)
+        """
+        from backend.greeks.numerical import ModelNumericalGreeks
+
+        calc = ModelNumericalGreeks()
+        num_greeks = calc.calculate(self, instrument, model, market)
+
+        return GreeksResult(
+            delta=num_greeks.delta,
+            gamma=num_greeks.gamma,
+            vega=num_greeks.vega,
+            theta=num_greeks.theta,
+            rho=num_greeks.rho,
         )
 
     def price_with_paths(

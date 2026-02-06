@@ -10,11 +10,15 @@ Author: Thomas
 Created: 2025
 """
 
-from typing import Dict, List, Optional, Type, Tuple
+from typing import Callable, Dict, List, Optional, Type, Tuple, Union
 
 from backend.core.interfaces import Instrument, Model, PricingEngine
 from backend.core.result_types import PricingResult, PricingCapability, ExerciseStyle
 from backend.core.market import MarketEnvironment
+
+# Type alias for engine providers
+# Supports: Class, pre-configured instance, or factory function
+EngineProvider = Union[Type[PricingEngine], Callable[[], PricingEngine], PricingEngine]
 
 
 class EngineRegistry:
@@ -26,20 +30,26 @@ class EngineRegistry:
     The registry maintains a mapping of (Model, Capability) -> Engine
     and selects the best available option.
 
-    Important
-    ---------
-    Registered engines are instantiated with no arguments, so they must
-    have sensible default parameters. For engines with specific configurations,
-    instantiate them directly rather than using the registry:
+    Engine Registration
+    -------------------
+    The registry supports three types of providers:
 
-        # Direct instantiation with custom parameters
-        engine = MonteCarloEngine(n_paths=100000, seed=42)
-        result = engine.price(option, model, market)
+    1. **Class** (backward compatible): Instantiated with no arguments
+    2. **Pre-configured instance**: Used directly as-is
+    3. **Factory function**: Called to create a new instance each time
 
     Examples
     --------
-    # Register an engine
+    # Register a class (backward compatible)
     EngineRegistry.register("GBM", PricingCapability.ANALYTICAL, BSAnalyticEngine)
+
+    # Register a pre-configured instance
+    EngineRegistry.register("GBM", PricingCapability.MONTE_CARLO,
+                            MonteCarloEngine(n_paths=500_000))
+
+    # Register a factory function
+    EngineRegistry.register("GBM", PricingCapability.MONTE_CARLO,
+                            lambda: MonteCarloEngine(n_paths=200_000))
 
     # Auto-select engine and price
     result = EngineRegistry.price(option, model, market)
@@ -52,14 +62,14 @@ class EngineRegistry:
         PricingCapability.MONTE_CARLO,
     ]
 
-    _engines: Dict[Tuple[str, PricingCapability], Type[PricingEngine]] = {}
+    _engines: Dict[Tuple[str, PricingCapability], EngineProvider] = {}
 
     @classmethod
     def register(
         cls,
         model_name: str,
         capability: PricingCapability,
-        engine_class: Type[PricingEngine],
+        engine_provider: EngineProvider,
     ) -> None:
         """
         Register an engine for a model/capability pair.
@@ -70,10 +80,38 @@ class EngineRegistry:
             Name of the model (e.g., "GBM", "Heston")
         capability : PricingCapability
             Type of engine
-        engine_class : Type[PricingEngine]
-            Engine class to instantiate
+        engine_provider : EngineProvider
+            Engine class, pre-configured instance, or factory function
         """
-        cls._engines[(model_name, capability)] = engine_class
+        cls._engines[(model_name, capability)] = engine_provider
+
+    @classmethod
+    def _instantiate(cls, provider: EngineProvider) -> PricingEngine:
+        """
+        Instantiate an engine from a provider.
+
+        Parameters
+        ----------
+        provider : EngineProvider
+            Engine class, pre-configured instance, or factory function
+
+        Returns
+        -------
+        PricingEngine
+            Engine instance ready for pricing
+
+        Raises
+        ------
+        TypeError
+            If provider is not a valid engine provider
+        """
+        if isinstance(provider, PricingEngine):
+            # Pre-configured instance
+            return provider
+        elif callable(provider):
+            # Class or factory function
+            return provider()
+        raise TypeError(f"Invalid engine provider: {provider}")
 
     @classmethod
     def unregister(cls, model_name: str, capability: PricingCapability) -> bool:
@@ -139,7 +177,7 @@ class EngineRegistry:
         if preferred is not None:
             key = (model_name, preferred)
             if key in cls._engines:
-                engine = cls._engines[key]()
+                engine = cls._instantiate(cls._engines[key])
                 if exercise in engine.supported_exercises:
                     return engine
                 raise ValueError(
@@ -158,12 +196,14 @@ class EngineRegistry:
             if key not in cls._engines:
                 continue
 
-            engine = cls._engines[key]()
+            engine = cls._instantiate(cls._engines[key])
             if exercise in engine.supported_exercises:
                 return engine
 
+        registered = cls.list_engines()
         raise ValueError(
-            f"No compatible engine found for {model_name} with {exercise.name} exercise"
+            f"No compatible engine found for {model_name} with {exercise.name} exercise. "
+            f"Registered engines: {registered}"
         )
 
     @classmethod

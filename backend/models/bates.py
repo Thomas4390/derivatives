@@ -120,6 +120,8 @@ class BatesModel(Model):
         # Jump validation
         if self.lambda_j < 0:
             raise ValueError(f"lambda_j must be non-negative, got {self.lambda_j}")
+        if not -1.0 <= self.mu_j <= 1.0:
+            raise ValueError(f"mu_j should be in [-1, 1], got {self.mu_j}")
         if self.sigma_j < 0:
             raise ValueError(f"sigma_j must be non-negative, got {self.sigma_j}")
 
@@ -316,6 +318,113 @@ class BatesModel(Model):
         return HestonModel(
             v0=self.v0, kappa=self.kappa, theta=self.theta,
             xi=self.xi, rho=self.rho
+        )
+
+    def mean_variance(self, t: float) -> float:
+        """
+        Expected variance at time t: E[V_t].
+
+        Same as Heston - the variance process is unchanged by jumps.
+
+        Parameters
+        ----------
+        t : float
+            Time
+
+        Returns
+        -------
+        float
+            Expected variance
+        """
+        decay = np.exp(-self.kappa * t)
+        return self.theta + (self.v0 - self.theta) * decay
+
+    def expected_variance(self, t: float) -> float:
+        """
+        Expected variance at time t under Q measure.
+
+        Alias for mean_variance for API consistency.
+
+        Parameters
+        ----------
+        t : float
+            Time
+
+        Returns
+        -------
+        float
+            Expected variance
+        """
+        return self.mean_variance(t)
+
+    def total_variance(self, t: float = 1.0) -> float:
+        """
+        Total variance over period t, including jump contribution.
+
+        Combines stochastic volatility and jump contributions.
+
+        Parameters
+        ----------
+        t : float
+            Time period (default 1 year)
+
+        Returns
+        -------
+        float
+            Total variance
+        """
+        # Stochastic vol contribution (from Heston)
+        if abs(self.kappa) < 1e-10:
+            sv_var = self.v0 * t
+        else:
+            sv_var = self.theta * t + (self.v0 - self.theta) * (1 - np.exp(-self.kappa * t)) / self.kappa
+
+        # Jump contribution (from Merton-style jumps)
+        jump_var = self.lambda_j * t * (self.mu_j ** 2 + self.sigma_j ** 2)
+
+        return sv_var + jump_var
+
+    def total_volatility(self, t: float = 1.0) -> float:
+        """
+        Total annualized volatility including jumps.
+
+        Parameters
+        ----------
+        t : float
+            Time period (default 1 year)
+
+        Returns
+        -------
+        float
+            Annualized volatility
+        """
+        return np.sqrt(self.total_variance(t) / t)
+
+    def create_simulator(self, **kwargs):
+        """
+        Create a Bates simulator for Monte Carlo pricing.
+
+        Parameters
+        ----------
+        **kwargs
+            Additional simulator parameters
+
+        Returns
+        -------
+        BatesSimulator
+            Configured simulator instance
+        """
+        from backend.simulation.models.bates import BatesSimulator
+        return BatesSimulator(
+            v0=self.v0,
+            kappa=self.kappa,
+            theta=self.theta,
+            xi=self.xi,
+            rho=self.rho,
+            lambda_j=self.lambda_j,
+            mu_j=self.mu_j,
+            sigma_j=self.sigma_j,
+            **kwargs
         )
 
     def __repr__(self) -> str:

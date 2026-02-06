@@ -5,30 +5,25 @@ Exercise Schedules
 Exercise type definitions and schedules for options.
 
 This module provides:
-- ExerciseType: Enum for exercise styles
 - EuropeanExercise: Exercise only at maturity
 - AmericanExercise: Exercise any time up to maturity
 - BermudanExercise: Exercise at discrete dates
+
+Note: ExerciseStyle enum is defined in backend.core.result_types
+      ExerciseType is an alias for backward compatibility.
 
 Author: Thomas
 Created: 2025
 """
 
-from enum import Enum
 from typing import List, Optional, Union, NamedTuple
 from dataclasses import dataclass
 import numpy as np
 
+from backend.core.result_types import ExerciseStyle
 
-# =============================================================================
-# Exercise Types
-# =============================================================================
-
-class ExerciseType(Enum):
-    """Option exercise style."""
-    EUROPEAN = "european"
-    AMERICAN = "american"
-    BERMUDAN = "bermudan"
+# Backward compatibility alias
+ExerciseType = ExerciseStyle
 
 
 # =============================================================================
@@ -48,8 +43,8 @@ class EuropeanExercise:
     maturity: float
 
     @property
-    def exercise_type(self) -> ExerciseType:
-        return ExerciseType.EUROPEAN
+    def exercise_type(self) -> ExerciseStyle:
+        return ExerciseStyle.EUROPEAN
 
     def can_exercise(self, t: float, tol: float = 1e-8) -> bool:
         """Check if exercise is allowed at time t."""
@@ -76,8 +71,8 @@ class AmericanExercise:
     start_time: float = 0.0
 
     @property
-    def exercise_type(self) -> ExerciseType:
-        return ExerciseType.AMERICAN
+    def exercise_type(self) -> ExerciseStyle:
+        return ExerciseStyle.AMERICAN
 
     def can_exercise(self, t: float, tol: float = 1e-8) -> bool:
         """Check if exercise is allowed at time t."""
@@ -117,8 +112,8 @@ class BermudanExercise:
         self.exercise_dates = sorted(self.exercise_dates)
 
     @property
-    def exercise_type(self) -> ExerciseType:
-        return ExerciseType.BERMUDAN
+    def exercise_type(self) -> ExerciseStyle:
+        return ExerciseStyle.BERMUDAN
 
     @property
     def maturity(self) -> float:
@@ -191,7 +186,7 @@ ExerciseSchedule = Union[EuropeanExercise, AmericanExercise, BermudanExercise]
 # =============================================================================
 
 def create_exercise(
-    exercise_type: Union[str, ExerciseType],
+    exercise_type: Union[str, ExerciseStyle],
     maturity: float,
     exercise_dates: Optional[List[float]] = None,
     start_time: float = 0.0
@@ -201,7 +196,7 @@ def create_exercise(
 
     Parameters
     ----------
-    exercise_type : str or ExerciseType
+    exercise_type : str or ExerciseStyle
         'european', 'american', or 'bermudan'
     maturity : float
         Option maturity in years
@@ -216,15 +211,23 @@ def create_exercise(
         Appropriate exercise schedule object
     """
     if isinstance(exercise_type, str):
-        exercise_type = ExerciseType(exercise_type.lower())
+        # Map string to ExerciseStyle enum
+        style_map = {
+            "european": ExerciseStyle.EUROPEAN,
+            "american": ExerciseStyle.AMERICAN,
+            "bermudan": ExerciseStyle.BERMUDAN,
+        }
+        exercise_type = style_map.get(exercise_type.lower())
+        if exercise_type is None:
+            raise ValueError(f"Unknown exercise type: {exercise_type}")
 
-    if exercise_type == ExerciseType.EUROPEAN:
+    if exercise_type == ExerciseStyle.EUROPEAN:
         return EuropeanExercise(maturity=maturity)
 
-    elif exercise_type == ExerciseType.AMERICAN:
+    elif exercise_type == ExerciseStyle.AMERICAN:
         return AmericanExercise(maturity=maturity, start_time=start_time)
 
-    elif exercise_type == ExerciseType.BERMUDAN:
+    elif exercise_type == ExerciseStyle.BERMUDAN:
         if exercise_dates is None:
             raise ValueError("exercise_dates required for Bermudan exercise")
         return BermudanExercise(exercise_dates=exercise_dates)

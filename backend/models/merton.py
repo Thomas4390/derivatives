@@ -90,6 +90,8 @@ class MertonModel(Model):
             raise ValueError(f"sigma must be positive, got {self.sigma}")
         if self.lambda_j < 0:
             raise ValueError(f"lambda_j must be non-negative, got {self.lambda_j}")
+        if not -1.0 <= self.mu_j <= 1.0:
+            raise ValueError(f"mu_j should be in [-1, 1], got {self.mu_j}")
         if self.sigma_j < 0:
             raise ValueError(f"sigma_j must be non-negative, got {self.sigma_j}")
 
@@ -261,6 +263,29 @@ class MertonModel(Model):
         """
         from backend.models.gbm import GBMModel
         return GBMModel(sigma=self.sigma)
+
+    def create_simulator(self, **kwargs):
+        """
+        Create a Merton simulator for Monte Carlo pricing.
+
+        Parameters
+        ----------
+        **kwargs
+            Additional simulator parameters
+
+        Returns
+        -------
+        MertonSimulator
+            Configured simulator instance
+        """
+        from backend.simulation.models.merton import MertonSimulator
+        return MertonSimulator(
+            sigma=self.sigma,
+            lambda_j=self.lambda_j,
+            mu_j=self.mu_j,
+            sigma_j=self.sigma_j,
+            **kwargs
+        )
 
     def __repr__(self) -> str:
         return (

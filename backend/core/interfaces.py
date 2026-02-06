@@ -12,7 +12,7 @@ Created: 2025
 """
 
 from abc import ABC, abstractmethod
-from typing import List
+from typing import List, Dict, Any
 import numpy as np
 
 from backend.core.result_types import PricingResult, PricingCapability, ExerciseStyle
@@ -145,7 +145,7 @@ class Model(ABC):
         pass
 
     @abstractmethod
-    def get_parameters(self) -> dict:
+    def get_parameters(self) -> Dict[str, Any]:
         """Return model parameters as dictionary."""
         pass
 
@@ -177,6 +177,35 @@ class Model(ABC):
         """
         raise NotImplementedError(f"{self.name} has no characteristic function")
 
+    def characteristic_function_vectorized(
+        self, u: np.ndarray, s0: float, t: float, r: float, q: float = 0.0
+    ) -> np.ndarray:
+        """
+        Vectorized characteristic function for FFT pricing.
+
+        Override in models that support efficient FFT pricing.
+        Default implementation falls back to scalar version.
+
+        Parameters
+        ----------
+        u : np.ndarray
+            Array of Fourier transform variables
+        s0 : float
+            Initial spot price
+        t : float
+            Time to maturity
+        r : float
+            Risk-free rate
+        q : float
+            Dividend yield
+
+        Returns
+        -------
+        np.ndarray
+            Array of characteristic function values
+        """
+        raise NotImplementedError(f"{self.name} has no vectorized characteristic function")
+
     def drift(self, s: float, v: float, t: float, r: float, q: float) -> float:
         """
         Drift coefficient for SDE discretization.
@@ -188,7 +217,10 @@ class Model(ABC):
         s : float
             Current spot price
         v : float
-            Current variance/volatility state
+            Current variance state. For stochastic volatility models (Heston,
+            Bates), this is the instantaneous variance v_t. For GBM/Merton,
+            this is sigma^2 (constant variance). Named 'v' for brevity in
+            SDE discretization code.
         t : float
             Current time
         r : float
@@ -212,7 +244,10 @@ class Model(ABC):
         s : float
             Current spot price
         v : float
-            Current variance/volatility state
+            Current variance state. For stochastic volatility models (Heston,
+            Bates), this is the instantaneous variance v_t. For GBM/Merton,
+            this is sigma^2 (constant variance). Named 'v' for brevity in
+            SDE discretization code.
         t : float
             Current time
 
@@ -222,6 +257,34 @@ class Model(ABC):
             Diffusion value
         """
         raise NotImplementedError(f"{self.name} has no SDE diffusion")
+
+    def create_simulator(self, **kwargs):
+        """
+        Create a simulator for Monte Carlo pricing.
+
+        This method provides a clean bridge between Model parameters
+        and the simulation infrastructure. Each model knows how to
+        create its own simulator with the correct parameters.
+
+        Parameters
+        ----------
+        **kwargs
+            Simulator-specific parameters (e.g., antithetic, scheme)
+
+        Returns
+        -------
+        BaseSimulator
+            Configured simulator instance
+
+        Raises
+        ------
+        NotImplementedError
+            If the model does not support Monte Carlo simulation
+        """
+        raise NotImplementedError(
+            f"{self.name} does not support Monte Carlo simulation. "
+            "Implement create_simulator() to enable MC pricing."
+        )
 
 
 # =============================================================================

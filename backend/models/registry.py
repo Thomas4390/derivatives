@@ -23,7 +23,8 @@ Created: 2025
 
 from typing import Dict, Type, Optional, List, Any, TYPE_CHECKING
 
-from backend.models.base import BaseModel, PricingCapability
+from backend.core.interfaces import Model as BaseModel
+from backend.core.result_types import PricingCapability
 
 if TYPE_CHECKING:
     from backend.simulation.base import BaseSimulator
@@ -129,7 +130,8 @@ class ModelRegistry:
             Configured model instance
         """
         model_class = self.get(key)
-        return model_class.from_params(**params)
+        # Models are dataclasses, so use direct constructor
+        return model_class(**params)
 
     def create_simulator(self, key: str, **params) -> "BaseSimulator":
         """
@@ -151,8 +153,8 @@ class ModelRegistry:
         simulator_opts = {}
         model_params = {}
 
-        # Known simulator options
-        sim_keys = {"scheme", "use_antithetic", "use_control_variate"}
+        # Known simulator options (use 'antithetic' to match GBMModel.create_simulator)
+        sim_keys = {"scheme", "antithetic", "control_variate"}
 
         for k, v in params.items():
             if k in sim_keys:

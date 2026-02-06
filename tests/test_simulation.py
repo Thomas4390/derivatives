@@ -868,7 +868,8 @@ class TestEdgeCases:
         report.info("Tests simulation with only 1 path (edge case)")
         report.info("Used for visualization or debugging, not for pricing")
 
-        gbm_sim = create_gbm(sigma=0.2)
+        # Disable antithetic for single path (requires even paths)
+        gbm_sim = create_gbm(sigma=0.2, antithetic=False)
 
         result = gbm_sim.simulate_paths(
             s0=100.0, mu=0.05, t=1.0,

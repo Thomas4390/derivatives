@@ -50,6 +50,13 @@ from backend.instruments.payoffs import (
     DigitalCallPayoff,
     DigitalPutPayoff,
     CompositePayoff,
+    # Exotic payoffs
+    AsianCallPayoff,
+    AsianPutPayoff,
+    BarrierUpOutCallPayoff,
+    BarrierDownOutPutPayoff,
+    LookbackFloatingCallPayoff,
+    LookbackFloatingPutPayoff,
 )
 
 # Options
@@ -65,6 +72,17 @@ from backend.instruments.options import (
     AmericanPut,
     BermudanCall,
     BermudanPut,
+    # Exotic options
+    AsianOption,
+    BarrierOption,
+    LookbackOption,
+    # Exotic factories
+    AsianCall,
+    AsianPut,
+    BarrierUpOutCall,
+    BarrierDownOutPut,
+    LookbackCall,
+    LookbackPut,
 )
 
 # Strategies
@@ -82,12 +100,13 @@ from backend.instruments.strategies import (
 
 # Exercise schedules
 from backend.instruments.exercise import (
-    ExerciseType,
+    ExerciseType,  # Backward compatibility alias for ExerciseStyle
     EuropeanExercise,
     AmericanExercise,
     BermudanExercise,
     create_exercise,
 )
+from backend.core.result_types import ExerciseStyle
 
 
 __all__ = [
@@ -97,6 +116,13 @@ __all__ = [
     "DigitalCallPayoff",
     "DigitalPutPayoff",
     "CompositePayoff",
+    # Exotic payoffs
+    "AsianCallPayoff",
+    "AsianPutPayoff",
+    "BarrierUpOutCallPayoff",
+    "BarrierDownOutPutPayoff",
+    "LookbackFloatingCallPayoff",
+    "LookbackFloatingPutPayoff",
     # Options
     "VanillaOption",
     "DigitalOption",
@@ -109,6 +135,17 @@ __all__ = [
     "AmericanPut",
     "BermudanCall",
     "BermudanPut",
+    # Exotic options
+    "AsianOption",
+    "BarrierOption",
+    "LookbackOption",
+    # Exotic factories
+    "AsianCall",
+    "AsianPut",
+    "BarrierUpOutCall",
+    "BarrierDownOutPut",
+    "LookbackCall",
+    "LookbackPut",
     # Strategies
     "StrategyLeg",
     "OptionStrategy",
@@ -120,7 +157,8 @@ __all__ = [
     "CallSpread",
     "PutSpread",
     # Exercise schedules
-    "ExerciseType",
+    "ExerciseStyle",  # Primary enum
+    "ExerciseType",   # Backward compatibility alias
     "EuropeanExercise",
     "AmericanExercise",
     "BermudanExercise",

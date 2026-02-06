@@ -318,6 +318,87 @@ class HestonModel(Model):
         decay = np.exp(-self.kappa * t)
         return self.theta + (self.v0 - self.theta) * decay
 
+    def expected_variance(self, t: float) -> float:
+        """
+        Expected variance at time t under Q measure.
+
+        Alias for mean_variance for API consistency with MertonModel.
+
+        Parameters
+        ----------
+        t : float
+            Time
+
+        Returns
+        -------
+        float
+            Expected variance
+        """
+        return self.mean_variance(t)
+
+    def total_variance(self, t: float = 1.0) -> float:
+        """
+        Approximate total variance over period t.
+
+        For stochastic volatility, this integrates E[V_s] from 0 to t.
+
+        Parameters
+        ----------
+        t : float
+            Time period (default 1 year)
+
+        Returns
+        -------
+        float
+            Integrated expected variance
+        """
+        # Integral of E[V_s] = theta*t + (v0 - theta)*(1 - exp(-kappa*t))/kappa
+        if abs(self.kappa) < 1e-10:
+            return self.v0 * t
+        return self.theta * t + (self.v0 - self.theta) * (1 - np.exp(-self.kappa * t)) / self.kappa
+
+    def total_volatility(self, t: float = 1.0) -> float:
+        """
+        Approximate total annualized volatility.
+
+        Returns sqrt(total_variance(t) / t).
+
+        Parameters
+        ----------
+        t : float
+            Time period (default 1 year)
+
+        Returns
+        -------
+        float
+            Annualized volatility
+        """
+        return np.sqrt(self.total_variance(t) / t)
+
+    def create_simulator(self, **kwargs):
+        """
+        Create a Heston simulator for Monte Carlo pricing.
+
+        Parameters
+        ----------
+        **kwargs
+            Additional simulator parameters (e.g., scheme)
+
+        Returns
+        -------
+        HestonSimulator
+            Configured simulator instance
+        """
+        from backend.simulation.models.heston import HestonSimulator
+        return HestonSimulator(
+            v0=self.v0,
+            kappa=self.kappa,
+            theta=self.theta,
+            xi=self.xi,
+            rho=self.rho,
+            **kwargs
+        )
+
     def __repr__(self) -> str:
         return (
             f"HestonModel(v0={self.v0}, kappa={self.kappa}, "

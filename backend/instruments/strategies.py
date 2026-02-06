@@ -50,6 +50,13 @@ class StrategyLeg:
     is_call: bool
     quantity: int
 
+    def __post_init__(self):
+        """Validate leg parameters."""
+        if self.quantity == 0:
+            raise ValueError("quantity cannot be zero")
+        if self.strike <= 0:
+            raise ValueError(f"strike must be positive, got {self.strike}")
+
     @property
     def payoff(self) -> Payoff:
         """Payoff for this leg (unweighted)."""
