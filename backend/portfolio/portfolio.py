@@ -435,7 +435,7 @@ class OptionsPortfolio:
         h_r = rate_bump
         v_r_up = self.value(market.bump_rate(h_r))
         v_r_down = self.value(market.bump_rate(-h_r))
-        rho = (v_r_up - v_r_down) / (2 * h_r)
+        rho = (v_r_up - v_r_down) / (2 * h_r) / 100
 
         # Vega (requires model bumping)
         vega = self._compute_vega(market, vol_bump)
@@ -455,73 +455,23 @@ class OptionsPortfolio:
         """
         Compute vega by bumping model volatility.
 
-        Handles different volatility parameters:
-        - "sigma" for GBM and Merton models
-        - "v0" for Heston and Bates models
-        - "sigma0" for GARCH family models
+        Uses the shared vol_bump utility for consistent bumping across
+        all model types (GBM, Merton, Heston, Bates, GARCH).
         """
         import warnings
-        params = self._model.get_parameters()
+        from backend.models.vol_bump import create_vol_bumped_pair
 
-        if "sigma" in params:
-            # GBM/Merton models - bump sigma
-            model_class = type(self._model)
-            sigma = params["sigma"]
+        model_up, model_down = create_vol_bumped_pair(self._model, h)
 
-            params_up = dict(params)
-            params_down = dict(params)
-            params_up["sigma"] = sigma + h
-            params_down["sigma"] = max(sigma - h, 0.001)
-
-            model_up = model_class(**params_up)
-            model_down = model_class(**params_down)
-
+        if model_up is not None and model_down is not None:
             v_up = self._value_with_model(market, model_up)
             v_down = self._value_with_model(market, model_down)
+            return (v_up - v_down) / (2 * h) / 100
 
-            return (v_up - v_down) / (2 * h)
-
-        elif "v0" in params:
-            # Heston/Bates - bump v0
-            v0 = params["v0"]
-
-            model_class = type(self._model)
-            params_up = dict(params)
-            params_down = dict(params)
-            params_up["v0"] = v0 + h * v0
-            params_down["v0"] = max(v0 - h * v0, 0.001)
-
-            model_up = model_class(**params_up)
-            model_down = model_class(**params_down)
-
-            v_up = self._value_with_model(market, model_up)
-            v_down = self._value_with_model(market, model_down)
-
-            return (v_up - v_down) / (2 * h * v0)
-
-        elif "sigma0" in params:
-            # GARCH family - bump sigma0 (initial volatility)
-            sigma0 = params["sigma0"]
-
-            model_class = type(self._model)
-            params_up = dict(params)
-            params_down = dict(params)
-            params_up["sigma0"] = sigma0 + h
-            params_down["sigma0"] = max(sigma0 - h, 0.001)
-
-            model_up = model_class(**params_up)
-            model_down = model_class(**params_down)
-
-            v_up = self._value_with_model(market, model_up)
-            v_down = self._value_with_model(market, model_down)
-
-            return (v_up - v_down) / (2 * h)
-
-        # Unknown model type - warn and return 0.0
         warnings.warn(
             f"Cannot compute vega for model '{self._model.name}': "
-            f"no recognized volatility parameter (sigma, v0, sigma0). "
-            f"Available parameters: {list(params.keys())}",
+            f"unsupported model type for vol bumping. "
+            f"Available parameters: {list(self._model.get_parameters().keys())}",
             UserWarning
         )
         return 0.0
@@ -553,7 +503,7 @@ class OptionsPortfolio:
             total_decayed += self._stock.quantity * market.spot
 
         # Theta = change in value for 1 day time decay (negative)
-        return (total_decayed - v0) / dt
+        return total_decayed - v0
 
     def _value_with_model(self, market: MarketEnvironment, model: Model) -> float:
         """Value portfolio with a different model."""

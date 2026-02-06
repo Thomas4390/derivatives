@@ -74,13 +74,22 @@ class BSAnalyticEngine(PricingEngine):
 
         BSAnalyticEngine requires:
         - European exercise style
-        - VanillaOption instrument
-        - GBMModel (constant volatility)
+        - Instrument with fixed strike
+        - Model supporting analytical pricing (GBMModel)
         """
-        is_european = instrument.exercise_style == ExerciseStyle.EUROPEAN
-        is_vanilla = isinstance(instrument, VanillaOption)
-        is_gbm = isinstance(model, GBMModel)
-        return is_european and is_vanilla and is_gbm
+        # Check exercise style
+        if instrument.exercise_style != ExerciseStyle.EUROPEAN:
+            return False
+
+        # Check instrument has a fixed strike
+        if not hasattr(instrument, 'strike'):
+            return False
+
+        # Check model supports analytical pricing
+        if PricingCapability.ANALYTICAL not in model.supported_engines:
+            return False
+
+        return True
 
     def price(
         self,
@@ -172,7 +181,14 @@ class BSAnalyticEngine(PricingEngine):
         sigma = gbm.sigma
         is_call = option.is_call
 
-        return self._bs_greeks(s0, k, t, r, q, sigma, is_call)
+        from backend.greeks.analytic import bs_all_greeks
+
+        g = bs_all_greeks(s0, k, t, r, q, sigma, is_call)
+        return GreeksResult(
+            delta=g[1], gamma=g[2], vega=g[3], theta=g[4], rho=g[5],
+            vanna=g[6], volga=g[7], charm=g[8], veta=g[9],
+            speed=g[10], zomma=g[11], color=g[12], ultima=g[13],
+        )
 
     def implied_volatility(
         self,
@@ -298,101 +314,6 @@ class BSAnalyticEngine(PricingEngine):
         d1, _ = self._d1_d2(s0, k, t, r, q, sigma)
         forward_discount = np.exp(-q * t)
         return s0 * forward_discount * norm.pdf(d1) * np.sqrt(t)
-
-    def _bs_greeks(
-        self, s0: float, k: float, t: float, r: float, q: float,
-        sigma: float, is_call: bool
-    ) -> GreeksResult:
-        """Compute all Black-Scholes Greeks."""
-        if t <= 0:
-            # At expiry - only delta matters
-            if is_call:
-                delta = 1.0 if s0 > k else 0.0
-            else:
-                delta = -1.0 if s0 < k else 0.0
-            return GreeksResult(delta=delta)
-
-        d1, d2 = self._d1_d2(s0, k, t, r, q, sigma)
-        sqrt_t = np.sqrt(t)
-        discount = np.exp(-r * t)
-        forward_discount = np.exp(-q * t)
-
-        n_d1 = norm.cdf(d1)
-        n_d2 = norm.cdf(d2)
-        n_prime_d1 = norm.pdf(d1)
-        n_prime_d2 = norm.pdf(d2)
-
-        # First order Greeks
-        if is_call:
-            delta = forward_discount * n_d1
-            theta = (
-                -s0 * forward_discount * n_prime_d1 * sigma / (2 * sqrt_t)
-                - r * k * discount * n_d2
-                + q * s0 * forward_discount * n_d1
-            )
-            rho = k * t * discount * n_d2
-        else:
-            delta = forward_discount * (n_d1 - 1)
-            theta = (
-                -s0 * forward_discount * n_prime_d1 * sigma / (2 * sqrt_t)
-                + r * k * discount * (1 - n_d2)
-                - q * s0 * forward_discount * (1 - n_d1)
-            )
-            rho = -k * t * discount * (1 - n_d2)
-
-        vega = s0 * forward_discount * n_prime_d1 * sqrt_t
-
-        # Second order Greeks
-        gamma = forward_discount * n_prime_d1 / (s0 * sigma * sqrt_t)
-
-        vanna = -forward_discount * n_prime_d1 * d2 / sigma
-
-        volga = vega * d1 * d2 / sigma  # Also called vomma
-
-        charm = (
-            forward_discount * n_prime_d1 *
-            (q + (r - q) * d1 / (sigma * sqrt_t) - (1 + d1 * d2) / (2 * t))
-        )
-        if not is_call:
-            charm = charm + q * forward_discount
-
-        veta = (
-            s0 * forward_discount * n_prime_d1 * sqrt_t *
-            (q + d1 * (r - q) / (sigma * sqrt_t) - (1 + d1 * d2) / (2 * t))
-        )
-
-        # Third order Greeks
-        speed = -gamma / s0 * (d1 / (sigma * sqrt_t) + 1)
-
-        zomma = gamma * (d1 * d2 - 1) / sigma
-
-        color = (
-            -forward_discount * n_prime_d1 / (2 * s0 * t * sigma * sqrt_t) *
-            (2 * q * t + 1 + d1 * (2 * (r - q) * t - d2 * sigma * sqrt_t) / (sigma * sqrt_t))
-        )
-
-        ultima = -vega / (sigma ** 2) * (
-            d1 * d2 * (1 - d1 * d2) + d1 ** 2 + d2 ** 2
-        )
-
-        return GreeksResult(
-            # First order
-            delta=delta,
-            theta=theta,
-            vega=vega,
-            rho=rho,
-            # Second order
-            gamma=gamma,
-            vanna=vanna,
-            volga=volga,
-            charm=charm,
-            veta=veta,
-            # Third order
-            speed=speed,
-            zomma=zomma,
-            color=color,
-            ultima=ultima,
-        )
 
 
 if __name__ == "__main__":

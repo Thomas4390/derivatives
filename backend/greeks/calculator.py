@@ -279,55 +279,7 @@ class GreeksCalculator:
             Dictionary with vanna, volga, charm, veta, speed, zomma, color, ultima
         """
         from backend.instruments.options import VanillaOption
-        from backend.models.gbm import GBMModel
-        from backend.models.heston import HestonModel
-        from backend.models.bates import BatesModel
-        from backend.models.merton import MertonModel
-
-        # Get model parameters and determine how to bump volatility
-        params = model.get_parameters()
-        has_sigma = 'sigma' in params
-        has_v0 = 'v0' in params  # For Heston/Bates models
-
-        # Helper to create bumped model preserving model type
-        def create_bumped_model(base_model: Model, vol_bump: float) -> Model:
-            """Create a model with bumped volatility, preserving model type."""
-            p = base_model.get_parameters()
-            if isinstance(base_model, GBMModel):
-                return GBMModel(sigma=p['sigma'] + vol_bump)
-            elif isinstance(base_model, MertonModel):
-                return MertonModel(
-                    sigma=p['sigma'] + vol_bump,
-                    lambda_j=p['lambda_j'],
-                    mu_j=p['mu_j'],
-                    sigma_j=p['sigma_j']
-                )
-            elif isinstance(base_model, HestonModel):
-                # Bump v0 (initial variance) to approximate vol bump
-                # vol_bump^2 approximately equals variance bump for small changes
-                new_v0 = max(p['v0'] + 2 * np.sqrt(p['v0']) * vol_bump, 1e-8)
-                return HestonModel(
-                    v0=new_v0,
-                    kappa=p['kappa'],
-                    theta=p['theta'],
-                    xi=p['xi'],
-                    rho=p['rho']
-                )
-            elif isinstance(base_model, BatesModel):
-                new_v0 = max(p['v0'] + 2 * np.sqrt(p['v0']) * vol_bump, 1e-8)
-                return BatesModel(
-                    v0=new_v0,
-                    kappa=p['kappa'],
-                    theta=p['theta'],
-                    xi=p['xi'],
-                    rho=p['rho'],
-                    lambda_j=p['lambda_j'],
-                    mu_j=p['mu_j'],
-                    sigma_j=p['sigma_j']
-                )
-            else:
-                # Fallback: can't bump unknown model type
-                return None
+        from backend.models.vol_bump import create_vol_bumped_model
 
         # Bump sizes
         h_s = market.spot * self.spot_bump
@@ -335,8 +287,8 @@ class GreeksCalculator:
         h_v = self.vol_bump
 
         # Create bumped models once for efficiency
-        mod_up = create_bumped_model(model, h_v)
-        mod_down = create_bumped_model(model, -h_v)
+        mod_up = create_vol_bumped_model(model, h_v)
+        mod_down = create_vol_bumped_model(model, -h_v)
         can_bump_vol = mod_up is not None and mod_down is not None
 
         # Helper to compute delta at a given market
@@ -407,14 +359,14 @@ class GreeksCalculator:
 
             # VOLGA = dVega/dSigma
             # Need models with double bump for volga
-            mod_2up = create_bumped_model(model, 2 * h_v)
-            mod_2down = create_bumped_model(model, -2 * h_v)
+            mod_2up = create_vol_bumped_model(model, 2 * h_v)
+            mod_2down = create_vol_bumped_model(model, -2 * h_v)
             if mod_2up is not None and mod_2down is not None:
                 v_2up = engine.price(instrument, mod_2up, market).price
                 v_mid = engine.price(instrument, model, market).price
                 v_2down = engine.price(instrument, mod_2down, market).price
                 # Volga = d²V/dσ² using central difference on vega
-                result['volga'] = (v_2up - 2 * v_mid + v_2down) / (h_v ** 2)
+                result['volga'] = (v_2up - 2 * v_mid + v_2down) / (2 * h_v) ** 2
 
             # ZOMMA = dGamma/dSigma
             # Compute gamma at two volatility levels
@@ -435,12 +387,12 @@ class GreeksCalculator:
             if mod_2up is not None and mod_2down is not None:
                 # Volga at mod_up
                 v_2up_up = engine.price(instrument, mod_2up, market).price
-                vega_up = engine.price(instrument, mod_up, market).price
+                v_at_up = engine.price(instrument, mod_up, market).price
                 v_0 = engine.price(instrument, model, market).price
-                volga_at_up = (v_2up_up - 2 * vega_up + v_0) / (h_v ** 2)
+                volga_at_up = (v_2up_up - 2 * v_at_up + v_0) / (h_v ** 2)
 
                 # Volga at mod_down (requires mod at -2h which we have)
-                v_0_for_down = vega_up = engine.price(instrument, model, market).price
+                v_0_for_down = v_0
                 v_down_mid = engine.price(instrument, mod_down, market).price
                 v_2down_val = engine.price(instrument, mod_2down, market).price
                 volga_at_down = (v_0_for_down - 2 * v_down_mid + v_2down_val) / (h_v ** 2)

@@ -2,6 +2,10 @@
 Volatility path visualization charts for Monte Carlo Simulation Explorer.
 
 Provides interactive visualizations for GARCH-family volatility simulations.
+Consolidated into 3 focused pedagogical tabs:
+1. Volatility Dynamics - paths + variance analysis combined
+2. GARCH Effects - leverage effect + news impact combined
+3. Theory vs Simulation - unchanged
 """
 
 import numpy as np
@@ -42,50 +46,47 @@ def render_volatility_paths_tab(
         "High volatility tends to follow high volatility, and negative returns increase volatility."
     )
 
-    # Create tabs for different views
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
-        "Volatility Paths",
-        "Variance Analysis",
-        "Leverage Effect",
-        "News Impact Curve",
-        "Theory Comparison"
+    # Create 3 consolidated tabs
+    tab1, tab2, tab3 = st.tabs([
+        "Volatility Dynamics",
+        "GARCH Effects",
+        "Theory vs Simulation"
     ])
 
     with tab1:
-        _render_volatility_sample_paths(simulation_result, params)
+        _render_volatility_dynamics(simulation_result, params)
 
     with tab2:
-        _render_variance_analysis(simulation_result, params)
+        _render_garch_effects(simulation_result, params)
 
     with tab3:
-        _render_leverage_effect(simulation_result, params)
-
-    with tab4:
-        _render_news_impact_curve(params)
-
-    with tab5:
         _render_theory_comparison(simulation_result, params)
 
 
-def _render_volatility_sample_paths(result, params: Dict[str, Any]) -> None:
-    """Render sample volatility paths with statistics."""
+def _render_volatility_dynamics(result, params: Dict[str, Any]) -> None:
+    """
+    Consolidated volatility dynamics tab combining:
+    - Sample volatility paths with statistics
+    - Variance analysis including variance ratio tests
+    """
     vol_paths = result.volatility_paths * 100  # Convert to percentage
+    variance_paths = result.variance_paths
     time_grid = result.time_grid
     n_paths = vol_paths.shape[0]
     max_display = min(params.get('max_display_paths', 50), n_paths)
 
-    fig = go.Figure()
+    # === Part 1: Volatility Paths ===
+    st.markdown("#### Sample Volatility Paths")
+
+    fig_paths = go.Figure()
 
     # Sample paths
     for i in range(max_display):
-        fig.add_trace(go.Scatter(
+        fig_paths.add_trace(go.Scatter(
             x=time_grid,
             y=vol_paths[i],
             mode='lines',
-            line=dict(
-                color='rgba(13, 148, 136, 0.15)',
-                width=0.8
-            ),
+            line=dict(color='rgba(13, 148, 136, 0.15)', width=0.8),
             hoverinfo='skip',
             showlegend=False
         ))
@@ -93,7 +94,7 @@ def _render_volatility_sample_paths(result, params: Dict[str, Any]) -> None:
     # Mean volatility
     if params.get('show_mean', True):
         mean_vol = result.mean_volatility_path * 100
-        fig.add_trace(go.Scatter(
+        fig_paths.add_trace(go.Scatter(
             x=time_grid,
             y=mean_vol,
             mode='lines',
@@ -106,7 +107,7 @@ def _render_volatility_sample_paths(result, params: Dict[str, Any]) -> None:
         percentiles = result.percentile_volatility_paths([5, 50, 95])
         p5, p50, p95 = percentiles[0] * 100, percentiles[1] * 100, percentiles[2] * 100
 
-        fig.add_trace(go.Scatter(
+        fig_paths.add_trace(go.Scatter(
             x=np.concatenate([time_grid, time_grid[::-1]]),
             y=np.concatenate([p95, p5[::-1]]),
             fill='toself',
@@ -116,7 +117,7 @@ def _render_volatility_sample_paths(result, params: Dict[str, Any]) -> None:
             hoverinfo='skip'
         ))
 
-        fig.add_trace(go.Scatter(
+        fig_paths.add_trace(go.Scatter(
             x=time_grid,
             y=p50,
             mode='lines',
@@ -126,7 +127,7 @@ def _render_volatility_sample_paths(result, params: Dict[str, Any]) -> None:
 
     # Initial volatility
     initial_vol = params['volatility'] * 100
-    fig.add_hline(
+    fig_paths.add_hline(
         y=initial_vol,
         line_dash="dot",
         line_color='#dc2626',
@@ -136,7 +137,7 @@ def _render_volatility_sample_paths(result, params: Dict[str, Any]) -> None:
     # Long-run volatility (if applicable)
     if hasattr(result, 'long_run_variance') and not np.isnan(result.long_run_variance):
         long_run_vol = np.sqrt(result.long_run_variance) * 100
-        fig.add_hline(
+        fig_paths.add_hline(
             y=long_run_vol,
             line_dash="dashdot",
             line_color='#059669',
@@ -145,14 +146,14 @@ def _render_volatility_sample_paths(result, params: Dict[str, Any]) -> None:
 
     model_name = VOLATILITY_MODELS.get(params.get('vol_model', 'garch'), 'GARCH')
 
-    fig.update_layout(
+    fig_paths.update_layout(
         title=dict(
             text=f"{model_name} Volatility Paths - {result.num_paths:,} Simulations",
             font=dict(size=16)
         ),
         xaxis_title="Time (Normalized)",
         yaxis_title="Volatility (%)",
-        height=CHART_HEIGHT_LARGE,
+        height=CHART_HEIGHT_STANDARD,
         hovermode='x unified',
         legend=dict(
             yanchor="top", y=0.99,
@@ -161,7 +162,7 @@ def _render_volatility_sample_paths(result, params: Dict[str, Any]) -> None:
         )
     )
 
-    st.plotly_chart(fig, width="stretch")
+    st.plotly_chart(fig_paths, use_container_width=True)
 
     # Statistics with styled cards
     terminal_vol = result.terminal_volatility * 100
@@ -174,28 +175,28 @@ def _render_volatility_sample_paths(result, params: Dict[str, Any]) -> None:
     ]
     render_stats_row(vol_stats, ["teal", "amber", "slate", "slate"])
 
+    # === Part 2: Variance Analysis ===
+    st.markdown("---")
+    st.markdown("#### Variance Analysis")
+    st.caption("Understanding variance dynamics, clustering, and autocorrelation.")
 
-def _render_variance_analysis(result, params: Dict[str, Any]) -> None:
-    """Render variance analysis including variance ratio tests."""
-    variance_paths = result.variance_paths
-    time_grid = result.time_grid
-
-    fig = make_subplots(
+    fig_var = make_subplots(
         rows=2, cols=2,
         subplot_titles=(
             "Mean Variance Over Time",
             "Variance Distribution at T",
             "Variance Autocorrelation",
-            "Variance Clustering"
+            "Variance Clustering Sample"
         ),
-        vertical_spacing=0.12
+        vertical_spacing=0.15,
+        horizontal_spacing=0.12
     )
 
     # Mean variance path
     mean_var = np.mean(variance_paths, axis=0)
     std_var = np.std(variance_paths, axis=0)
 
-    fig.add_trace(
+    fig_var.add_trace(
         go.Scatter(
             x=time_grid,
             y=mean_var,
@@ -207,7 +208,7 @@ def _render_variance_analysis(result, params: Dict[str, Any]) -> None:
     )
 
     # +/- 1 std band
-    fig.add_trace(
+    fig_var.add_trace(
         go.Scatter(
             x=np.concatenate([time_grid, time_grid[::-1]]),
             y=np.concatenate([mean_var + std_var, (mean_var - std_var)[::-1]]),
@@ -222,7 +223,7 @@ def _render_variance_analysis(result, params: Dict[str, Any]) -> None:
 
     # Terminal variance histogram
     terminal_var = result.terminal_variance
-    fig.add_trace(
+    fig_var.add_trace(
         go.Histogram(
             x=terminal_var,
             nbinsx=50,
@@ -240,11 +241,12 @@ def _render_variance_analysis(result, params: Dict[str, Any]) -> None:
     # Sample ACF
     acf_lags = min(50, len(mean_var_change) - 1)
     acf = np.correlate(mean_var_change - mean_var_change.mean(),
-                        mean_var_change - mean_var_change.mean(), mode='full')
+                       mean_var_change - mean_var_change.mean(), mode='full')
     acf = acf[len(acf)//2:len(acf)//2 + acf_lags]
-    acf = acf / acf[0]
+    if acf[0] > 0:
+        acf = acf / acf[0]
 
-    fig.add_trace(
+    fig_var.add_trace(
         go.Bar(
             x=list(range(acf_lags)),
             y=acf,
@@ -256,7 +258,7 @@ def _render_variance_analysis(result, params: Dict[str, Any]) -> None:
 
     # Variance clustering - sample path
     sample_path = variance_paths[0]
-    fig.add_trace(
+    fig_var.add_trace(
         go.Scatter(
             x=time_grid,
             y=sample_path,
@@ -267,16 +269,36 @@ def _render_variance_analysis(result, params: Dict[str, Any]) -> None:
         row=2, col=2
     )
 
-    fig.update_layout(
+    fig_var.update_layout(
         height=CHART_HEIGHT_LARGE,
         showlegend=False
     )
 
-    st.plotly_chart(fig, width="stretch")
+    st.plotly_chart(fig_var, use_container_width=True)
+
+    # Educational insight
+    st.markdown("""
+    <div style="background: #e8f4f8; padding: 1rem; border-radius: 8px; margin-top: 1rem;">
+        <h5 style="color: #1e3a5f; margin-top: 0;">Key Insight: Volatility Clustering</h5>
+        <p style="margin-bottom: 0;">
+            The autocorrelation plot shows <strong>persistent volatility</strong>: high variance today
+            predicts high variance tomorrow. This is captured by the β parameter in GARCH models.
+            A higher persistence (α+β close to 1) means shocks to volatility die out slowly.
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
 
 
-def _render_leverage_effect(result, params: Dict[str, Any]) -> None:
-    """Render leverage effect analysis (return-volatility correlation)."""
+def _render_garch_effects(result, params: Dict[str, Any]) -> None:
+    """
+    Consolidated GARCH effects tab combining:
+    - Leverage effect analysis
+    - News impact curve
+    """
+    # === Part 1: Leverage Effect ===
+    st.markdown("#### Leverage Effect Analysis")
+    st.caption("How returns affect subsequent volatility changes.")
+
     returns = result.return_paths[:, :-1].flatten()
     vol_paths = np.sqrt(result.variance_paths)
     vol_changes = (vol_paths[:, 2:] - vol_paths[:, 1:-1]).flatten()
@@ -294,9 +316,9 @@ def _render_leverage_effect(result, params: Dict[str, Any]) -> None:
         else:
             bin_means.append(np.nan)
 
-    fig = go.Figure()
+    fig_leverage = go.Figure()
 
-    fig.add_trace(go.Scatter(
+    fig_leverage.add_trace(go.Scatter(
         x=bin_centers * 100,
         y=np.array(bin_means) * 100,
         mode='markers+lines',
@@ -305,21 +327,21 @@ def _render_leverage_effect(result, params: Dict[str, Any]) -> None:
         name='Mean Vol Change'
     ))
 
-    fig.add_hline(y=0, line_dash="dash", line_color="gray")
-    fig.add_vline(x=0, line_dash="dash", line_color="gray")
+    fig_leverage.add_hline(y=0, line_dash="dash", line_color="gray")
+    fig_leverage.add_vline(x=0, line_dash="dash", line_color="gray")
 
     model_name = VOLATILITY_MODELS.get(params.get('vol_model', 'garch'), 'GARCH')
 
-    fig.update_layout(
+    fig_leverage.update_layout(
         title=f"Leverage Effect - {model_name}",
         xaxis_title="Return (%)",
         yaxis_title="Next Period Volatility Change (%)",
-        height=CHART_HEIGHT_STANDARD
+        height=CHART_HEIGHT_STANDARD - 50
     )
 
-    st.plotly_chart(fig, width="stretch")
+    st.plotly_chart(fig_leverage, use_container_width=True)
 
-    # Correlation statistic with styled card
+    # Correlation statistic
     valid_mask = ~np.isnan(vol_changes) & ~np.isnan(returns)
     if valid_mask.sum() > 100:
         correlation = np.corrcoef(returns[valid_mask], vol_changes[valid_mask])[0, 1]
@@ -329,9 +351,11 @@ def _render_leverage_effect(result, params: Dict[str, Any]) -> None:
         ]
         render_stats_row(leverage_stats, [corr_variant])
 
+    # === Part 2: News Impact Curve ===
+    st.markdown("---")
+    st.markdown("#### News Impact Curve")
+    st.caption("How shocks of different magnitudes affect next-period volatility.")
 
-def _render_news_impact_curve(params: Dict[str, Any]) -> None:
-    """Render the news impact curve for the selected GARCH model."""
     model = params.get('vol_model', 'garch')
     sigma = params.get('volatility', 0.20)
     alpha = params.get('garch_alpha', 0.05)
@@ -345,40 +369,31 @@ def _render_news_impact_curve(params: Dict[str, Any]) -> None:
     if model == 'ngarch':
         theta = params.get('ngarch_theta', 0.5)
         persistence = alpha * (1 + theta ** 2) + beta
-        if persistence < 1:
-            omega = sigma_sq * (1 - persistence)
-        else:
-            omega = 0.00001
+        omega = sigma_sq * (1 - persistence) if persistence < 1 else 0.00001
     elif model == 'gjr_garch':
         gamma = params.get('gjr_gamma', 0.05)
         persistence = alpha + beta + 0.5 * gamma
-        if persistence < 1:
-            omega = sigma_sq * (1 - persistence)
-        else:
-            omega = 0.00001
+        omega = sigma_sq * (1 - persistence) if persistence < 1 else 0.00001
     else:  # Standard GARCH
         persistence = alpha + beta
-        if persistence < 1:
-            omega = sigma_sq * (1 - persistence)
-        else:
-            omega = 0.00001
+        omega = sigma_sq * (1 - persistence) if persistence < 1 else 0.00001
 
-    fig = go.Figure()
+    fig_nic = go.Figure()
 
     # GARCH (symmetric)
     garch_response = omega + alpha * epsilon_range**2 + beta * sigma_sq
-    fig.add_trace(go.Scatter(
+    fig_nic.add_trace(go.Scatter(
         x=epsilon_range * 100,
         y=np.sqrt(garch_response) * 100,
         mode='lines',
-        name='GARCH(1,1)',
+        name='GARCH(1,1) - Symmetric',
         line=dict(color='#1a365d', width=2)
     ))
 
     if model == 'ngarch':
         theta = params.get('ngarch_theta', 0.5)
         ngarch_response = omega + alpha * (epsilon_range - theta * sigma)**2 + beta * sigma_sq
-        fig.add_trace(go.Scatter(
+        fig_nic.add_trace(go.Scatter(
             x=epsilon_range * 100,
             y=np.sqrt(ngarch_response) * 100,
             mode='lines',
@@ -390,7 +405,7 @@ def _render_news_impact_curve(params: Dict[str, Any]) -> None:
         gamma = params.get('gjr_gamma', 0.05)
         indicator = (epsilon_range < 0).astype(float)
         gjr_response = omega + (alpha + gamma * indicator) * epsilon_range**2 + beta * sigma_sq
-        fig.add_trace(go.Scatter(
+        fig_nic.add_trace(go.Scatter(
             x=epsilon_range * 100,
             y=np.sqrt(gjr_response) * 100,
             mode='lines',
@@ -398,27 +413,33 @@ def _render_news_impact_curve(params: Dict[str, Any]) -> None:
             line=dict(color='#059669', width=2)
         ))
 
-    fig.add_vline(x=0, line_dash="dash", line_color="gray", opacity=0.5)
+    fig_nic.add_vline(x=0, line_dash="dash", line_color="gray", opacity=0.5)
 
-    fig.update_layout(
+    fig_nic.update_layout(
         title="News Impact Curve",
         xaxis_title="Return Shock epsilon (%)",
         yaxis_title="Next Period Volatility (%)",
-        height=CHART_HEIGHT_STANDARD,
+        height=CHART_HEIGHT_STANDARD - 50,
         legend=dict(
             yanchor="top", y=0.99,
             xanchor="left", x=0.01
         )
     )
 
-    st.plotly_chart(fig, width="stretch")
+    st.plotly_chart(fig_nic, use_container_width=True)
 
+    # Combined educational insight
     st.markdown("""
-    **Interpretation:**
-    - GARCH(1,1) shows symmetric response - positive and negative shocks have equal impact
-    - NGARCH/GJR-GARCH show asymmetric response - negative shocks increase volatility more
-    - This asymmetry is called the **leverage effect** and is observed in equity markets
-    """)
+    <div style="background: #fef3c7; padding: 1rem; border-radius: 8px; margin-top: 1rem;">
+        <h5 style="color: #92400e; margin-top: 0;">Key Insight: Asymmetric Volatility Response</h5>
+        <ul style="margin-bottom: 0;">
+            <li><strong>GARCH(1,1)</strong>: Symmetric - positive and negative shocks have equal impact</li>
+            <li><strong>NGARCH/GJR-GARCH</strong>: Asymmetric - negative shocks increase volatility more</li>
+            <li>This asymmetry, called the <strong>leverage effect</strong>, is empirically observed in equity markets</li>
+            <li>Implication: Put options tend to be more expensive than calls at same distance from ATM</li>
+        </ul>
+    </div>
+    """, unsafe_allow_html=True)
 
 
 def _render_theory_comparison(result, params: Dict[str, Any]) -> None:
@@ -467,7 +488,11 @@ def _render_theory_comparison(result, params: Dict[str, Any]) -> None:
     mean_var_sim = np.mean(variance_paths[:, -1])
 
     # Long-run variance from simulation
-    long_run_var_sim = hasattr(result, 'long_run_variance') and result.long_run_variance or np.mean(variance_paths)
+    long_run_var_sim = (
+        result.long_run_variance
+        if hasattr(result, 'long_run_variance') and result.long_run_variance
+        else np.mean(variance_paths)
+    )
 
     fig = make_subplots(
         rows=2, cols=2,
@@ -508,7 +533,6 @@ def _render_theory_comparison(result, params: Dict[str, Any]) -> None:
         )
 
     # 2. Terminal variance distribution
-    # Theoretical distribution is approximately inverse chi-squared but we use empirical
     fig.add_trace(
         go.Histogram(
             x=terminal_var_sim,
@@ -564,7 +588,6 @@ def _render_theory_comparison(result, params: Dict[str, Any]) -> None:
     )
 
     # 4. Mean reversion: variance should revert to long-run
-    # Plot paths that started above/below long-run
     if not np.isnan(long_run_var_theory):
         above_mask = variance_paths[:, 0] > long_run_var_theory
         below_mask = ~above_mask
@@ -632,7 +655,7 @@ def _render_theory_comparison(result, params: Dict[str, Any]) -> None:
     fig.update_yaxes(title_text="Autocorrelation", row=2, col=1)
     fig.update_yaxes(title_text="Variance", row=2, col=2)
 
-    st.plotly_chart(fig, width="stretch")
+    st.plotly_chart(fig, use_container_width=True)
 
     # Summary statistics comparison
     st.markdown("#### Theory vs Simulation Summary")
@@ -648,25 +671,41 @@ def _render_theory_comparison(result, params: Dict[str, Any]) -> None:
     pers_variant = "green" if persistence < 0.99 else "amber" if persistence < 1 else "red"
 
     theory_stats = [
-        ("Persistence (α+β)", f"{persistence:.4f}", "< 1 for stationarity"),
-        ("Long-run Vol (Theory)", f"{np.sqrt(long_run_var_theory)*100:.2f}%" if not np.isnan(long_run_var_theory) else "Non-stationary", "Theoretical σ∞"),
+        ("Persistence (alpha+beta)", f"{persistence:.4f}", "< 1 for stationarity"),
+        ("Long-run Vol (Theory)",
+         f"{np.sqrt(long_run_var_theory)*100:.2f}%" if not np.isnan(long_run_var_theory) else "Non-stationary",
+         "Theoretical sigma_inf"),
         ("Long-run Vol (Sim)", f"{np.sqrt(mean_var_sim)*100:.2f}%", "Simulated mean"),
-        ("Deviation", f"{lr_var_error:+.2f}%" if not np.isnan(lr_var_error) else "N/A", "Simulation error"),
+        ("Deviation",
+         f"{lr_var_error:+.2f}%" if not np.isnan(lr_var_error) else "N/A",
+         "Simulation error"),
     ]
     render_stats_row(theory_stats, [pers_variant, "blue", "teal", lr_variant])
 
     # Interpretation
     st.markdown("---")
-    st.markdown("**Interpretation:**")
 
     if persistence >= 1:
-        st.warning("⚠️ Model is non-stationary (persistence ≥ 1). Variance has no long-run mean.")
+        st.warning("Model is non-stationary (persistence >= 1). Variance has no long-run mean.")
     elif persistence > 0.99:
-        st.info("ℹ️ High persistence - variance shocks are very persistent. Long convergence time expected.")
+        st.info("High persistence - variance shocks are very persistent. Long convergence time expected.")
     else:
         if not np.isnan(lr_var_error) and abs(lr_var_error) < 5:
-            st.success("✅ Simulation closely matches theoretical predictions.")
+            st.success("Simulation closely matches theoretical predictions.")
         elif not np.isnan(lr_var_error) and abs(lr_var_error) < 15:
-            st.info("ℹ️ Moderate deviation from theory - increase sample size or time horizon for better convergence.")
+            st.info("Moderate deviation from theory - increase sample size or time horizon for better convergence.")
         elif not np.isnan(lr_var_error):
-            st.warning("⚠️ Significant deviation from theory - check parameters or increase simulation length.")
+            st.warning("Significant deviation from theory - check parameters or increase simulation length.")
+
+    # Educational insight box
+    st.markdown("""
+    <div style="background: #e8f4f8; padding: 1rem; border-radius: 8px; margin-top: 1rem;">
+        <h5 style="color: #1e3a5f; margin-top: 0;">Key Insight: Stationarity and Convergence</h5>
+        <p style="margin-bottom: 0;">
+            For GARCH models to have a well-defined long-run variance, the <strong>persistence must be less than 1</strong>.
+            High persistence (close to 1) means the model is nearly "integrated" (IGARCH),
+            and shocks to variance persist for a very long time. This explains why equity volatility
+            tends to remain elevated after market crashes.
+        </p>
+    </div>
+    """, unsafe_allow_html=True)

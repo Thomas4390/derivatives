@@ -234,7 +234,8 @@ class TestGreeksSumRules:
         T = 0.25
 
         theta_diff = call_greeks.theta - put_greeks.theta
-        expected_diff = -r * K * np.exp(-r * T) + q * S * np.exp(-q * T)
+        # Theta is now scaled per calendar day (÷365), so scale expected accordingly
+        expected_diff = (-r * K * np.exp(-r * T) + q * S * np.exp(-q * T)) / 365
 
         report.params(strike=K, maturity=T, spot=S, rate=r, dividend=q)
         report.value("Call Theta", call_greeks.theta)
@@ -917,3 +918,40 @@ class TestCharacteristicFunction:
         )
         report.info("Property: phi(-u) = conj(phi(u)) for real-valued processes")
         report.success("Conjugate symmetry holds for all test values")
+
+
+# =============================================================================
+# FFT PUT-CALL PARITY WITH DIVIDENDS (Gap 6)
+# =============================================================================
+
+class TestFFTPutCallParityWithDividends:
+    """Gap 6: FFT put-call parity with non-zero dividend yield."""
+
+    @pytest.mark.parametrize("strike", [90, 100, 110])
+    def test_fft_put_call_parity_with_dividends(self, strike, market_with_dividend, heston_model, fft_engine):
+        """Test put-call parity holds for FFT pricing with dividends."""
+        report.header(f"FFT Put-Call Parity with Dividends (K={strike})")
+        report.info("Tests C - P = S*exp(-qT) - K*exp(-rT) with q > 0")
+
+        T = 0.5
+        call = VanillaOption(strike=strike, maturity=T, is_call=True)
+        put = VanillaOption(strike=strike, maturity=T, is_call=False)
+
+        call_price = fft_engine.price(call, heston_model, market_with_dividend).price
+        put_price = fft_engine.price(put, heston_model, market_with_dividend).price
+
+        S = market_with_dividend.spot
+        K = strike
+        r = market_with_dividend.rate
+        q = market_with_dividend.dividend_yield
+
+        lhs = call_price - put_price
+        rhs = S * np.exp(-q * T) - K * np.exp(-r * T)
+
+        report.params(strike=K, maturity=T, spot=S, rate=r, dividend=q)
+        report.value("Call Price (FFT)", call_price, unit="$")
+        report.value("Put Price (FFT)", put_price, unit="$")
+        report.value("C - P (LHS)", lhs, expected=rhs, unit="$")
+        report.success("Put-Call Parity holds with FFT/Heston + dividends")
+
+        np.testing.assert_allclose(lhs, rhs, rtol=1e-3, atol=0.01)

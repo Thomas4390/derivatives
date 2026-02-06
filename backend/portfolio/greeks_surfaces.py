@@ -276,7 +276,7 @@ def get_greek_name(greek_index: int) -> str:
 # =============================================================================
 
 @njit(fastmath=True, cache=True)
-def calculate_portfolio_pnl_at_expiry(
+def calculate_portfolio_pnl_at_expiry_arrays(
     spot: float,
     strikes: np.ndarray,
     option_types: np.ndarray,
@@ -384,7 +384,7 @@ def calculate_pnl_curve(
     pnls = np.zeros(n_spots)
 
     for i in prange(n_spots):
-        pnls[i] = calculate_portfolio_pnl_at_expiry(
+        pnls[i] = calculate_portfolio_pnl_at_expiry_arrays(
             spot_range[i], strikes, option_types, position_types,
             quantities, premiums, stock_quantity, stock_entry_price
         )
@@ -402,7 +402,7 @@ __all__ = [
     "portfolio_greeks_surface_iv",
     "single_option_greeks_surface_strike",
     # P&L functions
-    "calculate_portfolio_pnl_at_expiry",
+    "calculate_portfolio_pnl_at_expiry_arrays",
     "calculate_pnl_curve",
     # Utility
     "get_greek_name",
@@ -520,7 +520,7 @@ if __name__ == "__main__":
     print("\n--- Test 6: P&L at Single Spot ---")
     test_spots = [80.0, 95.0, 100.0, 105.0, 110.0, 120.0]
     for spot in test_spots:
-        pnl = calculate_portfolio_pnl_at_expiry(
+        pnl = calculate_portfolio_pnl_at_expiry_arrays(
             spot, strikes, option_types.astype(np.float64),
             position_types.astype(np.float64), quantities, premiums,
             stock_quantity=0.0, stock_entry_price=0.0
@@ -537,7 +537,7 @@ if __name__ == "__main__":
     cc_premiums = np.array([5.0], dtype=np.float64)
 
     for spot in [90.0, 100.0, 105.0, 115.0]:
-        pnl = calculate_portfolio_pnl_at_expiry(
+        pnl = calculate_portfolio_pnl_at_expiry_arrays(
             spot, cc_strikes, cc_option_types, cc_position_types,
             cc_quantities, cc_premiums,
             stock_quantity=100.0, stock_entry_price=100.0
@@ -549,12 +549,12 @@ if __name__ == "__main__":
     # Net premium paid: 8 - 3 = 5 per share = $500 total
     # Max profit at S >= 110: (110-100) * 100 - 500 = $500
     # Max loss at S <= 100: -$500 (premium paid)
-    pnl_below = calculate_portfolio_pnl_at_expiry(
+    pnl_below = calculate_portfolio_pnl_at_expiry_arrays(
         90.0, strikes, option_types.astype(np.float64),
         position_types.astype(np.float64), quantities, premiums,
         0.0, 0.0
     )
-    pnl_above = calculate_portfolio_pnl_at_expiry(
+    pnl_above = calculate_portfolio_pnl_at_expiry_arrays(
         120.0, strikes, option_types.astype(np.float64),
         position_types.astype(np.float64), quantities, premiums,
         0.0, 0.0

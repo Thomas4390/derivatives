@@ -124,3 +124,7 @@ __all__ = [
 ]
 
 __version__ = "2.0.0"
+
+# Auto-register engines with the EngineRegistry
+from backend.engines._registration import ensure_registered
+ensure_registered()

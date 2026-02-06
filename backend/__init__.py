@@ -116,7 +116,6 @@ from backend.simulation import (
 
 from backend.models import (
     # Base
-    BaseModel,
     PricingCapability,
     registry,
     # Models
@@ -132,6 +131,8 @@ from backend.models import (
     NGARCHParams,
     GJRGARCHParams,
 )
+# BaseModel is an alias for Model from core.interfaces
+from backend.core.interfaces import Model as BaseModel
 
 # =============================================================================
 # New Architecture - Core

@@ -1,0 +1,442 @@
+"""
+Tests for Greeks Integration
+============================
+
+Integration tests for GreeksCalculator with all engines and ModelRegistry.
+
+Author: Thomas
+Created: 2025
+"""
+
+import pytest
+import numpy as np
+
+from backend.core import MarketEnvironment
+from backend.models import GBMModel, HestonModel
+from backend.instruments import EuropeanCall, EuropeanPut, VanillaOption
+from backend.engines import BSAnalyticEngine, FFTEngine, MonteCarloEngine
+from backend.greeks.calculator import GreeksCalculator
+from backend.greeks.numerical import ModelNumericalGreeks, GreeksBumpConfig
+
+
+class TestGreeksCalculatorIntegration:
+    """Integration tests for GreeksCalculator with all engines."""
+
+    @pytest.fixture
+    def setup(self):
+        return {
+            'market': MarketEnvironment(spot=100, rate=0.05),
+            'model': GBMModel(sigma=0.20),
+            'option': EuropeanCall(strike=100, maturity=0.5),
+        }
+
+    def test_analytic_greeks_with_bs_engine(self, setup):
+        """Test analytic Greeks calculation with BS engine."""
+        calc = GreeksCalculator()
+        engine = BSAnalyticEngine()
+        result = calc.calculate(
+            engine, setup['option'], setup['model'], setup['market'],
+            include_higher_order=False
+        )
+        assert result.delta is not None
+        assert 0 < result.delta < 1  # Call delta bounded
+
+    def test_numerical_greeks_with_bs_engine(self, setup):
+        """Test numerical Greeks calculation with BS engine."""
+        calc = GreeksCalculator(prefer_analytic=False)
+        engine = BSAnalyticEngine()
+        result = calc.calculate(
+            engine, setup['option'], setup['model'], setup['market'],
+            include_higher_order=False
+        )
+        assert result.delta is not None
+        assert 0 < result.delta < 1
+
+    def test_numerical_greeks_with_fft_engine(self, setup):
+        """Test numerical Greeks work with FFT engine."""
+        calc = GreeksCalculator()
+        engine = FFTEngine()
+        result = calc.calculate(
+            engine, setup['option'], setup['model'], setup['market'],
+            include_higher_order=False
+        )
+        assert result.delta is not None
+        assert 0 < result.delta < 1
+
+    def test_numerical_greeks_with_mc_engine(self, setup):
+        """Test numerical Greeks work with MC engine."""
+        calc = GreeksCalculator()
+        engine = MonteCarloEngine(n_paths=10000, seed=42)
+        result = calc.calculate(
+            engine, setup['option'], setup['model'], setup['market'],
+            include_higher_order=False
+        )
+        assert result.delta is not None
+        # MC has more variance, so use looser bounds
+        assert -0.2 < result.delta < 1.2
+
+    def test_greeks_consistency_across_engines(self, setup):
+        """Test that Greeks are roughly consistent across engines."""
+        calc = GreeksCalculator(prefer_analytic=False)
+
+        bs_engine = BSAnalyticEngine()
+        fft_engine = FFTEngine()
+
+        bs_result = calc.calculate(
+            bs_engine, setup['option'], setup['model'], setup['market'],
+            include_higher_order=False
+        )
+        fft_result = calc.calculate(
+            fft_engine, setup['option'], setup['model'], setup['market'],
+            include_higher_order=False
+        )
+
+        # Results should be close (numerical differences from FFT vs analytic pricing)
+        assert abs(bs_result.delta - fft_result.delta) < 0.01
+        assert abs(bs_result.gamma - fft_result.gamma) < 0.005  # Gamma has more variance
+
+    def test_greeks_with_heston_model(self):
+        """Test Greeks with stochastic volatility model."""
+        market = MarketEnvironment(spot=100, rate=0.05)
+        model = HestonModel(v0=0.04, kappa=2.0, theta=0.04, xi=0.3, rho=-0.7)
+        option = EuropeanCall(strike=100, maturity=0.5)
+
+        calc = GreeksCalculator()
+        engine = FFTEngine()
+
+        result = calc.calculate(
+            engine, option, model, market,
+            include_higher_order=False
+        )
+
+        assert result.delta is not None
+        assert 0 < result.delta < 1
+
+    def test_greeks_with_put_option(self, setup):
+        """Test Greeks calculation for put options."""
+        calc = GreeksCalculator()
+        engine = BSAnalyticEngine()
+        put = EuropeanPut(strike=100, maturity=0.5)
+
+        result = calc.calculate(
+            engine, put, setup['model'], setup['market'],
+            include_higher_order=False
+        )
+
+        # Put delta should be negative
+        assert result.delta is not None
+        assert -1 < result.delta < 0
+
+
+class TestModelNumericalGreeksIntegration:
+    """Tests for ModelNumericalGreeks class."""
+
+    def test_constructor_with_config(self):
+        """Test ModelNumericalGreeks accepts config."""
+        config = GreeksBumpConfig(
+            spot_bump=0.005,
+            vol_bump=0.005,
+            time_bump_days=0.5,
+            rate_bump=0.00005
+        )
+        calc = ModelNumericalGreeks(config)
+
+        assert calc.spot_bump == 0.005
+        assert calc.vol_bump == 0.005
+        assert calc.time_bump_days == 0.5
+        assert calc.rate_bump == 0.00005
+
+    def test_constructor_with_defaults(self):
+        """Test ModelNumericalGreeks uses defaults."""
+        calc = ModelNumericalGreeks()
+
+        assert calc.spot_bump == 0.01
+        assert calc.vol_bump == 0.01
+        assert calc.time_bump_days == 1.0
+        assert calc.rate_bump == 0.0001
+
+    def test_calculate_with_bs_engine(self):
+        """Test calculate method works."""
+        market = MarketEnvironment(spot=100, rate=0.05)
+        model = GBMModel(sigma=0.20)
+        option = EuropeanCall(strike=100, maturity=0.5)
+        engine = BSAnalyticEngine()
+
+        calc = ModelNumericalGreeks()
+        result = calc.calculate(engine, option, model, market)
+
+        assert result.delta is not None
+        assert result.gamma is not None
+        assert result.vega is not None
+        assert result.theta is not None
+        assert result.rho is not None
+
+
+class TestModelRegistryCreate:
+    """Tests for ModelRegistry.create() method."""
+
+    def test_create_gbm_model(self):
+        """Test creating GBM model via registry."""
+        from backend.models.registry import registry
+
+        registry.register('test_gbm', GBMModel)
+        model = registry.create('test_gbm', sigma=0.2)
+
+        assert isinstance(model, GBMModel)
+        assert model.sigma == 0.2
+
+    def test_create_heston_model(self):
+        """Test creating Heston model via registry."""
+        from backend.models.registry import registry
+
+        registry.register('test_heston', HestonModel)
+        model = registry.create('test_heston',
+            v0=0.04, kappa=2.0, theta=0.04, xi=0.3, rho=-0.7
+        )
+
+        assert isinstance(model, HestonModel)
+        assert model.v0 == 0.04
+        assert model.kappa == 2.0
+
+    def test_create_unknown_model_raises(self):
+        """Test creating unknown model raises KeyError."""
+        from backend.models.registry import registry
+
+        with pytest.raises(KeyError):
+            registry.create('nonexistent_model', sigma=0.2)
+
+
+class TestEngineGreeksMethod:
+    """Tests for greeks() method on engines."""
+
+    @pytest.fixture
+    def setup(self):
+        return {
+            'market': MarketEnvironment(spot=100, rate=0.05),
+            'model': GBMModel(sigma=0.20),
+            'option': EuropeanCall(strike=100, maturity=0.5),
+        }
+
+    def test_fft_engine_greeks(self, setup):
+        """Test FFTEngine.greeks() method."""
+        engine = FFTEngine()
+        result = engine.greeks(
+            setup['option'], setup['model'], setup['market']
+        )
+
+        assert result.delta is not None
+        assert result.gamma is not None
+        assert 0 < result.delta < 1
+
+    def test_mc_engine_greeks(self, setup):
+        """Test MonteCarloEngine.greeks() method."""
+        engine = MonteCarloEngine(n_paths=10000, seed=42)
+        result = engine.greeks(
+            setup['option'], setup['model'], setup['market']
+        )
+
+        assert result.delta is not None
+        assert result.gamma is not None
+
+    def test_bs_engine_greeks(self, setup):
+        """Test BSAnalyticEngine.greeks() method exists."""
+        engine = BSAnalyticEngine()
+        # BS engine should have greeks method
+        assert hasattr(engine, 'greeks')
+
+
+class TestExoticInstrumentGreeks:
+    """Tests for Greeks with exotic instruments."""
+
+    def test_lookback_has_no_strike(self):
+        """Verify LookbackOption has no strike attribute."""
+        from backend.instruments import LookbackCall
+
+        lookback = LookbackCall(maturity=0.5)
+        assert not hasattr(lookback, 'strike')
+
+    def test_asian_has_strike(self):
+        """Verify AsianOption has strike attribute."""
+        from backend.instruments import AsianCall
+
+        asian = AsianCall(strike=100, maturity=0.5)
+        assert hasattr(asian, 'strike')
+        assert asian.strike == 100
+
+
+class TestHigherOrderGreeks:
+    """Tests for second and third order Greeks."""
+
+    @pytest.fixture
+    def atm_setup(self):
+        return {
+            'market': MarketEnvironment(spot=100, rate=0.05),
+            'model': GBMModel(sigma=0.20),
+            'option': EuropeanCall(strike=100, maturity=0.5),
+        }
+
+    def test_analytic_higher_order_greeks_nonzero(self, atm_setup):
+        """All 8 higher-order Greeks are non-zero for ATM call."""
+        calc = GreeksCalculator()
+        engine = BSAnalyticEngine()
+        result = calc.calculate(
+            engine, atm_setup['option'], atm_setup['model'], atm_setup['market'],
+            include_higher_order=True
+        )
+
+        assert result.vanna != 0.0, "Vanna should be non-zero"
+        assert result.volga != 0.0, "Volga should be non-zero"
+        assert result.charm != 0.0, "Charm should be non-zero"
+        assert result.veta != 0.0, "Veta should be non-zero"
+        assert result.speed != 0.0, "Speed should be non-zero"
+        assert result.zomma != 0.0, "Zomma should be non-zero"
+        assert result.color != 0.0, "Color should be non-zero"
+        assert result.ultima != 0.0, "Ultima should be non-zero"
+
+    def test_analytic_vs_numerical_higher_order(self, atm_setup):
+        """Numerical higher-order Greeks agree in sign and order with analytic.
+
+        Note: analytic and numerical use different scaling conventions
+        (analytic: per 1% vol for vanna/zomma; per 1%^2 for volga; etc.).
+        We verify sign agreement and that spot-only Greeks (speed, charm, color)
+        which share the same convention match closely.
+        """
+        engine = BSAnalyticEngine()
+
+        analytic_calc = GreeksCalculator(prefer_analytic=True)
+        numerical_calc = GreeksCalculator(prefer_analytic=False)
+
+        analytic = analytic_calc.calculate(
+            engine, atm_setup['option'], atm_setup['model'], atm_setup['market'],
+            include_higher_order=True
+        )
+        numerical = numerical_calc.calculate(
+            engine, atm_setup['option'], atm_setup['model'], atm_setup['market'],
+            include_higher_order=True
+        )
+
+        # Same-convention Greeks should match closely
+        np.testing.assert_allclose(numerical.charm, analytic.charm, rtol=0.05, atol=1e-4)
+        np.testing.assert_allclose(numerical.speed, analytic.speed, rtol=0.05, atol=1e-6)
+
+        # Vanna/zomma: analytic is per 1% vol (scaled by 1/100), numerical is raw
+        np.testing.assert_allclose(numerical.vanna, analytic.vanna * 100, rtol=0.10, atol=1e-3)
+        np.testing.assert_allclose(numerical.zomma, analytic.zomma * 100, rtol=0.10, atol=1e-3)
+
+        # Volga and ultima: sign agreement (different stencil conventions)
+        assert np.sign(numerical.volga) == np.sign(analytic.volga) or abs(analytic.volga) < 1e-8
+        assert np.sign(numerical.ultima) == np.sign(analytic.ultima) or abs(analytic.ultima) < 1e-8
+
+    def test_vanna_sign_convention(self):
+        """Vanna is small for ATM, positive for OTM call."""
+        calc = GreeksCalculator()
+        engine = BSAnalyticEngine()
+        model = GBMModel(sigma=0.20)
+        market = MarketEnvironment(spot=100, rate=0.05)
+
+        atm = EuropeanCall(strike=100, maturity=0.5)
+        otm = EuropeanCall(strike=115, maturity=0.5)
+
+        atm_greeks = calc.calculate(engine, atm, model, market, include_higher_order=True)
+        otm_greeks = calc.calculate(engine, otm, model, market, include_higher_order=True)
+
+        # ATM vanna is near zero (exactly zero for ATM with q=0 and specific d1)
+        assert abs(atm_greeks.vanna) < abs(otm_greeks.vanna)
+        # OTM call vanna is positive (delta increases with vol for OTM call)
+        assert otm_greeks.vanna > 0
+
+    def test_volga_positive_atm(self):
+        """Volga > 0 for ATM (convexity in vol)."""
+        calc = GreeksCalculator()
+        engine = BSAnalyticEngine()
+        model = GBMModel(sigma=0.20)
+        market = MarketEnvironment(spot=100, rate=0.05)
+        option = EuropeanCall(strike=100, maturity=0.5)
+
+        result = calc.calculate(engine, option, model, market, include_higher_order=True)
+        assert result.volga > 0, "Volga should be positive for ATM"
+
+    def test_charm_direction(self):
+        """Charm is consistent with delta decay."""
+        calc = GreeksCalculator()
+        engine = BSAnalyticEngine()
+        model = GBMModel(sigma=0.20)
+        market = MarketEnvironment(spot=100, rate=0.05)
+
+        option = EuropeanCall(strike=100, maturity=0.5)
+        result = calc.calculate(engine, option, model, market, include_higher_order=True)
+
+        # For an ATM call, charm (dDelta/dt) captures delta's time decay
+        # Value should be non-zero and have a definite sign
+        assert result.charm != 0.0
+
+    def test_ultima_regression(self):
+        """Ultima produces correct values after Bug 1 fix."""
+        calc = GreeksCalculator()
+        engine = BSAnalyticEngine()
+        model = GBMModel(sigma=0.20)
+        market = MarketEnvironment(spot=100, rate=0.05)
+        option = EuropeanCall(strike=100, maturity=0.5)
+
+        # Both analytic and numerical should give a non-zero ultima
+        analytic = calc.calculate(engine, option, model, market, include_higher_order=True)
+        assert analytic.ultima != 0.0, "Ultima should be non-zero"
+
+        # Cross-check: numerical ultima should be in same ballpark
+        num_calc = GreeksCalculator(prefer_analytic=False)
+        numerical = num_calc.calculate(engine, option, model, market, include_higher_order=True)
+        assert numerical.ultima != 0.0, "Numerical ultima should be non-zero"
+
+        # They should agree in sign
+        assert np.sign(analytic.ultima) == np.sign(numerical.ultima), \
+            f"Sign mismatch: analytic={analytic.ultima}, numerical={numerical.ultima}"
+
+    def test_higher_order_greeks_heston(self):
+        """Numerical higher-order Greeks work with Heston + FFT."""
+        calc = GreeksCalculator()
+        engine = FFTEngine()
+        model = HestonModel(v0=0.04, kappa=2.0, theta=0.04, xi=0.3, rho=-0.7)
+        market = MarketEnvironment(spot=100, rate=0.05)
+        option = EuropeanCall(strike=100, maturity=0.5)
+
+        result = calc.calculate(engine, option, model, market, include_higher_order=True)
+
+        # Should produce non-zero higher-order Greeks
+        assert result.vanna != 0.0
+        assert result.volga != 0.0
+        assert result.speed != 0.0
+        assert result.zomma != 0.0
+
+
+class TestNumericalVolga:
+    """Regression test for Bug 4: numerical volga 4x scaling error."""
+
+    def test_numerical_volga_vs_analytic(self):
+        """Bug 4: Numerical volga must match analytic volga within 10% for GBM."""
+        from backend.greeks.analytic import bs_all_greeks
+
+        market = MarketEnvironment(spot=100, rate=0.05)
+        model = GBMModel(sigma=0.20)
+        option = EuropeanCall(strike=100, maturity=0.5)
+        engine = BSAnalyticEngine()
+
+        # Get numerical volga
+        calc = GreeksCalculator(prefer_analytic=False)
+        numerical = calc.calculate(engine, option, model, market, include_higher_order=True)
+
+        # Get analytic volga (scaled per 1%²)
+        g = bs_all_greeks(100.0, 100.0, 0.5, 0.05, 0.0, 0.20, True)
+        analytic_volga = g[7]  # Scaled volga
+
+        # Numerical volga is raw (unscaled), analytic is per 1%²
+        # Raw volga = scaled_volga * 10000
+        analytic_volga_raw = analytic_volga * 10000
+
+        np.testing.assert_allclose(
+            numerical.volga, analytic_volga_raw, rtol=0.10,
+            err_msg="Numerical volga should match analytic within 10%"
+        )
+
+
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])

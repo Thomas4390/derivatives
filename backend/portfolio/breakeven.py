@@ -386,7 +386,7 @@ class BreakevenCalculator:
 
         if len(breakeven_points) == 0:
             # No breakeven: either always profit or always loss
-            if first_pnl > 0:
+            if first_pnl >= 0:
                 profit_zones.append((-np.inf, np.inf))
             else:
                 loss_zones.append((-np.inf, np.inf))
@@ -409,7 +409,7 @@ class BreakevenCalculator:
                 # Calculate P&L at test point
                 test_pnl = calculate_portfolio_pnl_at_expiry(test_spot, positions, stock)
 
-                if test_pnl > 0:
+                if test_pnl >= 0:
                     profit_zones.append((breakeven_extended[i], breakeven_extended[i + 1]))
                 else:
                     loss_zones.append((breakeven_extended[i], breakeven_extended[i + 1]))

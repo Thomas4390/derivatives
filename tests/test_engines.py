@@ -83,8 +83,8 @@ class TestBSAnalyticEngine:
 
         np.testing.assert_allclose(greeks.delta, BS_BENCHMARK["delta_call"], rtol=0.01)
         np.testing.assert_allclose(greeks.gamma, BS_BENCHMARK["gamma"], rtol=0.01)
-        # Vega per 100% volatility move
-        np.testing.assert_allclose(greeks.vega, BS_BENCHMARK["vega"], rtol=0.01)
+        # Vega now scaled per 1% vol move (benchmark is per 100% move)
+        np.testing.assert_allclose(greeks.vega, BS_BENCHMARK["vega"] / 100, rtol=0.01)
 
     def test_can_price_gbm_only(self, market_atm, bs_engine, call_atm):
         """BSAnalyticEngine should only work with GBM model."""
@@ -680,3 +680,113 @@ class TestEdgeCases:
 
         assert result.price > 0
         assert result.price < market_atm.spot
+
+
+# =============================================================================
+# EXTENDED CROSS-ENGINE CONSISTENCY TESTS
+# =============================================================================
+
+class TestExtendedEngineComparison:
+    """Extended cross-engine consistency tests for jump and SV models."""
+
+    def test_fft_mc_consistent_bates(self, market_atm, bates_model, fft_engine):
+        """FFT vs MC for Bates model (tolerance 3%)."""
+        mc_engine = MonteCarloEngine(n_paths=100000, seed=42)
+        call = VanillaOption(strike=100, maturity=0.5, is_call=True)
+
+        fft_price = fft_engine.price(call, bates_model, market_atm).price
+        mc_price = mc_engine.price(call, bates_model, market_atm).price
+
+        np.testing.assert_allclose(mc_price, fft_price, rtol=0.03)
+
+    def test_fft_mc_consistent_merton(self, market_atm, merton_model, fft_engine):
+        """FFT vs MC for Merton model (tolerance 3%)."""
+        mc_engine = MonteCarloEngine(n_paths=100000, seed=42)
+        call = VanillaOption(strike=100, maturity=0.5, is_call=True)
+
+        fft_price = fft_engine.price(call, merton_model, market_atm).price
+        mc_price = mc_engine.price(call, merton_model, market_atm).price
+
+        np.testing.assert_allclose(mc_price, fft_price, rtol=0.03)
+
+    @pytest.mark.parametrize("engine_factory,model_name", [
+        (lambda: BSAnalyticEngine(), "bs"),
+        (lambda: FFTEngine(), "fft"),
+        (lambda: MonteCarloEngine(n_paths=100000, seed=42), "mc"),
+    ])
+    def test_put_call_parity_all_engines(self, engine_factory, model_name, market_atm, gbm_model):
+        """Put-call parity: C - P = S - K*exp(-rT) for all engines."""
+        engine = engine_factory()
+        k, t = 100.0, 0.5
+
+        call = VanillaOption(strike=k, maturity=t, is_call=True)
+        put = VanillaOption(strike=k, maturity=t, is_call=False)
+
+        c = engine.price(call, gbm_model, market_atm).price
+        p = engine.price(put, gbm_model, market_atm).price
+
+        expected = market_atm.spot - k * np.exp(-market_atm.rate * t)
+        actual = c - p
+
+        np.testing.assert_allclose(actual, expected, atol=0.5)
+
+    def test_fft_put_call_parity_heston(self, market_atm, heston_model, fft_engine):
+        """Put-call parity for Heston/FFT."""
+        k, t = 100.0, 0.5
+
+        call = VanillaOption(strike=k, maturity=t, is_call=True)
+        put = VanillaOption(strike=k, maturity=t, is_call=False)
+
+        c = fft_engine.price(call, heston_model, market_atm).price
+        p = fft_engine.price(put, heston_model, market_atm).price
+
+        expected = market_atm.spot - k * np.exp(-market_atm.rate * t)
+        actual = c - p
+
+        np.testing.assert_allclose(actual, expected, atol=0.5)
+
+
+# =============================================================================
+# REGRESSION TESTS
+# =============================================================================
+
+class TestRegressions:
+    """Regression tests for confirmed bugs."""
+
+    def test_fft_put_with_dividends(self):
+        """Bug 3: FFT put price must be correct when q > 0."""
+        market = MarketEnvironment(spot=100.0, rate=0.05, dividend_yield=0.03)
+        model = GBMModel(sigma=0.20)
+
+        bs_engine = BSAnalyticEngine()
+        fft_engine = FFTEngine()
+
+        put = VanillaOption(strike=100, maturity=0.5, is_call=False)
+
+        bs_price = bs_engine.price(put, model, market).price
+        fft_price = fft_engine.price(put, model, market).price
+
+        # FFT put with dividends must match BS within tight tolerance
+        np.testing.assert_allclose(fft_price, bs_price, rtol=1e-3, atol=0.02)
+
+    def test_bs_engine_greeks_scaled(self):
+        """Bug 1: engine.greeks() must return market-scaled values matching bs_all_greeks."""
+        from backend.greeks.analytic import bs_all_greeks
+
+        market = MarketEnvironment(spot=100.0, rate=0.05, dividend_yield=0.0)
+        model = GBMModel(sigma=0.20)
+        engine = BSAnalyticEngine()
+        option = VanillaOption(strike=100, maturity=0.5, is_call=True)
+
+        greeks = engine.greeks(option, model, market)
+        g = bs_all_greeks(100.0, 100.0, 0.5, 0.05, 0.0, 0.20, True)
+
+        # All Greeks must match exactly (same source of truth)
+        np.testing.assert_allclose(greeks.delta, g[1], rtol=1e-10)
+        np.testing.assert_allclose(greeks.gamma, g[2], rtol=1e-10)
+        np.testing.assert_allclose(greeks.vega, g[3], rtol=1e-10)
+        np.testing.assert_allclose(greeks.theta, g[4], rtol=1e-10)
+        np.testing.assert_allclose(greeks.rho, g[5], rtol=1e-10)
+        np.testing.assert_allclose(greeks.vanna, g[6], rtol=1e-10)
+        np.testing.assert_allclose(greeks.volga, g[7], rtol=1e-10)
+        np.testing.assert_allclose(greeks.ultima, g[13], rtol=1e-10)

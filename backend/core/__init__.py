@@ -50,6 +50,7 @@ from backend.core.interfaces import (
 # Registry and pricing function
 from backend.core.registry import (
     EngineRegistry,
+    EngineProvider,
     price,
 )
 
@@ -83,6 +84,7 @@ __all__ = [
     "PricingEngine",
     # Registry
     "EngineRegistry",
+    "EngineProvider",
     "price",
     # Black-Scholes formulas
     "norm_cdf",

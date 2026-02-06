@@ -85,7 +85,7 @@ from backend.portfolio.greeks_surfaces import (
     get_greek_name,
     # P&L functions (Numba-optimized)
     calculate_pnl_curve,
-    calculate_portfolio_pnl_at_expiry,
+    calculate_portfolio_pnl_at_expiry_arrays,
     # Greek indices
     GREEK_PRICE,
     GREEK_DELTA,
@@ -163,6 +163,7 @@ __all__ = [
     "get_greek_name",
     # P&L functions (from greeks_surfaces.py)
     "calculate_pnl_curve",
+    "calculate_portfolio_pnl_at_expiry_arrays",
     # Greek indices
     "GREEK_PRICE",
     "GREEK_DELTA",

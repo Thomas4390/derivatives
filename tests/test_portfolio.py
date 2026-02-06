@@ -31,6 +31,9 @@ from backend.portfolio.breakeven import (
     calculate_portfolio_pnl_at_expiry,
 )
 from backend.models.gbm import GBMModel
+from backend.core.market import MarketEnvironment
+from backend.engines import BSAnalyticEngine
+from backend.greeks.analytic import bs_all_greeks
 
 from tests.conftest import report
 
@@ -1094,3 +1097,272 @@ class TestBreakevenResult:
         assert d["max_loss"] == -5.0
 
         report.success("Dictionary conversion works correctly")
+
+
+# =============================================================================
+# PORTFOLIO GREEKS TESTS
+# =============================================================================
+
+class TestPortfolioGreeks:
+    """Tests for portfolio-level Greeks calculation."""
+
+    @pytest.fixture
+    def market(self):
+        return MarketEnvironment(spot=100.0, rate=0.05, dividend_yield=0.0)
+
+    @pytest.fixture
+    def model(self):
+        return GBMModel(sigma=0.20)
+
+    def test_single_call_greeks(self, market, model):
+        """Portfolio Greeks = BS Greeks for a single call."""
+        portfolio = OptionsPortfolio(model=model)
+        portfolio.add(long_call(strike=100, maturity=0.25, premium=0))
+
+        port_greeks = portfolio.greeks(market)
+
+        # Compare with BS analytic Greeks
+        bs = bs_all_greeks(
+            s=market.spot, k=100.0, t=0.25, r=market.rate,
+            q=market.dividend_yield, sigma=0.20, is_call=True
+        )
+        bs_delta, bs_gamma, bs_vega, bs_theta = bs[1], bs[2], bs[3], bs[4]
+
+        np.testing.assert_allclose(port_greeks.delta, bs_delta, rtol=0.02)
+        np.testing.assert_allclose(port_greeks.gamma, bs_gamma, rtol=0.02)
+
+    def test_straddle_delta_neutral(self, market, model):
+        """ATM straddle has |delta| < 0.15 (not perfectly zero due to r > 0)."""
+        portfolio = OptionsPortfolio(model=model)
+        portfolio.add(long_call(strike=100, maturity=0.25, premium=0))
+        portfolio.add(long_put(strike=100, maturity=0.25, premium=0))
+
+        greeks = portfolio.greeks(market)
+        assert abs(greeks.delta) < 0.15, f"|delta| = {abs(greeks.delta)} should be < 0.15"
+
+    def test_straddle_gamma_positive(self, market, model):
+        """Long straddle has positive gamma."""
+        portfolio = OptionsPortfolio(model=model)
+        portfolio.add(long_call(strike=100, maturity=0.25, premium=0))
+        portfolio.add(long_put(strike=100, maturity=0.25, premium=0))
+
+        greeks = portfolio.greeks(market)
+        assert greeks.gamma > 0, f"Gamma = {greeks.gamma} should be positive"
+
+    def test_straddle_vega_positive(self, market, model):
+        """Long straddle has positive vega."""
+        portfolio = OptionsPortfolio(model=model)
+        portfolio.add(long_call(strike=100, maturity=0.25, premium=0))
+        portfolio.add(long_put(strike=100, maturity=0.25, premium=0))
+
+        greeks = portfolio.greeks(market)
+        assert greeks.vega > 0, f"Vega = {greeks.vega} should be positive"
+
+    def test_straddle_theta_negative(self, market, model):
+        """Long options have negative theta."""
+        portfolio = OptionsPortfolio(model=model)
+        portfolio.add(long_call(strike=100, maturity=0.25, premium=0))
+        portfolio.add(long_put(strike=100, maturity=0.25, premium=0))
+
+        greeks = portfolio.greeks(market)
+        assert greeks.theta < 0, f"Theta = {greeks.theta} should be negative"
+
+    def test_iron_condor_low_delta(self, market, model):
+        """Iron condor has |delta| < 0.2."""
+        portfolio = OptionsPortfolio(model=model)
+        portfolio.add(short_put(strike=95, maturity=0.25, premium=0))
+        portfolio.add(long_put(strike=90, maturity=0.25, premium=0))
+        portfolio.add(short_call(strike=105, maturity=0.25, premium=0))
+        portfolio.add(long_call(strike=110, maturity=0.25, premium=0))
+
+        greeks = portfolio.greeks(market)
+        assert abs(greeks.delta) < 0.2, f"|delta| = {abs(greeks.delta)} should be < 0.2"
+
+    def test_greeks_aggregation_linearity(self, market, model):
+        """greeks(A+B) = greeks(A) + greeks(B)."""
+        # Portfolio A: single call
+        port_a = OptionsPortfolio(model=model)
+        port_a.add(long_call(strike=100, maturity=0.25, premium=0))
+        greeks_a = port_a.greeks(market)
+
+        # Portfolio B: single put
+        port_b = OptionsPortfolio(model=model)
+        port_b.add(long_put(strike=105, maturity=0.25, premium=0))
+        greeks_b = port_b.greeks(market)
+
+        # Combined portfolio
+        port_ab = OptionsPortfolio(model=model)
+        port_ab.add(long_call(strike=100, maturity=0.25, premium=0))
+        port_ab.add(long_put(strike=105, maturity=0.25, premium=0))
+        greeks_ab = port_ab.greeks(market)
+
+        np.testing.assert_allclose(greeks_ab.delta, greeks_a.delta + greeks_b.delta, atol=1e-4)
+        np.testing.assert_allclose(greeks_ab.gamma, greeks_a.gamma + greeks_b.gamma, atol=1e-4)
+        np.testing.assert_allclose(greeks_ab.vega, greeks_a.vega + greeks_b.vega, atol=1e-4)
+        np.testing.assert_allclose(greeks_ab.theta, greeks_a.theta + greeks_b.theta, atol=1e-4)
+
+
+class TestPortfolioNameCollision:
+    """Bug 6: Both pnl functions must be accessible without collision."""
+
+    def test_portfolio_pnl_name_no_collision(self):
+        """Both breakeven and arrays versions of calculate_portfolio_pnl_at_expiry are accessible."""
+        from backend.portfolio.breakeven import (
+            calculate_portfolio_pnl_at_expiry as pnl_breakeven,
+        )
+        from backend.portfolio.greeks_surfaces import (
+            calculate_portfolio_pnl_at_expiry_arrays as pnl_arrays,
+        )
+
+        # They must be different functions
+        assert pnl_breakeven is not pnl_arrays
+
+        # breakeven version takes (spot, positions_list)
+        pos = [long_call(strike=100, maturity=0.5, premium=5.0)]
+        result_be = pnl_breakeven(110.0, pos)
+        assert result_be == pytest.approx(5.0)  # (110-100) - 5
+
+        # arrays version takes numpy arrays
+        import numpy as np
+        result_arr = pnl_arrays(
+            110.0,
+            np.array([100.0]),
+            np.array([1.0]),   # call
+            np.array([1.0]),   # long
+            np.array([1.0]),
+            np.array([5.0]),
+            0.0, 0.0
+        )
+        assert result_arr == pytest.approx(5.0)
+
+
+# =============================================================================
+# NEW COVERAGE TESTS (Phase 3)
+# =============================================================================
+
+class TestPortfolioGreeksScaling:
+    """Gap 1: Verify portfolio.greeks() vega/theta/rho match engine.greeks() scaling."""
+
+    def test_portfolio_greeks_match_engine_scaling(self):
+        """Portfolio Greeks vega/theta/rho should match BSAnalyticEngine.greeks() within 2%."""
+        model = GBMModel(sigma=0.20)
+        market = MarketEnvironment(spot=100.0, rate=0.05, dividend_yield=0.0)
+        engine = BSAnalyticEngine()
+
+        from backend.instruments.options import VanillaOption
+        option = VanillaOption(strike=100.0, maturity=0.25, is_call=True)
+
+        # Engine (analytic) Greeks
+        engine_greeks = engine.greeks(option, model, market)
+
+        # Portfolio Greeks (single call, quantity=1, premium=0)
+        portfolio = OptionsPortfolio(model=model, engine=engine)
+        portfolio.add(long_call(strike=100.0, maturity=0.25, premium=0.0))
+        port_greeks = portfolio.greeks(market)
+
+        report.header("Portfolio vs Engine Greeks Scaling")
+        report.greeks(engine_greeks, label="Engine Greeks")
+        report.greeks(port_greeks, label="Portfolio Greeks")
+
+        np.testing.assert_allclose(port_greeks.delta, engine_greeks.delta, rtol=0.02)
+        np.testing.assert_allclose(port_greeks.gamma, engine_greeks.gamma, rtol=0.02)
+        np.testing.assert_allclose(port_greeks.vega, engine_greeks.vega, rtol=0.02)
+        np.testing.assert_allclose(port_greeks.theta, engine_greeks.theta, rtol=0.02)
+        np.testing.assert_allclose(port_greeks.rho, engine_greeks.rho, rtol=0.02)
+
+        report.success("Portfolio Greeks match engine Greeks scaling")
+
+
+class TestPureStockPortfolioGreeks:
+    """Gap 2: Portfolio with only stock position."""
+
+    def test_pure_stock_portfolio_greeks(self):
+        """Pure stock portfolio: delta = quantity, gamma = vega = theta = rho = 0."""
+        model = GBMModel(sigma=0.20)
+        market = MarketEnvironment(spot=100.0, rate=0.05, dividend_yield=0.0)
+
+        portfolio = OptionsPortfolio(model=model)
+        portfolio.add(long_stock(quantity=100, entry_price=100.0))
+
+        greeks = portfolio.greeks(market)
+
+        report.header("Pure Stock Portfolio Greeks")
+        report.greeks(greeks)
+
+        np.testing.assert_allclose(greeks.delta, 100.0, rtol=0.01)
+        assert abs(greeks.gamma) < 1e-6
+        assert abs(greeks.vega) < 1e-6
+        assert abs(greeks.theta) < 1e-6
+        assert abs(greeks.rho) < 1e-6
+
+        report.success("Pure stock: delta=shares, gamma=vega=theta=rho≈0")
+
+
+class TestThetaShortDated:
+    """Gap 3: Theta for very short-dated options."""
+
+    def test_theta_very_short_dated_option(self):
+        """Theta should still be finite and negative for T < 0.01."""
+        model = GBMModel(sigma=0.20)
+        market = MarketEnvironment(spot=100.0, rate=0.05, dividend_yield=0.0)
+
+        portfolio = OptionsPortfolio(model=model)
+        portfolio.add(long_call(strike=100.0, maturity=0.005, premium=0.0))
+
+        greeks = portfolio.greeks(market)
+
+        report.header("Short-Dated Theta")
+        report.value("Theta (T=0.005)", greeks.theta)
+
+        assert np.isfinite(greeks.theta), "Theta should be finite"
+        assert greeks.theta < 0, f"Theta = {greeks.theta} should be negative"
+
+        report.success("Short-dated theta is finite and negative")
+
+
+class TestRiskMetricsZeroVariance:
+    """Gap 4: Zero-variance P&L skewness/kurtosis edge case."""
+
+    def test_risk_metrics_zero_variance_pnl(self):
+        """Zero-variance P&L should return (0, 0) for skewness/kurtosis."""
+        from backend.portfolio.pnl import compute_skewness_kurtosis
+
+        # Constant P&L array -> zero variance
+        pnl = np.full(1000, 5.0, dtype=np.float64)
+        skew, kurt = compute_skewness_kurtosis(pnl)
+
+        report.header("Zero Variance Risk Metrics")
+        report.value("Skewness", skew, expected=0.0)
+        report.value("Excess Kurtosis", kurt, expected=0.0)
+
+        assert skew == 0.0
+        assert kurt == 0.0
+
+        report.success("Zero-variance P&L returns (0, 0) for skew/kurtosis")
+
+
+class TestBreakevenAlwaysLoss:
+    """Gap 5: Always-loss portfolio classification."""
+
+    def test_breakeven_always_loss_portfolio(self):
+        """Portfolio that always loses should be classified correctly."""
+        # Long call + short call at same strike with net debit
+        # (impossible to profit, always loses the net premium)
+        positions = [
+            long_call(strike=100, maturity=0.5, premium=10.0),
+            short_call(strike=100, maturity=0.5, premium=3.0),
+        ]
+        # At every spot: both cancel out, net P&L = -(10-3) = -7
+
+        result = find_breakevens(positions, spot_min=50, spot_max=150)
+
+        report.header("Always-Loss Portfolio Breakeven")
+        report.info(f"Breakeven points: {result.breakeven_points}")
+        report.info(f"Profit zones: {result.profit_zones}")
+        report.info(f"Loss zones: {result.loss_zones}")
+
+        assert len(result.breakeven_points) == 0
+        assert len(result.profit_zones) == 0
+        assert len(result.loss_zones) >= 1
+
+        report.success("Always-loss portfolio classified correctly")

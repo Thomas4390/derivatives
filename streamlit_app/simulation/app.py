@@ -69,6 +69,10 @@ from charts.unified_paths import (
 from charts.distributions import render_distributions_tab
 from charts.statistics import render_statistics_tab
 from charts.pnl_distribution import render_pnl_distribution_tab, render_risk_metrics_tab
+from charts.greeks_decomposition import render_greeks_decomposition_tab
+from charts.volatility_impact import render_volatility_impact_tab
+from charts.convergence_analysis import render_convergence_analysis_tab
+from charts.scenario_dashboard import render_scenario_dashboard_tab
 
 # Services
 from services.simulation_service import (
@@ -244,22 +248,40 @@ with st.sidebar:
 
 # Check if P&L analysis is available
 pnl_result = st.session_state.get("pnl_result")
+simulation_result = st.session_state.get("simulation_result")
 has_pnl = pnl_result is not None
+has_simulation = simulation_result is not None
 
 if has_pnl:
-    tab_sim, tab_pnl, tab_risk, tab_edu = st.tabs([
+    tab_sim, tab_pnl, tab_greeks, tab_vol, tab_scenarios, tab_convergence, tab_edu = st.tabs([
         "📈 Simulation",
         "💰 P&L Distribution",
-        "📊 Risk Metrics",
+        "📊 Greeks Attribution",
+        "📉 Volatility Impact",
+        "🔥 Stress Scenarios",
+        "🎯 Convergence",
         "📚 Education"
     ])
+elif has_simulation:
+    tab_sim, tab_vol, tab_convergence, tab_edu = st.tabs([
+        "📈 Simulation",
+        "📉 Volatility Impact",
+        "🎯 Convergence",
+        "📚 Education"
+    ])
+    tab_pnl = None
+    tab_greeks = None
+    tab_scenarios = None
 else:
     tab_sim, tab_edu = st.tabs([
         "📈 Simulation",
         "📚 Education"
     ])
     tab_pnl = None
-    tab_risk = None
+    tab_greeks = None
+    tab_vol = None
+    tab_scenarios = None
+    tab_convergence = None
 
 
 # =============================================================================
@@ -365,7 +387,7 @@ with tab_sim:
 # TAB 2: P&L DISTRIBUTION (Only shown when strategy is defined)
 # =============================================================================
 
-if tab_pnl is not None:
+if has_pnl:
     with tab_pnl:
         pnl_result = st.session_state.get("pnl_result")
         sim_params = st.session_state.get("simulation_params", all_params)
@@ -381,21 +403,77 @@ if tab_pnl is not None:
 
 
 # =============================================================================
-# TAB 3: RISK METRICS (Only shown when strategy is defined)
+# TAB: GREEKS ATTRIBUTION (Only shown when strategy is defined)
 # =============================================================================
 
-if tab_risk is not None:
-    with tab_risk:
+if has_pnl:
+    with tab_greeks:
         pnl_result = st.session_state.get("pnl_result")
+        simulation_result = st.session_state.get("simulation_result")
         sim_params = st.session_state.get("simulation_params", all_params)
 
-        if pnl_result is not None:
-            render_risk_metrics_tab(
-                metrics=pnl_result['risk_metrics'],
+        if pnl_result is not None and simulation_result is not None:
+            render_greeks_decomposition_tab(
+                simulation_result=simulation_result,
+                pnl_result=pnl_result,
                 params=sim_params
             )
         else:
-            st.info("👈 Define an option strategy and run simulation to see risk metrics.")
+            st.info("👈 Define a strategy and run simulation to see Greeks P&L decomposition.")
+
+
+# =============================================================================
+# TAB: VOLATILITY IMPACT (Shown when simulation exists)
+# =============================================================================
+
+if has_simulation or has_pnl:
+    with tab_vol:
+        pnl_result = st.session_state.get("pnl_result")
+        simulation_result = st.session_state.get("simulation_result")
+        sim_params = st.session_state.get("simulation_params", all_params)
+
+        if simulation_result is not None:
+            render_volatility_impact_tab(
+                simulation_result=simulation_result,
+                pnl_result=pnl_result,
+                params=sim_params
+            )
+        else:
+            st.info("👈 Run a simulation to see volatility impact analysis.")
+
+
+# =============================================================================
+# TAB: STRESS SCENARIOS (Only shown when strategy is defined)
+# =============================================================================
+
+if has_pnl:
+    with tab_scenarios:
+        sim_params = st.session_state.get("simulation_params", all_params)
+
+        if len(sim_params.get('position_arrays', {}).get('strikes', [])) > 0:
+            render_scenario_dashboard_tab(params=sim_params)
+        else:
+            st.info("👈 Define a strategy to see stress scenario analysis.")
+
+
+# =============================================================================
+# TAB: CONVERGENCE (Shown when simulation exists)
+# =============================================================================
+
+if has_simulation or has_pnl:
+    with tab_convergence:
+        pnl_result = st.session_state.get("pnl_result")
+        simulation_result = st.session_state.get("simulation_result")
+        sim_params = st.session_state.get("simulation_params", all_params)
+
+        if simulation_result is not None:
+            render_convergence_analysis_tab(
+                simulation_result=simulation_result,
+                pnl_result=pnl_result,
+                params=sim_params
+            )
+        else:
+            st.info("👈 Run a simulation to see convergence analysis.")
 
 
 # =============================================================================

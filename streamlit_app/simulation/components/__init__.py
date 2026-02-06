@@ -14,10 +14,9 @@ __all__ = [
     'render_results_summary',
 ]
 
-# Try to import old components for backward compatibility
+# Import additional components
 try:
     from .sidebar import render_sidebar
-    from .configuration import render_configuration_tab
     from .analysis_header import (
         render_analysis_header,
         render_strategy_summary_compact,
@@ -33,7 +32,6 @@ try:
     )
     __all__.extend([
         'render_sidebar',
-        'render_configuration_tab',
         'render_analysis_header',
         'render_strategy_summary_compact',
         'render_no_results_message',
@@ -45,5 +43,5 @@ try:
         'get_net_premium'
     ])
 except ImportError:
-    # Old backend not available, skip legacy components
+    # Components not available, skip
     pass

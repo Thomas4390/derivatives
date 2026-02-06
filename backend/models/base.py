@@ -2,23 +2,19 @@
 Base Model Classes
 ==================
 
-Abstract base class for unified financial models.
+Common enums and utilities for financial models.
 
 Provides:
-- BaseModel: Abstract base class for financial models
-- PricingCapability: Enum for supported pricing methods
 - Measure: Enum for probability measure (P/Q)
+
+Note: The canonical PricingCapability enum is in backend.core.result_types.
+      All models should inherit from backend.core.interfaces.Model.
 
 Author: Thomas
 Created: 2025
 """
 
-from abc import ABC, abstractmethod
 from enum import Enum
-from typing import Optional, List, Dict, Any, TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from backend.simulation.base import BaseSimulator
 
 
 class Measure(Enum):
@@ -30,148 +26,3 @@ class Measure(Enum):
     """
     P = "physical"
     Q = "risk_neutral"
-
-
-class PricingCapability(Enum):
-    """
-    Pricing methods a model supports.
-
-    ANALYTICAL: Closed-form solution (e.g., Black-Scholes)
-    FFT: Fast Fourier Transform via characteristic function
-    MONTE_CARLO: Monte Carlo simulation
-    """
-    ANALYTICAL = "analytical"
-    FFT = "fft"
-    MONTE_CARLO = "monte_carlo"
-
-
-class BaseModel(ABC):
-    """
-    Abstract base class for financial models.
-
-    Defines the interface for financial models used in pricing.
-    Models should implement model_name, supported_pricing_methods,
-    create_simulator, create_pricer, and get_parameters.
-    """
-
-    @property
-    @abstractmethod
-    def model_name(self) -> str:
-        """Human-readable model name."""
-        pass
-
-    @property
-    @abstractmethod
-    def supported_pricing_methods(self) -> List[PricingCapability]:
-        """List of pricing methods this model supports."""
-        pass
-
-    @abstractmethod
-    def create_simulator(self, **kwargs) -> "BaseSimulator":
-        """
-        Create a simulator for this model.
-
-        Parameters
-        ----------
-        **kwargs
-            Simulator-specific options
-
-        Returns
-        -------
-        BaseSimulator
-            Configured simulator instance
-        """
-        pass
-
-    @abstractmethod
-    def create_pricer(
-        self,
-        method: Optional[PricingCapability] = None,
-        **kwargs
-    ):
-        """
-        Create an option pricer for this model.
-
-        Parameters
-        ----------
-        method : PricingCapability, optional
-            Preferred pricing method
-        **kwargs
-            Pricer-specific options
-
-        Returns
-        -------
-        Configured pricer instance
-        """
-        pass
-
-    def characteristic_function(
-        self, u: complex, s0: float, t: float, r: float, q: float = 0.0
-    ) -> complex:
-        """
-        Characteristic function phi(u) = E^Q[exp(i*u*ln(S_T))].
-
-        Override in models that support FFT pricing.
-
-        Parameters
-        ----------
-        u : complex
-            Frequency argument
-        s0 : float
-            Initial spot price
-        t : float
-            Time to maturity
-        r : float
-            Risk-free rate
-        q : float, optional
-            Continuous dividend yield (default 0.0)
-
-        Returns
-        -------
-        complex
-            Characteristic function value
-        """
-        raise NotImplementedError(
-            f"{self.model_name} does not have a characteristic function"
-        )
-
-    def characteristic_function_vectorized(
-        self, u, s0: float, t: float, r: float, q: float = 0.0
-    ):
-        """
-        Vectorized characteristic function for arrays of u.
-
-        Override in models that support efficient FFT pricing.
-        Default implementation loops over scalar characteristic_function.
-
-        Parameters
-        ----------
-        u : array-like
-            Array of frequency arguments
-        s0 : float
-            Initial spot price
-        t : float
-            Time to maturity
-        r : float
-            Risk-free rate
-        q : float, optional
-            Continuous dividend yield (default 0.0)
-
-        Returns
-        -------
-        np.ndarray
-            Array of characteristic function values
-        """
-        import numpy as np
-        u_arr = np.asarray(u)
-        return np.array([
-            self.characteristic_function(ui, s0, t, r, q) for ui in u_arr.flat
-        ]).reshape(u_arr.shape)
-
-    @abstractmethod
-    def get_parameters(self) -> Dict[str, Any]:
-        """Return parameters as dictionary."""
-        pass
-
-    def __repr__(self) -> str:
-        return f"{self.__class__.__name__}({self.get_parameters()})"

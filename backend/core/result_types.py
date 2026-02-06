@@ -171,6 +171,35 @@ class GreeksResult:
     def __rmul__(self, scalar: float) -> 'GreeksResult':
         return self.__mul__(scalar)
 
+    def __sub__(self, other: 'GreeksResult') -> 'GreeksResult':
+        """Subtract Greeks (for hedging calculations)."""
+        return GreeksResult(
+            # First order
+            delta=self.delta - other.delta,
+            theta=self.theta - other.theta,
+            vega=self.vega - other.vega,
+            rho=self.rho - other.rho,
+            # Second order
+            gamma=self.gamma - other.gamma,
+            vanna=self.vanna - other.vanna,
+            volga=self.volga - other.volga,
+            charm=self.charm - other.charm,
+            veta=self.veta - other.veta,
+            # Third order
+            speed=self.speed - other.speed,
+            zomma=self.zomma - other.zomma,
+            color=self.color - other.color,
+            ultima=self.ultima - other.ultima,
+        )
+
+    def __truediv__(self, scalar: float) -> 'GreeksResult':
+        """Divide Greeks by a scalar (for normalization)."""
+        return self * (1.0 / scalar)
+
+    def __neg__(self) -> 'GreeksResult':
+        """Negate Greeks (for short positions)."""
+        return self * (-1.0)
+
     @property
     def vomma(self) -> float:
         """Alias for volga (∂²V/∂σ²)."""

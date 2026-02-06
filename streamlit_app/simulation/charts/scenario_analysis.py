@@ -23,6 +23,7 @@ from backend.simulation import (
     find_breakeven_points,
     RiskMetrics
 )
+from backend.greeks.analytic import bs_all_greeks
 
 
 def render_scenario_analysis_tab(
@@ -60,7 +61,7 @@ def render_scenario_analysis_tab(
     )
 
     # Create tabs
-    tab1, tab2 = st.tabs(["Price vs P&L", "Scenario Breakdown"])
+    tab1, tab2, tab3 = st.tabs(["Price vs P&L", "Scenario Breakdown", "Greeks by Scenario"])
 
     with tab1:
         _render_scatter_with_payoff(
@@ -69,6 +70,9 @@ def render_scenario_analysis_tab(
 
     with tab2:
         _render_scenario_breakdown(terminal_prices, pnl_values, params)
+
+    with tab3:
+        _render_greeks_by_scenario(terminal_prices, pnl_values, position_arrays, params)
 
 
 def _render_scatter_with_payoff(
@@ -350,6 +354,274 @@ def _render_scenario_breakdown(
             "Win Rate": st.column_config.TextColumn("Win %", width="small")
         }
     )
+
+
+def _render_greeks_by_scenario(
+    terminal_prices: np.ndarray,
+    pnl_values: np.ndarray,
+    position_arrays: Dict[str, np.ndarray],
+    params: Dict[str, Any]
+) -> None:
+    """
+    Render Greeks at each price level to show which contributes most to P&L.
+
+    This helps users understand the "why" behind P&L changes:
+    - Delta: P&L from directional movement
+    - Gamma: P&L from acceleration (large moves)
+    - Vega: P&L from volatility changes
+    - Theta: P&L from time decay
+    """
+    st.caption(
+        "This view shows how Greeks change as the underlying price moves. "
+        "Understanding which Greek dominates at each price level explains your P&L."
+    )
+
+    strikes = position_arrays.get('strikes', np.array([]))
+    option_types = position_arrays.get('option_types', np.array([]))
+    position_types = position_arrays.get('position_types', np.array([]))
+    quantities = position_arrays.get('quantities', np.array([]))
+
+    if len(strikes) == 0:
+        st.info("Add options to your strategy to see Greeks analysis.")
+        return
+
+    spot_price = params.get('spot_price', 100)
+    time_to_expiry = params.get('time_horizon', 1.0)
+    risk_free_rate = params.get('risk_free_rate', 0.05)
+    volatility = params.get('volatility', 0.20)
+
+    # Create price range for Greeks calculation
+    price_min = terminal_prices.min() * 0.95
+    price_max = terminal_prices.max() * 1.05
+    price_range = np.linspace(price_min, price_max, 50)
+
+    # Calculate portfolio Greeks at each price level
+    deltas = []
+    gammas = []
+    vegas = []
+    thetas = []
+
+    for price in price_range:
+        portfolio_delta = 0.0
+        portfolio_gamma = 0.0
+        portfolio_vega = 0.0
+        portfolio_theta = 0.0
+
+        for i in range(len(strikes)):
+            is_call = option_types[i] == 1
+            sign = position_types[i]
+            qty = quantities[i]
+
+            greeks = bs_all_greeks(
+                s=price,
+                k=strikes[i],
+                t=max(time_to_expiry, 0.001),
+                r=risk_free_rate,
+                q=0.0,
+                sigma=volatility,
+                is_call=is_call
+            )
+
+            # Each contract is for 100 shares
+            multiplier = sign * qty * 100
+            portfolio_delta += greeks[1] * multiplier
+            portfolio_gamma += greeks[2] * multiplier
+            portfolio_vega += greeks[3] * multiplier
+            portfolio_theta += greeks[4] * multiplier
+
+        deltas.append(portfolio_delta)
+        gammas.append(portfolio_gamma)
+        vegas.append(portfolio_vega)
+        thetas.append(portfolio_theta)
+
+    # Create subplot with Greeks across price range
+    fig = make_subplots(
+        rows=2, cols=2,
+        subplot_titles=("Delta (Directional)", "Gamma (Acceleration)",
+                       "Vega (Vol Sensitivity)", "Theta (Time Decay)"),
+        vertical_spacing=0.15,
+        horizontal_spacing=0.1
+    )
+
+    # Delta
+    fig.add_trace(
+        go.Scatter(
+            x=price_range, y=deltas,
+            mode='lines', name='Delta',
+            line=dict(color='#3b82f6', width=2)
+        ),
+        row=1, col=1
+    )
+    fig.add_hline(y=0, line_dash="dot", line_color="gray", row=1, col=1)
+
+    # Gamma
+    fig.add_trace(
+        go.Scatter(
+            x=price_range, y=gammas,
+            mode='lines', name='Gamma',
+            line=dict(color='#10b981', width=2)
+        ),
+        row=1, col=2
+    )
+    fig.add_hline(y=0, line_dash="dot", line_color="gray", row=1, col=2)
+
+    # Vega
+    fig.add_trace(
+        go.Scatter(
+            x=price_range, y=vegas,
+            mode='lines', name='Vega',
+            line=dict(color='#8b5cf6', width=2)
+        ),
+        row=2, col=1
+    )
+    fig.add_hline(y=0, line_dash="dot", line_color="gray", row=2, col=1)
+
+    # Theta
+    fig.add_trace(
+        go.Scatter(
+            x=price_range, y=thetas,
+            mode='lines', name='Theta',
+            line=dict(color='#ef4444', width=2)
+        ),
+        row=2, col=2
+    )
+    fig.add_hline(y=0, line_dash="dot", line_color="gray", row=2, col=2)
+
+    # Add vertical line at current spot
+    for row in [1, 2]:
+        for col in [1, 2]:
+            fig.add_vline(
+                x=spot_price, line_dash="dash", line_color="#1f2937",
+                annotation_text="S₀" if row == 1 and col == 1 else None,
+                row=row, col=col
+            )
+
+    fig.update_layout(
+        height=CHART_HEIGHT_LARGE,
+        showlegend=False,
+        margin=dict(t=60, b=40)
+    )
+
+    # Update axis labels
+    fig.update_xaxes(title_text="Underlying Price ($)", row=2, col=1)
+    fig.update_xaxes(title_text="Underlying Price ($)", row=2, col=2)
+    fig.update_yaxes(title_text="Shares Eq.", row=1, col=1)
+    fig.update_yaxes(title_text="Δ per $1", row=1, col=2)
+    fig.update_yaxes(title_text="$ per 1% Vol", row=2, col=1)
+    fig.update_yaxes(title_text="$/day", row=2, col=2)
+
+    st.plotly_chart(fig, use_container_width=True)
+
+    # Educational interpretation
+    _render_greeks_interpretation(
+        deltas, gammas, vegas, thetas, price_range, spot_price
+    )
+
+
+def _render_greeks_interpretation(
+    deltas: List[float],
+    gammas: List[float],
+    vegas: List[float],
+    thetas: List[float],
+    price_range: np.ndarray,
+    spot_price: float
+) -> None:
+    """Provide educational interpretation of Greeks patterns."""
+    import pandas as pd
+
+    # Find current values (at spot)
+    idx_spot = np.argmin(np.abs(price_range - spot_price))
+    current_delta = deltas[idx_spot]
+    current_gamma = gammas[idx_spot]
+    current_vega = vegas[idx_spot]
+    current_theta = thetas[idx_spot]
+
+    st.markdown("#### Current Greeks at Spot Price")
+
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        delta_color = "green" if current_delta > 0 else "red" if current_delta < 0 else "gray"
+        st.metric("Delta", f"{current_delta:+,.1f}", "Shares equivalent")
+    with col2:
+        gamma_sign = "Long" if current_gamma > 0 else "Short"
+        st.metric("Gamma", f"{current_gamma:,.4f}", f"{gamma_sign} gamma")
+    with col3:
+        vega_sign = "Long" if current_vega > 0 else "Short"
+        st.metric("Vega", f"${current_vega:+,.1f}", f"{vega_sign} vol")
+    with col4:
+        theta_impact = "Earning" if current_theta > 0 else "Paying"
+        st.metric("Theta", f"${current_theta:+,.2f}/day", theta_impact)
+
+    # Dominant Greek analysis
+    st.markdown("#### Which Greek Drives Your P&L?")
+
+    interpretations = []
+
+    # Delta interpretation
+    if abs(current_delta) > 50:
+        direction = "bullish" if current_delta > 0 else "bearish"
+        interpretations.append(
+            f"**Delta ({current_delta:+,.0f})**: You have significant directional exposure. "
+            f"A 1% move = ~${abs(current_delta * spot_price * 0.01):,.0f} P&L change. "
+            f"Strategy is {direction}."
+        )
+
+    # Gamma interpretation
+    if current_gamma > 0.5:
+        interpretations.append(
+            f"**Gamma (+{current_gamma:.2f})**: You're long gamma - you profit from large moves "
+            f"in either direction. The bigger the move, the more you make."
+        )
+    elif current_gamma < -0.5:
+        interpretations.append(
+            f"**Gamma ({current_gamma:.2f})**: You're short gamma - large moves hurt you. "
+            f"You need the underlying to stay relatively stable."
+        )
+
+    # Vega interpretation
+    if abs(current_vega) > 50:
+        vol_exposure = "long" if current_vega > 0 else "short"
+        interpretations.append(
+            f"**Vega (${current_vega:+,.0f})**: You're {vol_exposure} volatility. "
+            f"A 1% change in implied vol = ~${abs(current_vega):,.0f} P&L change."
+        )
+
+    # Theta interpretation
+    if current_theta < -10:
+        interpretations.append(
+            f"**Theta (${current_theta:+,.0f}/day)**: Time decay is working against you. "
+            f"You need the underlying to move (or vol to increase) to overcome this."
+        )
+    elif current_theta > 10:
+        interpretations.append(
+            f"**Theta (${current_theta:+,.0f}/day)**: Time decay works for you. "
+            f"You earn money each day if nothing moves."
+        )
+
+    if interpretations:
+        for interp in interpretations:
+            st.markdown(f"- {interp}")
+    else:
+        st.markdown("- Position has relatively balanced Greek exposures.")
+
+    # Educational callout
+    st.markdown("""
+    <div style="background: #e8f4f8; padding: 1rem; border-radius: 8px; margin-top: 1rem;">
+        <h5 style="color: #1e3a5f; margin-top: 0;">💡 Key Insight: P&L Attribution</h5>
+        <p style="margin-bottom: 0;">
+            Your total P&L at any price level can be approximated as:
+        </p>
+        <p style="font-family: monospace; background: #f1f5f9; padding: 0.5rem; border-radius: 4px;">
+            P&L ≈ Delta × ΔS + ½ × Gamma × (ΔS)² + Vega × Δσ + Theta × Δt
+        </p>
+        <ul style="margin-bottom: 0;">
+            <li><strong>Delta P&L</strong>: Linear with price movement</li>
+            <li><strong>Gamma P&L</strong>: Accelerates with large moves (squared term!)</li>
+            <li><strong>Vega P&L</strong>: Changes with implied volatility</li>
+            <li><strong>Theta P&L</strong>: Accumulates with time passage</li>
+        </ul>
+    </div>
+    """, unsafe_allow_html=True)
 
 
 def render_beneficial_scenarios(

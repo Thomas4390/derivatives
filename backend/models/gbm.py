@@ -255,6 +255,25 @@ class GBMModel(Model):
         """Annualized variance sigma^2."""
         return self.sigma ** 2
 
+    def create_simulator(self, antithetic: bool = True, **kwargs):
+        """
+        Create a GBM simulator for Monte Carlo pricing.
+
+        Parameters
+        ----------
+        antithetic : bool
+            Use antithetic variates for variance reduction
+        **kwargs
+            Additional simulator parameters
+
+        Returns
+        -------
+        GBMSimulator
+            Configured simulator instance
+        """
+        from backend.simulation.models.gbm import GBMSimulator
+        return GBMSimulator(sigma=self.sigma, antithetic=antithetic, **kwargs)
+
     def __repr__(self) -> str:
         return f"GBMModel(sigma={self.sigma})"
 

@@ -220,7 +220,8 @@ class CarrMadanFFTEngine:
         s0: float,
         k: float,
         t: float,
-        r: float
+        r: float,
+        q: float = 0.0
     ) -> float:
         """
         Price a single European call option.
@@ -237,6 +238,8 @@ class CarrMadanFFTEngine:
             Time to maturity
         r : float
             Risk-free rate
+        q : float
+            Dividend yield (default 0)
 
         Returns
         -------
@@ -246,7 +249,7 @@ class CarrMadanFFTEngine:
         log_s0 = np.log(s0)
         log_k = np.log(k)
 
-        # Compute integrand
+        # Compute integrand (characteristic function already includes q)
         integrand = self._compute_integrand(characteristic_fn, s0, t, r)
 
         # FFT transform
@@ -287,7 +290,7 @@ class CarrMadanFFTEngine:
         float
             Put option price
         """
-        call_price = self.price_call(characteristic_fn, s0, k, t, r)
+        call_price = self.price_call(characteristic_fn, s0, k, t, r, q)
         # Put-call parity: P = C - S*e^(-qT) + K*e^(-rT)
         put_price = call_price - s0 * np.exp(-q * t) + k * np.exp(-r * t)
         return max(put_price, 0.0)
@@ -450,7 +453,7 @@ def fft_price(
     engine = CarrMadanFFTEngine(config)
 
     if is_call:
-        return engine.price_call(characteristic_fn, s0, k, t, r)
+        return engine.price_call(characteristic_fn, s0, k, t, r, q)
     else:
         return engine.price_put(characteristic_fn, s0, k, t, r, q)
 

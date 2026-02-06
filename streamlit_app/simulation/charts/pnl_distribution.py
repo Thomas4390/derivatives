@@ -11,6 +11,7 @@ from plotly.subplots import make_subplots
 import streamlit as st
 from typing import Dict, Any, Optional
 from scipy import stats
+from scipy.ndimage import gaussian_filter1d
 
 from config.constants import (
     CHART_HEIGHT_STANDARD,
@@ -55,13 +56,16 @@ def render_pnl_distribution_tab(
     _render_summary_metrics(risk_metrics)
 
     # Create tabs for different views
-    tab1, tab2 = st.tabs(["Histogram", "CDF & Percentiles"])
+    tab1, tab2, tab3 = st.tabs(["Histogram", "CDF & Percentiles", "P&L Drivers"])
 
     with tab1:
         _render_histogram(pnl_values, risk_metrics)
 
     with tab2:
         _render_cdf(pnl_values, risk_metrics)
+
+    with tab3:
+        _render_pnl_drivers(pnl_values, risk_metrics, params)
 
 
 def _render_summary_metrics(metrics: RiskMetrics) -> None:
@@ -320,6 +324,257 @@ def _render_cdf(pnl_values: np.ndarray, metrics: RiskMetrics) -> None:
             "Category": st.column_config.TextColumn("Category", width="medium")
         }
     )
+
+
+def _render_pnl_drivers(
+    pnl_values: np.ndarray,
+    metrics: RiskMetrics,
+    params: Dict[str, Any]
+) -> None:
+    """
+    Render educational content explaining P&L distribution drivers.
+
+    Explains why different strategies create different distribution shapes.
+    """
+    st.markdown("#### Understanding Your P&L Distribution Shape")
+
+    # Detect distribution characteristics
+    is_bimodal = _detect_bimodality(pnl_values)
+    is_bounded = _detect_bounded_distribution(pnl_values, metrics)
+    has_fat_tails = metrics.kurtosis > 3.5
+
+    # Get model info
+    model_name = params.get('model_name', 'GBM')
+    has_stoch_vol = model_name.lower() in ['heston', 'bates', 'garch', 'ngarch', 'gjr-garch']
+
+    # Strategy type detection from position arrays
+    position_arrays = params.get('position_arrays', {})
+    strategy_type = _detect_strategy_type(position_arrays)
+
+    # Display detected characteristics
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        bimodal_icon = "✅" if is_bimodal else "❌"
+        st.markdown(f"**Bimodal:** {bimodal_icon}")
+    with col2:
+        bounded_icon = "✅" if is_bounded else "❌"
+        st.markdown(f"**Bounded:** {bounded_icon}")
+    with col3:
+        fat_icon = "✅" if has_fat_tails else "❌"
+        st.markdown(f"**Fat Tails:** {fat_icon}")
+
+    st.markdown("---")
+
+    # Explanation based on detected characteristics
+    if is_bimodal:
+        st.markdown("""
+        <div style="background: #fef3c7; padding: 1rem; border-radius: 8px; margin-bottom: 1rem;">
+            <h5 style="color: #92400e; margin-top: 0;">📊 Bimodal Distribution Detected</h5>
+            <p style="margin-bottom: 0.5rem;">
+                Your P&L distribution has two peaks. This is characteristic of <strong>volatility strategies</strong>
+                like straddles and strangles.
+            </p>
+            <p style="margin-bottom: 0;">
+                <strong>Why?</strong> These strategies profit from large moves in either direction, but lose money
+                when the underlying stays flat. The two modes represent:
+            </p>
+            <ul style="margin-bottom: 0;">
+                <li><strong>Left peak:</strong> Scenarios where the stock doesn't move much (theta decay dominates)</li>
+                <li><strong>Right peak:</strong> Scenarios where the stock moves significantly (gamma gains dominate)</li>
+            </ul>
+        </div>
+        """, unsafe_allow_html=True)
+
+    if is_bounded:
+        st.markdown("""
+        <div style="background: #dbeafe; padding: 1rem; border-radius: 8px; margin-bottom: 1rem;">
+            <h5 style="color: #1e40af; margin-top: 0;">📏 Bounded Distribution Detected</h5>
+            <p style="margin-bottom: 0.5rem;">
+                Your P&L has defined maximum profit and/or loss limits. This is characteristic of
+                <strong>spread strategies</strong> like bull/bear spreads, iron condors, and butterflies.
+            </p>
+            <p style="margin-bottom: 0;">
+                <strong>Why?</strong> Spreads combine long and short options at different strikes:
+            </p>
+            <ul style="margin-bottom: 0;">
+                <li>The short options cap your gains but also reduce cost</li>
+                <li>The long options limit your losses</li>
+                <li>Result: A "box" of possible outcomes with defined edges</li>
+            </ul>
+        </div>
+        """, unsafe_allow_html=True)
+
+    if has_fat_tails and has_stoch_vol:
+        st.markdown(f"""
+        <div style="background: #fce7f3; padding: 1rem; border-radius: 8px; margin-bottom: 1rem;">
+            <h5 style="color: #9d174d; margin-top: 0;">📈 Fat Tails from Stochastic Volatility ({model_name})</h5>
+            <p style="margin-bottom: 0.5rem;">
+                Your distribution has fatter tails than a normal distribution (kurtosis = {metrics.kurtosis:.2f} > 3).
+                Using a stochastic volatility model explains why:
+            </p>
+            <ul style="margin-bottom: 0;">
+                <li><strong>Volatility clustering:</strong> High vol tends to stay high, low vol stays low</li>
+                <li><strong>Correlation effect:</strong> In crashes, both price drops AND vol spikes (double whammy for long positions)</li>
+                <li><strong>Result:</strong> More extreme outcomes than GBM would predict</li>
+            </ul>
+            <p style="margin-top: 0.5rem; margin-bottom: 0;">
+                <em>This is why options are priced with volatility "smile" - the market knows tails are fatter!</em>
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
+    elif has_fat_tails:
+        st.markdown(f"""
+        <div style="background: #fce7f3; padding: 1rem; border-radius: 8px; margin-bottom: 1rem;">
+            <h5 style="color: #9d174d; margin-top: 0;">📈 Fat Tails Detected</h5>
+            <p style="margin-bottom: 0;">
+                Your distribution has higher kurtosis ({metrics.kurtosis:.2f}) than a normal distribution (3.0).
+                This means extreme P&L outcomes are more likely than a bell curve would suggest.
+                Consider using a stochastic volatility model (Heston, GARCH) for more realistic tail risk.
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
+
+    # General educational content
+    st.markdown("#### Key P&L Drivers by Strategy Type")
+
+    strategy_drivers = {
+        "Long Call/Put": {
+            "main_driver": "Delta (directional exposure)",
+            "secondary": "Gamma (acceleration), Vega (vol sensitivity)",
+            "risk": "Theta decay works against you every day",
+            "distribution": "Asymmetric: limited loss (premium), unlimited gain potential"
+        },
+        "Short Call/Put": {
+            "main_driver": "Theta (time decay collection)",
+            "secondary": "Negative Gamma (risk of large moves)",
+            "risk": "Unlimited loss potential if wrong",
+            "distribution": "Asymmetric: limited gain (premium), large loss potential"
+        },
+        "Straddle/Strangle": {
+            "main_driver": "Gamma (profits from large moves)",
+            "secondary": "Vega (benefits from vol increase)",
+            "risk": "Theta decay if underlying stays flat",
+            "distribution": "Bimodal: peaks at 'no move' and 'big move' scenarios"
+        },
+        "Vertical Spread": {
+            "main_driver": "Delta (directional view with reduced cost)",
+            "secondary": "Limited Gamma and Vega exposure",
+            "risk": "Both profit and loss are capped",
+            "distribution": "Bounded: max profit at one strike, max loss at other"
+        },
+        "Iron Condor": {
+            "main_driver": "Theta (time decay on 4 options)",
+            "secondary": "Negative Vega (hurt by vol increase)",
+            "risk": "Loss if underlying moves beyond wings",
+            "distribution": "Bounded with central plateau of max profit"
+        }
+    }
+
+    # Display as expandable sections
+    for strategy, drivers in strategy_drivers.items():
+        with st.expander(f"**{strategy}**"):
+            col1, col2 = st.columns(2)
+            with col1:
+                st.markdown(f"**Main Driver:** {drivers['main_driver']}")
+                st.markdown(f"**Secondary:** {drivers['secondary']}")
+            with col2:
+                st.markdown(f"**Key Risk:** {drivers['risk']}")
+                st.markdown(f"**Distribution Shape:** {drivers['distribution']}")
+
+    # Practical insight
+    st.markdown("""
+    <div style="background: #ecfdf5; padding: 1rem; border-radius: 8px; margin-top: 1rem;">
+        <h5 style="color: #065f46; margin-top: 0;">💡 Practical Insight</h5>
+        <p style="margin-bottom: 0;">
+            The shape of your P&L distribution tells you what you're betting on:
+        </p>
+        <ul style="margin-bottom: 0;">
+            <li><strong>Wide symmetric distribution:</strong> You're taking directional risk</li>
+            <li><strong>Bimodal distribution:</strong> You're betting on movement magnitude</li>
+            <li><strong>Narrow bounded distribution:</strong> You're selling insurance (premium collection)</li>
+            <li><strong>Skewed distribution:</strong> Asymmetric risk/reward trade-off</li>
+        </ul>
+    </div>
+    """, unsafe_allow_html=True)
+
+
+def _detect_bimodality(pnl_values: np.ndarray) -> bool:
+    """
+    Detect if distribution is bimodal using dip test heuristic.
+
+    Uses histogram peak counting as a simple proxy.
+    """
+    try:
+        hist, bin_edges = np.histogram(pnl_values, bins=30)
+        # Smooth histogram
+        smoothed = gaussian_filter1d(hist.astype(float), sigma=2)
+
+        # Count local maxima
+        peaks = 0
+        for i in range(1, len(smoothed) - 1):
+            if smoothed[i] > smoothed[i-1] and smoothed[i] > smoothed[i+1]:
+                # Only count significant peaks (>10% of max)
+                if smoothed[i] > 0.1 * smoothed.max():
+                    peaks += 1
+
+        return peaks >= 2
+    except Exception:
+        return False
+
+
+def _detect_bounded_distribution(pnl_values: np.ndarray, metrics: RiskMetrics) -> bool:
+    """
+    Detect if distribution has clearly bounded range.
+
+    Looks for sharp cutoffs in the distribution tails.
+    """
+    # Check if max loss and max profit are "close" to VaR values
+    # indicating hard boundaries rather than fat tails
+
+    range_pnl = metrics.max_profit - metrics.max_loss
+    if range_pnl == 0:
+        return False
+
+    # Calculate how much of the range is outside the 5-95% interval
+    tail_range = (metrics.max_profit - np.percentile(pnl_values, 95)) + \
+                 (np.percentile(pnl_values, 5) - metrics.max_loss)
+
+    # If tails are very short relative to total range, distribution is bounded
+    tail_ratio = tail_range / range_pnl
+
+    return tail_ratio < 0.15  # Tails are less than 15% of total range
+
+
+def _detect_strategy_type(position_arrays: Dict[str, Any]) -> str:
+    """Attempt to detect strategy type from position arrays."""
+    if not position_arrays or len(position_arrays.get('strikes', [])) == 0:
+        return "Unknown"
+
+    strikes = position_arrays.get('strikes', [])
+    option_types = position_arrays.get('option_types', [])
+    position_types = position_arrays.get('position_types', [])
+
+    n_legs = len(strikes)
+    n_calls = sum(1 for t in option_types if t == 1)
+    n_puts = sum(1 for t in option_types if t == -1)
+    n_long = sum(1 for p in position_types if p == 1)
+    n_short = sum(1 for p in position_types if p == -1)
+
+    unique_strikes = len(set(strikes))
+
+    # Simple heuristics
+    if n_legs == 1:
+        return "Single Option"
+    elif n_legs == 2 and n_calls == 1 and n_puts == 1 and unique_strikes == 1:
+        return "Straddle"
+    elif n_legs == 2 and n_calls == 1 and n_puts == 1 and unique_strikes == 2:
+        return "Strangle"
+    elif n_legs == 2 and (n_calls == 2 or n_puts == 2):
+        return "Vertical Spread"
+    elif n_legs == 4:
+        return "Multi-Leg (Condor/Butterfly)"
+    else:
+        return "Custom Strategy"
 
 
 def render_risk_metrics_tab(metrics: RiskMetrics, params: Dict[str, Any]) -> None:

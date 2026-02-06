@@ -834,27 +834,29 @@ class ModelNumericalGreeks:
 
         # Time bump (requires instrument modification)
         h_t = self.time_bump_days / 365.0
-        # Create decayed instrument
-        from backend.instruments.options import VanillaOption
-        decayed = VanillaOption(
-            strike=instrument.strike,
-            maturity=max(instrument.maturity - h_t, 0.001),
-            is_call=instrument.is_call
-        )
-        v_t_bump = engine.price(decayed, model, market).price
+        # Create decayed instrument only if strike and is_call exist
+        # (exotic instruments like LookbackOption may not have these)
+        if hasattr(instrument, 'strike') and hasattr(instrument, 'is_call'):
+            from backend.instruments.options import VanillaOption
+            decayed = VanillaOption(
+                strike=instrument.strike,
+                maturity=max(instrument.maturity - h_t, 0.001),
+                is_call=instrument.is_call
+            )
+            v_t_bump = engine.price(decayed, model, market).price
+        else:
+            # Skip theta for exotic instruments without strike/is_call
+            v_t_bump = v_mid  # This will result in theta = 0
 
         # Vol bump (requires model modification)
-        params = model.get_parameters()
-        if 'sigma' in params:
-            # GBM model
-            from backend.models.gbm import GBMModel
-            model_v_up = GBMModel(sigma=params['sigma'] + self.vol_bump)
-            model_v_down = GBMModel(sigma=params['sigma'] - self.vol_bump)
+        from backend.models.vol_bump import create_vol_bumped_pair
+        model_v_up, model_v_down = create_vol_bumped_pair(model, self.vol_bump)
+        if model_v_up is not None and model_v_down is not None:
             v_v_up = engine.price(instrument, model_v_up, market).price
             v_v_down = engine.price(instrument, model_v_down, market).price
             vega = (v_v_up - v_v_down) / (2 * self.vol_bump) / 100.0
         else:
-            vega = 0.0  # Non-GBM model, vega would need different calculation
+            vega = 0.0
 
         # Calculate Greeks
         delta = (v_s_up - v_s_down) / (2 * h_s)

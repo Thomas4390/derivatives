@@ -60,7 +60,9 @@ from backend.models.characteristic_functions import (
 # Base Classes and Registry
 # =============================================================================
 
-from backend.models.base import BaseModel, Measure, PricingCapability
+from backend.models.base import Measure
+# PricingCapability is canonical in backend.core.result_types
+from backend.core.result_types import PricingCapability
 from backend.models.registry import registry, ModelRegistry
 
 
@@ -91,7 +93,6 @@ __all__ = [
     "merton_characteristic_function",
     "merton_cf_vectorized",
     # Base classes
-    "BaseModel",
     "Measure",
     "PricingCapability",
     # Registry

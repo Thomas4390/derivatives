@@ -21,6 +21,7 @@ from backend.models.gbm import GBMModel
 from backend.models.heston import HestonModel
 from backend.models.bates import BatesModel
 from backend.models.merton import MertonModel
+from backend.models.garch import GARCHModel, NGARCHModel, GJRGARCHModel
 from backend.engines import BSAnalyticEngine, FFTEngine, MonteCarloEngine
 from backend.core.market import MarketEnvironment
 from backend.portfolio import (
@@ -130,6 +131,24 @@ def merton_model() -> MertonModel:
         mu_j=-0.1,
         sigma_j=0.2
     )
+
+
+@pytest.fixture
+def garch_model() -> GARCHModel:
+    """Standard GARCH(1,1) model."""
+    return GARCHModel(sigma0=0.20, omega=0.000002, alpha=0.05, beta=0.90)
+
+
+@pytest.fixture
+def ngarch_model() -> NGARCHModel:
+    """NGARCH model with leverage effect."""
+    return NGARCHModel(sigma0=0.20, omega=0.000002, alpha=0.04, beta=0.90, theta=0.5)
+
+
+@pytest.fixture
+def gjr_garch_model() -> GJRGARCHModel:
+    """GJR-GARCH model with asymmetric response."""
+    return GJRGARCHModel(sigma0=0.20, omega=0.000002, alpha=0.03, beta=0.90, gamma=0.04)
 
 
 # =============================================================================
