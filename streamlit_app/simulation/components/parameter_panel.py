@@ -368,14 +368,20 @@ def _render_bates_params(defaults: Dict, key_prefix: str) -> Dict[str, float]:
 
 
 def _render_garch_params(defaults: Dict, key_prefix: str) -> Dict[str, float]:
-    """Render GARCH parameters."""
+    """Render GARCH parameters.
+
+    Theoretical constraints:
+    - omega > 0  (intercept, drives long-run variance)
+    - alpha >= 0, beta >= 0  (non-negativity)
+    - alpha + beta < 1  (stationarity)
+    - Long-run vol = sqrt(omega / (1 - alpha - beta))
+    """
     params = {}
 
-    # Initial volatility
     params["sigma0"] = st.slider(
         "Initial Vol (σ₀)",
         min_value=0.01,
-        max_value=1.0,
+        max_value=2.0,
         value=st.session_state.get(f"{key_prefix}_sigma0", defaults.get("sigma0", 0.20)),
         step=0.01,
         format="%.2f",
@@ -385,16 +391,15 @@ def _render_garch_params(defaults: Dict, key_prefix: str) -> Dict[str, float]:
     st.session_state[f"{key_prefix}_sigma0"] = params["sigma0"]
     st.caption(f"σ₀ = {params['sigma0']*100:.1f}%")
 
-    # Omega (constant)
     params["omega"] = st.number_input(
         "Constant (ω)",
-        min_value=0.0000001,
-        max_value=0.001,
-        value=st.session_state.get(f"{key_prefix}_omega", defaults.get("omega", 0.000001)),
-        step=0.0000001,
-        format="%.7f",
+        min_value=1e-7,
+        max_value=0.1,
+        value=st.session_state.get(f"{key_prefix}_omega", defaults.get("omega", 0.002)),
+        step=0.0001,
+        format="%.4f",
         key=f"{key_prefix}_omega_input",
-        help="Variance constant term"
+        help="Variance intercept — long-run vol ≈ √(ω / (1 − α − β))"
     )
     st.session_state[f"{key_prefix}_omega"] = params["omega"]
 
@@ -403,13 +408,13 @@ def _render_garch_params(defaults: Dict, key_prefix: str) -> Dict[str, float]:
     with col1:
         params["alpha"] = st.slider(
             "ARCH Coef (α)",
-            min_value=0.001,
-            max_value=0.5,
-            value=st.session_state.get(f"{key_prefix}_alpha", defaults.get("alpha", 0.05)),
+            min_value=0.0,
+            max_value=0.50,
+            value=st.session_state.get(f"{key_prefix}_alpha", defaults.get("alpha", 0.06)),
             step=0.01,
             format="%.3f",
             key=f"{key_prefix}_alpha_input",
-            help="Response to past shocks"
+            help="Reaction to past shocks — must satisfy α + β < 1"
         )
         st.session_state[f"{key_prefix}_alpha"] = params["alpha"]
 
@@ -422,9 +427,17 @@ def _render_garch_params(defaults: Dict, key_prefix: str) -> Dict[str, float]:
             step=0.01,
             format="%.2f",
             key=f"{key_prefix}_beta_input",
-            help="Persistence of volatility"
+            help="Volatility persistence — must satisfy α + β < 1"
         )
         st.session_state[f"{key_prefix}_beta"] = params["beta"]
+
+    # Stationarity diagnostic
+    persistence = params["alpha"] + params["beta"]
+    if persistence >= 1.0:
+        st.error(f"α + β = {persistence:.3f} ≥ 1 — non-stationary (IGARCH)")
+    else:
+        lr_vol = (params["omega"] / (1 - persistence)) ** 0.5 * 100
+        st.caption(f"Persistence α+β = {persistence:.3f} · Long-run vol ≈ {lr_vol:.1f}%")
 
     return params
 
@@ -457,12 +470,12 @@ def _render_gjr_garch_params(defaults: Dict, key_prefix: str) -> Dict[str, float
     params["gamma"] = st.slider(
         "Asymmetry (γ)",
         min_value=0.0,
-        max_value=0.3,
-        value=st.session_state.get(f"{key_prefix}_gamma", defaults.get("gamma", 0.05)),
+        max_value=0.5,
+        value=st.session_state.get(f"{key_prefix}_gamma", defaults.get("gamma", 0.03)),
         step=0.01,
         format="%.3f",
         key=f"{key_prefix}_gamma_input",
-        help="Asymmetry for negative shocks"
+        help="Extra vol reaction to negative shocks — persistence = α + γ/2 + β"
     )
     st.session_state[f"{key_prefix}_gamma"] = params["gamma"]
 

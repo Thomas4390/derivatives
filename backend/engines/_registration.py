@@ -80,22 +80,9 @@ def register_all_engines():
         MonteCarloEngine
     )
 
-    # GARCH Family Models (Monte Carlo only)
-    EngineRegistry.register(
-        "GARCH(1,1)",
-        PricingCapability.MONTE_CARLO,
-        MonteCarloEngine
-    )
-    EngineRegistry.register(
-        "NGARCH (Nonlinear Asymmetric)",
-        PricingCapability.MONTE_CARLO,
-        MonteCarloEngine
-    )
-    EngineRegistry.register(
-        "GJR-GARCH",
-        PricingCapability.MONTE_CARLO,
-        MonteCarloEngine
-    )
+    # GARCH Family Models: not registered with MonteCarloEngine because
+    # _get_terminal_simulator() only supports GBM/Heston/Bates/Merton.
+    # GARCH models have their own create_pricer() for risk-neutral MC pricing.
 
 
 # Track if registration has been done

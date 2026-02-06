@@ -438,5 +438,78 @@ class TestNumericalVolga:
         )
 
 
+class TestDirectNumericalGreeks:
+    """Group 5: Test finite_difference_* functions directly against bs_all_greeks."""
+
+    @pytest.fixture
+    def bs_price_func(self):
+        """Create a BS price function for finite difference testing."""
+        from backend.greeks.analytic import bs_all_greeks
+
+        def price_func(spot, vol=0.20, time=0.25, rate=0.05, strike=100.0, is_call=True):
+            g = bs_all_greeks(spot, strike, time, rate, 0.0, vol, is_call)
+            return g[0]  # price
+
+        return price_func
+
+    @pytest.fixture
+    def analytic_greeks(self):
+        """Get analytic Greeks for comparison."""
+        from backend.greeks.analytic import bs_all_greeks
+        return bs_all_greeks(100.0, 100.0, 0.25, 0.05, 0.0, 0.20, True)
+
+    def test_finite_difference_delta_vs_analytic(self, bs_price_func, analytic_greeks):
+        """FD delta matches analytic delta within 0.5%."""
+        from backend.greeks.numerical import finite_difference_delta
+
+        fd_delta = finite_difference_delta(bs_price_func, 100.0, bump=0.01)
+        np.testing.assert_allclose(fd_delta, analytic_greeks[1], rtol=0.005)
+
+    def test_finite_difference_gamma_vs_analytic(self, bs_price_func, analytic_greeks):
+        """FD gamma matches analytic gamma within 1%."""
+        from backend.greeks.numerical import finite_difference_gamma
+
+        fd_gamma = finite_difference_gamma(bs_price_func, 100.0, bump=0.01)
+        np.testing.assert_allclose(fd_gamma, analytic_greeks[2], rtol=0.01)
+
+    def test_finite_difference_vega_vs_analytic(self, bs_price_func, analytic_greeks):
+        """FD vega matches analytic vega within 1%."""
+        from backend.greeks.numerical import finite_difference_vega
+
+        # FD vega returns per 1% vol, analytic vega (index 3) is also per 1% vol
+        fd_vega = finite_difference_vega(bs_price_func, 100.0, vol=0.20, bump=0.01)
+        np.testing.assert_allclose(fd_vega, analytic_greeks[3], rtol=0.01)
+
+    def test_finite_difference_theta_vs_analytic(self, bs_price_func, analytic_greeks):
+        """FD theta matches analytic theta within 2%."""
+        from backend.greeks.numerical import finite_difference_theta
+
+        # FD theta returns per day, analytic theta (index 4) is also per day
+        fd_theta = finite_difference_theta(bs_price_func, 100.0, time=0.25, bump_days=1.0)
+        np.testing.assert_allclose(fd_theta, analytic_greeks[4], rtol=0.02)
+
+    def test_finite_difference_rho_vs_analytic(self, bs_price_func, analytic_greeks):
+        """FD rho matches analytic rho within 1%."""
+        from backend.greeks.numerical import finite_difference_rho
+
+        # FD rho returns per 1% rate, analytic rho (index 5) is also per 1%
+        fd_rho = finite_difference_rho(bs_price_func, 100.0, rate=0.05, bump=0.0001)
+        np.testing.assert_allclose(fd_rho, analytic_greeks[5], rtol=0.01)
+
+    def test_finite_difference_greeks_combined(self, bs_price_func, analytic_greeks):
+        """All first-order Greeks via finite_difference_greeks() match analytic."""
+        from backend.greeks.numerical import finite_difference_greeks
+
+        result = finite_difference_greeks(
+            bs_price_func, spot=100.0, vol=0.20, time=0.25, rate=0.05
+        )
+
+        np.testing.assert_allclose(result.delta, analytic_greeks[1], rtol=0.005)
+        np.testing.assert_allclose(result.gamma, analytic_greeks[2], rtol=0.01)
+        np.testing.assert_allclose(result.vega, analytic_greeks[3], rtol=0.01)
+        np.testing.assert_allclose(result.theta, analytic_greeks[4], rtol=0.02)
+        np.testing.assert_allclose(result.rho, analytic_greeks[5], rtol=0.01)
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

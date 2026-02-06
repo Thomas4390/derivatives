@@ -790,3 +790,96 @@ class TestRegressions:
         np.testing.assert_allclose(greeks.vanna, g[6], rtol=1e-10)
         np.testing.assert_allclose(greeks.volga, g[7], rtol=1e-10)
         np.testing.assert_allclose(greeks.ultima, g[13], rtol=1e-10)
+
+
+# =============================================================================
+# GARCH MC REJECTION TESTS (Group 1)
+# =============================================================================
+
+class TestGARCHMCRejection:
+    """Tests that MonteCarloEngine correctly rejects GARCH models."""
+
+    def test_mc_engine_rejects_garch(self):
+        """can_price() returns False for all 3 GARCH variants."""
+        from backend.models.garch import GARCHModel, NGARCHModel, GJRGARCHModel
+
+        mc = MonteCarloEngine(n_paths=1000, seed=42)
+        call = VanillaOption(strike=100, maturity=0.5, is_call=True)
+
+        garch = GARCHModel(sigma0=0.20, omega=0.002, alpha=0.05, beta=0.90)
+        ngarch = NGARCHModel(sigma0=0.20, omega=0.002, alpha=0.05, beta=0.90, theta=0.3)
+        gjr = GJRGARCHModel(sigma0=0.20, omega=0.002, alpha=0.04, beta=0.85, gamma=0.10)
+
+        assert mc.can_price(call, garch) is False
+        assert mc.can_price(call, ngarch) is False
+        assert mc.can_price(call, gjr) is False
+
+    def test_mc_engine_still_accepts_supported_models(self):
+        """can_price() returns True for GBM/Heston/Bates/Merton."""
+        mc = MonteCarloEngine(n_paths=1000, seed=42)
+        call = VanillaOption(strike=100, maturity=0.5, is_call=True)
+
+        assert mc.can_price(call, GBMModel(sigma=0.20)) is True
+        assert mc.can_price(call, HestonModel(v0=0.04, kappa=2.0, theta=0.04, xi=0.3, rho=-0.7)) is True
+        assert mc.can_price(call, BatesModel(v0=0.04, kappa=2.0, theta=0.04, xi=0.3, rho=-0.7, lambda_j=0.5, mu_j=-0.1, sigma_j=0.2)) is True
+        assert mc.can_price(call, MertonModel(sigma=0.20, lambda_j=0.5, mu_j=-0.1, sigma_j=0.2)) is True
+
+    def test_garch_models_have_own_pricer(self):
+        """GARCH models provide create_pricer() as an alternative to MonteCarloEngine."""
+        from backend.models.garch import GARCHModel, NGARCHModel, GJRGARCHModel
+
+        garch = GARCHModel(sigma0=0.20, omega=0.002, alpha=0.05, beta=0.90)
+        ngarch = NGARCHModel(sigma0=0.20, omega=0.002, alpha=0.05, beta=0.90, theta=0.3)
+        gjr = GJRGARCHModel(sigma0=0.20, omega=0.002, alpha=0.04, beta=0.85, gamma=0.10)
+
+        # All GARCH models should have create_pricer
+        assert hasattr(garch, 'create_pricer')
+        assert hasattr(ngarch, 'create_pricer')
+        assert hasattr(gjr, 'create_pricer')
+
+        # create_pricer should return a pricer object with a price method
+        assert hasattr(garch.create_pricer(), 'price')
+        assert hasattr(ngarch.create_pricer(), 'price')
+        assert hasattr(gjr.create_pricer(), 'price')
+
+
+# =============================================================================
+# IMPLIED VOLATILITY EDGE CASES (Group 2)
+# =============================================================================
+
+class TestImpliedVolatilityEdgeCases:
+    """Tests for implied volatility edge cases and convergence."""
+
+    def test_iv_convergence_failure_raises(self):
+        """Impossible price raises ValueError."""
+        engine = BSAnalyticEngine()
+        call = VanillaOption(strike=100, maturity=0.25, is_call=True)
+        market = MarketEnvironment(spot=100, rate=0.05)
+
+        # Price that's too high (above spot) is impossible for a call
+        with pytest.raises(ValueError):
+            engine.implied_volatility(200.0, call, market)
+
+    @pytest.mark.parametrize("sigma", [0.05, 0.10, 0.20, 0.50, 1.0, 2.0])
+    def test_iv_roundtrip_various_vols(self, sigma):
+        """Round-trip test: price at sigma -> IV should recover sigma."""
+        engine = BSAnalyticEngine()
+        model = GBMModel(sigma=sigma)
+        call = VanillaOption(strike=100, maturity=0.5, is_call=True)
+        market = MarketEnvironment(spot=100, rate=0.05)
+
+        price = engine.price(call, model, market).price
+        iv = engine.implied_volatility(price, call, market)
+
+        np.testing.assert_allclose(iv, sigma, rtol=1e-3)
+
+    def test_iv_very_low_vega_early_exit(self):
+        """Near-expiry deep OTM raises ValueError (vega too small to iterate)."""
+        engine = BSAnalyticEngine()
+        # Very short maturity + deep OTM -> negligible vega
+        call = VanillaOption(strike=200, maturity=0.001, is_call=True)
+        market = MarketEnvironment(spot=100, rate=0.05)
+
+        # Price of this option is essentially 0; IV search should fail
+        with pytest.raises(ValueError):
+            engine.implied_volatility(0.0001, call, market)

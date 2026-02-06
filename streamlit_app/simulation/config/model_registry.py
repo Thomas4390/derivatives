@@ -304,17 +304,17 @@ GARCH_PARAMETERS = [
     ParameterSpec(
         name="omega",
         display_name="Constant (ω)",
-        default=0.000001,
-        min_value=0.0000001,
-        max_value=0.001,
-        step=0.0000001,
-        description="Variance constant term",
-        format="%.7f"
+        default=0.002,
+        min_value=0.00001,
+        max_value=0.01,
+        step=0.0001,
+        description="Variance constant — long-run vol ≈ √(ω/(1-α-β))",
+        format="%.4f"
     ),
     ParameterSpec(
         name="alpha",
         display_name="ARCH Coef (α)",
-        default=0.05,
+        default=0.06,
         min_value=0.001,
         max_value=0.5,
         step=0.01,
@@ -352,7 +352,7 @@ GJR_GARCH_PARAMETERS = GARCH_PARAMETERS + [
     ParameterSpec(
         name="gamma",
         display_name="Asymmetry (γ)",
-        default=0.05,
+        default=0.03,
         min_value=0.0,
         max_value=0.3,
         step=0.01,

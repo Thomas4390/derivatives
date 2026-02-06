@@ -107,16 +107,16 @@ def _extract_model_params(model: str, params: Dict[str, Any]) -> Dict[str, Any]:
     elif model_lower == "garch":
         return {
             "sigma0": params.get("sigma0", 0.20),
-            "omega": params.get("omega", 0.000001),
-            "alpha": params.get("alpha", 0.05),
+            "omega": params.get("omega", 0.002),
+            "alpha": params.get("alpha", 0.06),
             "beta": params.get("beta", 0.90),
         }
 
     elif model_lower == "ngarch":
         return {
             "sigma0": params.get("sigma0", 0.20),
-            "omega": params.get("omega", 0.000001),
-            "alpha": params.get("alpha", 0.05),
+            "omega": params.get("omega", 0.002),
+            "alpha": params.get("alpha", 0.06),
             "beta": params.get("beta", 0.90),
             "theta": params.get("theta_ngarch", params.get("theta", 0.5)),
         }
@@ -124,10 +124,10 @@ def _extract_model_params(model: str, params: Dict[str, Any]) -> Dict[str, Any]:
     elif model_lower == "gjr_garch":
         return {
             "sigma0": params.get("sigma0", 0.20),
-            "omega": params.get("omega", 0.000001),
-            "alpha": params.get("alpha", 0.05),
+            "omega": params.get("omega", 0.002),
+            "alpha": params.get("alpha", 0.06),
             "beta": params.get("beta", 0.90),
-            "gamma": params.get("gamma", 0.05),
+            "gamma": params.get("gamma", 0.03),
         }
 
     else:
@@ -380,21 +380,19 @@ def compute_long_run_volatility(model: str, params: Dict[str, Any]) -> Optional[
         return np.sqrt(theta)
 
     elif model_lower == "garch":
-        omega = params.get("omega", 0.000001)
-        alpha = params.get("alpha", 0.05)
+        omega = params.get("omega", 0.002)
+        alpha = params.get("alpha", 0.06)
         beta = params.get("beta", 0.90)
         persistence = alpha + beta
         if persistence >= 1:
             return None
         long_run_var = omega / (1 - persistence)
-        # Convert from per-step variance to annualized volatility
-        # Assuming daily steps, multiply by sqrt(252)
         n_steps = params.get("n_steps", 252)
         return np.sqrt(long_run_var * n_steps)
 
     elif model_lower == "ngarch":
-        omega = params.get("omega", 0.000001)
-        alpha = params.get("alpha", 0.05)
+        omega = params.get("omega", 0.002)
+        alpha = params.get("alpha", 0.06)
         beta = params.get("beta", 0.90)
         theta = params.get("theta_ngarch", params.get("theta", 0.5))
         persistence = alpha * (1 + theta ** 2) + beta
@@ -405,10 +403,10 @@ def compute_long_run_volatility(model: str, params: Dict[str, Any]) -> Optional[
         return np.sqrt(long_run_var * n_steps)
 
     elif model_lower == "gjr_garch":
-        omega = params.get("omega", 0.000001)
-        alpha = params.get("alpha", 0.05)
+        omega = params.get("omega", 0.002)
+        alpha = params.get("alpha", 0.06)
         beta = params.get("beta", 0.90)
-        gamma = params.get("gamma", 0.05)
+        gamma = params.get("gamma", 0.03)
         persistence = alpha + beta + gamma / 2
         if persistence >= 1:
             return None

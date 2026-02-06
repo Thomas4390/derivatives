@@ -123,6 +123,11 @@ class MonteCarloEngine(PricingEngine):
         if PricingCapability.MONTE_CARLO not in model.supported_engines:
             return False
 
+        # Only models with hardcoded terminal simulators are supported
+        _SUPPORTED = (GBMModel, HestonModel, BatesModel, MertonModel)
+        if not isinstance(model, _SUPPORTED):
+            return False
+
         return True
 
     def price(

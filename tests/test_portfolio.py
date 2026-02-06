@@ -1366,3 +1366,84 @@ class TestBreakevenAlwaysLoss:
         assert len(result.loss_zones) >= 1
 
         report.success("Always-loss portfolio classified correctly")
+
+
+# =============================================================================
+# SKEWNESS / KURTOSIS TESTS (Group 6)
+# =============================================================================
+
+class TestSkewnessKurtosis:
+    """Tests for compute_skewness_kurtosis on known distributions."""
+
+    def test_normal_distribution_skewness_near_zero(self):
+        """Normal samples: skew ~ 0, excess kurtosis ~ 0."""
+        from backend.portfolio.pnl import compute_skewness_kurtosis
+
+        rng = np.random.default_rng(42)
+        pnl = rng.normal(0.0, 1.0, size=100_000).astype(np.float64)
+        skew, kurt = compute_skewness_kurtosis(pnl)
+
+        np.testing.assert_allclose(skew, 0.0, atol=0.05)
+        np.testing.assert_allclose(kurt, 0.0, atol=0.10)
+
+    def test_positive_skew_distribution(self):
+        """Exponential distribution has positive skew."""
+        from backend.portfolio.pnl import compute_skewness_kurtosis
+
+        rng = np.random.default_rng(42)
+        pnl = rng.exponential(1.0, size=100_000).astype(np.float64)
+        skew, kurt = compute_skewness_kurtosis(pnl)
+
+        assert skew > 0.5, f"Exponential skew={skew:.3f} should be > 0.5"
+
+    def test_negative_skew_distribution(self):
+        """Negated exponential distribution has negative skew."""
+        from backend.portfolio.pnl import compute_skewness_kurtosis
+
+        rng = np.random.default_rng(42)
+        pnl = -rng.exponential(1.0, size=100_000).astype(np.float64)
+        skew, kurt = compute_skewness_kurtosis(pnl)
+
+        assert skew < -0.5, f"Negated exponential skew={skew:.3f} should be < -0.5"
+
+
+# =============================================================================
+# PERCENTILE TESTS (Group 7)
+# =============================================================================
+
+class TestPercentiles:
+    """Tests for compute_percentiles on known inputs."""
+
+    def test_percentiles_sorted_array(self):
+        """Known values 0-100: percentiles should match expected positions."""
+        from backend.portfolio.pnl import compute_percentiles
+
+        pnl = np.arange(101, dtype=np.float64)  # 0, 1, 2, ..., 100
+        pcts = np.array([0.0, 25.0, 50.0, 75.0, 100.0], dtype=np.float64)
+        result = compute_percentiles(pnl, pcts)
+
+        assert result[0] == 0.0    # 0th percentile
+        assert result[2] == 50.0   # 50th percentile (median)
+        assert result[4] == 100.0  # 100th percentile
+
+    def test_percentiles_constant_array(self):
+        """All-equal array: every percentile should equal that constant."""
+        from backend.portfolio.pnl import compute_percentiles
+
+        pnl = np.full(1000, 42.0, dtype=np.float64)
+        pcts = np.array([10.0, 50.0, 90.0], dtype=np.float64)
+        result = compute_percentiles(pnl, pcts)
+
+        for val in result:
+            np.testing.assert_allclose(val, 42.0)
+
+    def test_percentiles_two_values(self):
+        """Two-value array: 0th percentile = min, 100th = max."""
+        from backend.portfolio.pnl import compute_percentiles
+
+        pnl = np.array([10.0, 20.0], dtype=np.float64)
+        pcts = np.array([0.0, 100.0], dtype=np.float64)
+        result = compute_percentiles(pnl, pcts)
+
+        assert result[0] == 10.0
+        assert result[1] == 20.0

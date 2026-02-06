@@ -132,11 +132,14 @@ CUSTOM_CSS = """
     }
 
     .metric-card .value {
-        font-size: 1.75rem;
+        font-size: clamp(0.9rem, 2vw, 1.5rem);
         font-weight: 700;
         color: #1e293b;
         line-height: 1.2;
         font-family: 'JetBrains Mono', monospace;
+        overflow-wrap: break-word;
+        word-break: break-word;
+        hyphens: auto;
     }
 
     .metric-card .value.positive {

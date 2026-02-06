@@ -1,11 +1,5 @@
 """
-Unified Monte Carlo Simulation Explorer
-
-A comprehensive educational tool for Monte Carlo simulation featuring:
-- 7 stochastic models (GBM, Heston, Merton, Bates, GARCH, NGARCH, GJR-GARCH)
-- Unified price and volatility path visualization
-- Option Strategy P&L analysis with full strategy builder
-- Risk metrics (VaR, CVaR, skewness, kurtosis)
+Monte Carlo Simulation Explorer
 
 Author: Thomas Vaudescal
 """
@@ -14,7 +8,6 @@ import sys
 from pathlib import Path
 import time
 
-# Add paths for imports
 app_dir = Path(__file__).parent
 project_root = app_dir.parent.parent
 sys.path.insert(0, str(project_root))
@@ -22,76 +15,41 @@ sys.path.insert(0, str(app_dir))
 
 import streamlit as st
 import numpy as np
+from scipy.stats import norm
 
-# Backend imports
-from backend.simulation.base import SimulationResult
-from backend.portfolio.pnl import RiskMetrics
+from backend.portfolio.pnl import compute_payoff_curve, find_breakeven_points
 
-# Local config and components
-from config.styles import (
-    inject_styles,
-    render_compact_header,
-    footer_html,
-    metric_card_html
-)
-from config.model_registry import (
-    MODEL_REGISTRY,
-    MODEL_DISPLAY_ORDER,
-    get_model,
-    PricingMethod,
-)
+from config.styles import inject_styles, render_compact_header, footer_html, metric_card_html
+from config.model_registry import get_model
 
-# Components
-from components.model_selector import render_model_selector, render_model_comparison_table
+from components.model_selector import render_model_selector
 from components.parameter_panel import (
     render_market_parameters,
     render_model_parameters,
     render_simulation_settings,
 )
-from components.strategy_builder import (
-    render_strategy_builder,
-    export_positions_for_pnl_engine
-)
-from components.results_summary import (
-    render_results_summary,
-    render_simulation_info,
-    render_model_equations,
-    render_percentile_table,
+from components.strategy_builder import render_strategy_builder, export_positions_for_pnl_engine
+
+from charts.simulation_paths import render_simulation_chart, render_path_controls
+from charts.pnl_analysis import render_payoff_with_distribution, render_3d_pnl_chart
+from charts.pricing_comparison import (
+    run_convergence_study,
+    render_convergence_chart,
+    render_method_comparison,
 )
 
-# Charts
-from charts.unified_paths import (
-    render_unified_paths,
-    render_price_paths_only,
-    render_volatility_paths_only,
-    render_path_controls,
-)
-from charts.distributions import render_distributions_tab
-from charts.statistics import render_statistics_tab
-from charts.pnl_distribution import render_pnl_distribution_tab, render_risk_metrics_tab
-from charts.greeks_decomposition import render_greeks_decomposition_tab
-from charts.volatility_impact import render_volatility_impact_tab
-from charts.convergence_analysis import render_convergence_analysis_tab
-from charts.scenario_dashboard import render_scenario_dashboard_tab
-
-# Services
 from services.simulation_service import (
     run_simulation,
-    get_model_characteristics,
     check_model_conditions,
     MODEL_NAMES,
 )
-from services.simulation_runner import (
-    run_price_simulation,
-    calculate_pnl_from_paths,
-)
-
-# Black-Scholes functions for premium calculation
-from scipy.stats import norm
+from services.pricing_service import get_available_pricing_methods
+from services.simulation_runner import calculate_pnl_from_paths
 
 
-def black_scholes_call_price(S: float, K: float, T: float, r: float, sigma: float) -> float:
-    """Calculate Black-Scholes call price."""
+# ── Black-Scholes helpers (for strategy builder premium calc) ────────────
+
+def _bs_call(S, K, T, r, sigma):
     if T <= 0:
         return max(S - K, 0)
     d1 = (np.log(S / K) + (r + 0.5 * sigma**2) * T) / (sigma * np.sqrt(T))
@@ -99,8 +57,7 @@ def black_scholes_call_price(S: float, K: float, T: float, r: float, sigma: floa
     return S * norm.cdf(d1) - K * np.exp(-r * T) * norm.cdf(d2)
 
 
-def black_scholes_put_price(S: float, K: float, T: float, r: float, sigma: float) -> float:
-    """Calculate Black-Scholes put price."""
+def _bs_put(S, K, T, r, sigma):
     if T <= 0:
         return max(K - S, 0)
     d1 = (np.log(S / K) + (r + 0.5 * sigma**2) * T) / (sigma * np.sqrt(T))
@@ -108,89 +65,69 @@ def black_scholes_put_price(S: float, K: float, T: float, r: float, sigma: float
     return K * np.exp(-r * T) * norm.cdf(-d2) - S * norm.cdf(-d1)
 
 
-# =============================================================================
-# PAGE CONFIGURATION
-# =============================================================================
+# ═════════════════════════════════════════════════════════════════════════
+# PAGE CONFIG
+# ═════════════════════════════════════════════════════════════════════════
 
 st.set_page_config(
     page_title="Monte Carlo Simulation Explorer",
     page_icon="📈",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="expanded",
 )
-
-# Inject custom CSS styles
 inject_styles()
 
-# Initialize session state
-if "selected_model" not in st.session_state:
-    st.session_state.selected_model = "gbm"
-if "simulation_result" not in st.session_state:
-    st.session_state.simulation_result = None
-if "pnl_result" not in st.session_state:
-    st.session_state.pnl_result = None
-if "all_params" not in st.session_state:
-    st.session_state.all_params = {}
+for key, default in [
+    ("simulation_result", None),
+    ("pnl_result", None),
+    ("all_params", {}),
+]:
+    if key not in st.session_state:
+        st.session_state[key] = default
 
-
-# =============================================================================
+# ═════════════════════════════════════════════════════════════════════════
 # HEADER
-# =============================================================================
+# ═════════════════════════════════════════════════════════════════════════
 
 render_compact_header(
     title="Monte Carlo Simulation Explorer",
     subtitle="Option Strategy P&L Analysis with 7 Stochastic Models",
-    badge="Educational Tool"
+    badge="Educational Tool",
 )
 
-
-# =============================================================================
-# SIDEBAR - UNIFIED CONFIGURATION
-# =============================================================================
+# ═════════════════════════════════════════════════════════════════════════
+# SIDEBAR
+# ═════════════════════════════════════════════════════════════════════════
 
 with st.sidebar:
-    # Model Selection
     model_key = render_model_selector()
-
     st.markdown("---")
 
-    # Market Parameters
     market_params = render_market_parameters()
-
     st.markdown("---")
 
-    # Model-Specific Parameters
     model_params = render_model_parameters(model_key)
-
     st.markdown("---")
 
-    # Simulation Settings
     sim_settings = render_simulation_settings()
-
     st.markdown("---")
 
-    # Strategy Builder
-    st.markdown("### 🎯 Option Strategy")
+    # Strategy builder
+    st.markdown("### Option Strategy")
 
-    def bs_price(s, k, r, t, sigma, opt_type):
-        if opt_type == 'call':
-            return black_scholes_call_price(s, k, t, r, sigma)
-        else:
-            return black_scholes_put_price(s, k, t, r, sigma)
+    def _bs_price(s, k, r, t, sigma, opt_type):
+        return _bs_call(s, k, t, r, sigma) if opt_type == "call" else _bs_put(s, k, t, r, sigma)
 
     positions, stock_position = render_strategy_builder(
-        spot_price=market_params.get('spot', 100.0),
-        risk_free_rate=market_params.get('risk_free_rate', 0.05),
-        time_to_expiry=market_params.get('time_horizon', 1.0),
-        volatility=market_params.get('sigma', 0.20),
-        bs_price_function=bs_price
+        spot_price=market_params.get("spot", 100.0),
+        risk_free_rate=market_params.get("risk_free_rate", 0.05),
+        time_to_expiry=market_params.get("time_horizon", 1.0),
+        volatility=market_params.get("sigma", 0.20),
+        bs_price_function=_bs_price,
     )
-
     position_arrays = export_positions_for_pnl_engine(positions, stock_position)
-
     st.markdown("---")
 
-    # Combine all parameters
     all_params = {
         **market_params,
         **model_params,
@@ -203,375 +140,251 @@ with st.sidebar:
     }
     st.session_state.all_params = all_params
 
-    # Model condition check
+    # Condition warnings
     conditions = check_model_conditions(model_key, all_params)
     if not conditions["is_valid"]:
-        for cond in conditions["conditions"]:
-            if not cond["satisfied"]:
-                st.warning(f"⚠️ {cond['name']}: {cond['message']}")
+        for c in conditions["conditions"]:
+            if not c["satisfied"]:
+                st.warning(f"⚠️ {c['name']}: {c['message']}")
 
-    # Run Simulation Button
-    run_clicked = st.button(
-        "▶️ Run Simulation",
-        type="primary",
-        use_container_width=True,
-        key="run_simulation_btn"
-    )
-
-    if run_clicked:
+    # Run button
+    if st.button("Run Simulation", type="primary", use_container_width=True, key="run_btn"):
         with st.spinner("Running simulation..."):
-            start_time = time.time()
+            t0 = time.time()
             try:
                 result = run_simulation(model_key, all_params)
-                execution_time = time.time() - start_time
+                dt = time.time() - t0
                 st.session_state.simulation_result = result
-                st.session_state.execution_time = execution_time
+                st.session_state.execution_time = dt
                 st.session_state.simulation_model = model_key
                 st.session_state.simulation_params = all_params.copy()
 
-                # Calculate P&L if strategy is defined
-                if len(position_arrays.get('strikes', [])) > 0:
-                    pnl_result = calculate_pnl_from_paths(result, all_params)
-                    st.session_state.pnl_result = pnl_result
+                if len(position_arrays.get("strikes", [])) > 0:
+                    st.session_state.pnl_result = calculate_pnl_from_paths(result, all_params)
                 else:
                     st.session_state.pnl_result = None
 
-                st.success(f"✓ Completed in {execution_time*1000:.0f}ms")
+                st.success(f"Done — {dt*1000:.0f} ms")
             except Exception as e:
-                st.error(f"Error: {str(e)}")
+                st.error(str(e))
                 st.exception(e)
 
 
-# =============================================================================
-# MAIN CONTENT - TABS
-# =============================================================================
+# ═════════════════════════════════════════════════════════════════════════
+# MAIN CONTENT
+# ═════════════════════════════════════════════════════════════════════════
 
-# Check if P&L analysis is available
-pnl_result = st.session_state.get("pnl_result")
-simulation_result = st.session_state.get("simulation_result")
-has_pnl = pnl_result is not None
-has_simulation = simulation_result is not None
+result = st.session_state.get("simulation_result")
 
-if has_pnl:
-    tab_sim, tab_pnl, tab_greeks, tab_vol, tab_scenarios, tab_convergence, tab_edu = st.tabs([
-        "📈 Simulation",
-        "💰 P&L Distribution",
-        "📊 Greeks Attribution",
-        "📉 Volatility Impact",
-        "🔥 Stress Scenarios",
-        "🎯 Convergence",
-        "📚 Education"
-    ])
-elif has_simulation:
-    tab_sim, tab_vol, tab_convergence, tab_edu = st.tabs([
-        "📈 Simulation",
-        "📉 Volatility Impact",
-        "🎯 Convergence",
-        "📚 Education"
-    ])
-    tab_pnl = None
-    tab_greeks = None
-    tab_scenarios = None
+if result is None:
+    st.info("Configure parameters in the sidebar and click **Run Simulation**.")
 else:
-    tab_sim, tab_edu = st.tabs([
-        "📈 Simulation",
-        "📚 Education"
-    ])
-    tab_pnl = None
-    tab_greeks = None
-    tab_vol = None
-    tab_scenarios = None
-    tab_convergence = None
+    sim_model = st.session_state.get("simulation_model", model_key)
+    sim_params = st.session_state.get("simulation_params", all_params)
+    exec_time = st.session_state.get("execution_time", 0)
+    pnl_result = st.session_state.get("pnl_result")
+    has_strategy = pnl_result is not None
 
+    # Precompute shared data
+    pnl_vals = pnl_result["pnl_values"] if has_strategy else None
+    breakevens = None
+    payoff_curve = None
+    spot_range = None
 
-# =============================================================================
-# TAB 1: SIMULATION
-# =============================================================================
-
-with tab_sim:
-    result = st.session_state.get("simulation_result")
-
-    if result is None:
-        st.info("👈 Configure parameters and strategy in the sidebar, then click **Run Simulation**")
-
-        # Show strategy summary if defined
-        if len(positions) > 0:
-            from streamlit_app.option_pricer.config.constants import CONTRACT_MULTIPLIER
-
-            total_net = 0.0
-            for pos in positions:
-                cost = pos.premium * pos.quantity * CONTRACT_MULTIPLIER
-                if pos.position_type == 'long':
-                    total_net -= cost
-                else:
-                    total_net += cost
-
-            st.markdown(
-                f"**Strategy configured:** {len(positions)} leg(s) | "
-                f"Net: {'+'if total_net >= 0 else ''}${total_net:,.0f}"
+    if has_strategy:
+        pa = sim_params.get("position_arrays", {})
+        if len(pa.get("strikes", [])) > 0:
+            spot = sim_params.get("spot_price", sim_params.get("spot", 100.0))
+            spot_range = np.linspace(spot * 0.5, spot * 1.5, 1000)
+            payoff_curve = compute_payoff_curve(
+                spot_range, pa["strikes"], pa["option_types"],
+                pa["position_types"], pa["quantities"], pa["premiums"],
+                pa.get("stock_quantity", 0.0), pa.get("stock_entry_price", 0.0),
             )
+            breakevens = find_breakeven_points(payoff_curve, spot_range)
 
-        # Show model comparison table
-        with st.expander("📋 Model Comparison", expanded=True):
-            render_model_comparison_table()
-    else:
-        # Get stored model and params
-        sim_model = st.session_state.get("simulation_model", model_key)
-        sim_params = st.session_state.get("simulation_params", all_params)
-        exec_time = st.session_state.get("execution_time", 0)
+    # ── Tabs ──────────────────────────────────────────────────────────
+    tab_names = ["Simulation"]
+    if has_strategy:
+        tab_names.append("P&L Analysis")
+    tab_names.append("Pricing Comparison")
 
-        # Summary metrics
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            st.markdown(metric_card_html(
-                "Model",
-                MODEL_NAMES.get(sim_model, sim_model)
-            ), unsafe_allow_html=True)
-        with col2:
-            st.markdown(metric_card_html(
-                "Paths",
-                f"{int(sim_params.get('n_paths', 10000)):,}"
-            ), unsafe_allow_html=True)
-        with col3:
-            st.markdown(metric_card_html(
-                "Steps",
-                f"{int(sim_params.get('n_steps', 252)):,}"
-            ), unsafe_allow_html=True)
-        with col4:
-            st.markdown(metric_card_html(
-                "Time",
-                f"{exec_time*1000:.0f} ms"
-            ), unsafe_allow_html=True)
+    tabs = st.tabs(tab_names)
+
+    # ── TAB 1: Simulation ─────────────────────────────────────────────
+    with tabs[0]:
+        # Metric cards
+        c1, c2, c3, c4 = st.columns(4)
+        with c1:
+            st.markdown(metric_card_html("Model", MODEL_NAMES.get(sim_model, sim_model)), unsafe_allow_html=True)
+        with c2:
+            st.markdown(metric_card_html("Paths", f"{int(sim_params.get('n_paths', 10000)):,}"), unsafe_allow_html=True)
+        with c3:
+            st.markdown(metric_card_html("Steps", f"{int(sim_params.get('n_steps', 252)):,}"), unsafe_allow_html=True)
+        with c4:
+            st.markdown(metric_card_html("Time", f"{exec_time*1000:.0f} ms"), unsafe_allow_html=True)
 
         st.markdown("---")
 
-        # Visualization controls
-        with st.expander("🎨 Visualization Options", expanded=False):
-            viz_opts = render_path_controls()
+        with st.expander("Visualization Options", expanded=False):
+            viz = render_path_controls()
 
-        # Unified paths chart
-        render_unified_paths(
+        render_simulation_chart(
             result=result,
             model_key=sim_model,
             params=sim_params,
-            n_sample_paths=viz_opts.get("n_sample_paths", 100),
-            show_percentiles=viz_opts.get("show_percentiles", True),
-            show_mean=viz_opts.get("show_mean", True),
+            n_display=viz["n_display"],
+            show_bands=viz["show_bands"],
+            pnl_values=pnl_vals,
+            breakeven_prices=breakevens,
         )
 
-        # Results summary
-        render_results_summary(result, sim_model, sim_params)
+        # Empirical statistics
+        if has_strategy:
+            risk = pnl_result["risk_metrics"]
+            be_str = " / ".join(f"${b:.2f}" for b in breakevens) if breakevens is not None and len(breakevens) > 0 else "N/A"
 
-        # Detailed tabs
-        detail_tabs = st.tabs(["📊 Distribution", "📋 Statistics", "📐 Percentiles"])
+            s1, s2, s3, s4 = st.columns(4)
+            with s1:
+                st.markdown(metric_card_html("P(Profit)", f"{risk.prob_profit:.1%}"), unsafe_allow_html=True)
+            with s2:
+                st.markdown(metric_card_html("Breakeven", be_str), unsafe_allow_html=True)
+            with s3:
+                st.markdown(metric_card_html("Expected P&L", f"${risk.mean_pnl:+,.2f}"), unsafe_allow_html=True)
+            with s4:
+                st.markdown(metric_card_html("VaR 95%", f"${risk.var_95:+,.2f}", subtext="Max loss at 95% confidence"), unsafe_allow_html=True)
+        else:
+            tp = result.terminal_prices
+            s1, s2, s3, s4 = st.columns(4)
+            with s1:
+                st.markdown(metric_card_html("E[S(T)]", f"${np.mean(tp):,.2f}"), unsafe_allow_html=True)
+            with s2:
+                st.markdown(metric_card_html("Std[S(T)]", f"${np.std(tp):,.2f}"), unsafe_allow_html=True)
+            with s3:
+                ret = np.mean(tp / result.initial_price - 1) * 100
+                st.markdown(metric_card_html("E[Return]", f"{ret:+.2f}%"), unsafe_allow_html=True)
+            with s4:
+                p5 = np.percentile(tp, 5)
+                st.markdown(metric_card_html("5th Percentile", f"${p5:,.2f}", subtext="Worst 5% of outcomes"), unsafe_allow_html=True)
 
-        with detail_tabs[0]:
-            render_distributions_tab(
-                simulation_result=result,
-                params=sim_params,
-                result_type="price"
+    # ── TAB 2: P&L Analysis (only when strategy exists) ───────────────
+    if has_strategy:
+        with tabs[1]:
+            # Payoff diagram + MC distribution
+            st.subheader("Payoff Diagram & Simulated P&L")
+            render_payoff_with_distribution(
+                result=result,
+                pnl_values=pnl_vals,
+                payoff_curve=payoff_curve,
+                spot_range=spot_range,
+                breakeven_prices=breakevens,
+                spot=sim_params.get("spot_price", sim_params.get("spot", 100.0)),
             )
 
-        with detail_tabs[1]:
-            render_statistics_tab(
-                simulation_result=result,
-                params=sim_params,
-                result_type="price"
+            st.markdown("---")
+
+            # 3D scatter
+            st.subheader("Realized Volatility / Terminal Price / P&L")
+            render_3d_pnl_chart(
+                result=result,
+                pnl_values=pnl_vals,
+                time_horizon=sim_params.get("time_horizon", 1.0),
             )
 
-        with detail_tabs[2]:
-            render_percentile_table(result)
+    # ── TAB: Pricing Comparison ────────────────────────────────────────
+    pricing_tab_idx = 2 if has_strategy else 1
+    with tabs[pricing_tab_idx]:
+        spot_val = sim_params.get("spot_price", sim_params.get("spot", 100.0))
+        r_val = sim_params.get("risk_free_rate", 0.05)
+        T_val = sim_params.get("time_horizon", 1.0)
+        n_steps_val = int(sim_params.get("n_steps", 252))
 
+        methods = get_available_pricing_methods(sim_model)
+        method_str = " · ".join(m.replace("_", " ").title() for m in methods)
+        st.caption(f"Available methods for {MODEL_NAMES.get(sim_model, sim_model)}: **{method_str}**")
 
-# =============================================================================
-# TAB 2: P&L DISTRIBUTION (Only shown when strategy is defined)
-# =============================================================================
-
-if has_pnl:
-    with tab_pnl:
-        pnl_result = st.session_state.get("pnl_result")
-        sim_params = st.session_state.get("simulation_params", all_params)
-
-        if pnl_result is not None:
-            render_pnl_distribution_tab(
-                pnl_values=pnl_result['pnl_values'],
-                risk_metrics=pnl_result['risk_metrics'],
-                params=sim_params
+        # Option configuration
+        col_k, col_type = st.columns(2)
+        with col_k:
+            default_strike = float(spot_val)
+            if has_strategy:
+                pa = sim_params.get("position_arrays", {})
+                strikes_arr = pa.get("strikes", [])
+                if len(strikes_arr) > 0:
+                    default_strike = float(strikes_arr[0])
+            conv_strike = st.number_input(
+                "Strike", value=default_strike, min_value=1.0, step=5.0,
+                format="%.1f", key="conv_strike",
             )
-        else:
-            st.info("👈 Define an option strategy and run simulation to see P&L distribution.")
+        with col_type:
+            conv_call = st.selectbox(
+                "Option Type", ["Call", "Put"], index=0, key="conv_type"
+            ) == "Call"
 
-
-# =============================================================================
-# TAB: GREEKS ATTRIBUTION (Only shown when strategy is defined)
-# =============================================================================
-
-if has_pnl:
-    with tab_greeks:
-        pnl_result = st.session_state.get("pnl_result")
-        simulation_result = st.session_state.get("simulation_result")
-        sim_params = st.session_state.get("simulation_params", all_params)
-
-        if pnl_result is not None and simulation_result is not None:
-            render_greeks_decomposition_tab(
-                simulation_result=simulation_result,
-                pnl_result=pnl_result,
-                params=sim_params
-            )
-        else:
-            st.info("👈 Define a strategy and run simulation to see Greeks P&L decomposition.")
-
-
-# =============================================================================
-# TAB: VOLATILITY IMPACT (Shown when simulation exists)
-# =============================================================================
-
-if has_simulation or has_pnl:
-    with tab_vol:
-        pnl_result = st.session_state.get("pnl_result")
-        simulation_result = st.session_state.get("simulation_result")
-        sim_params = st.session_state.get("simulation_params", all_params)
-
-        if simulation_result is not None:
-            render_volatility_impact_tab(
-                simulation_result=simulation_result,
-                pnl_result=pnl_result,
-                params=sim_params
-            )
-        else:
-            st.info("👈 Run a simulation to see volatility impact analysis.")
-
-
-# =============================================================================
-# TAB: STRESS SCENARIOS (Only shown when strategy is defined)
-# =============================================================================
-
-if has_pnl:
-    with tab_scenarios:
-        sim_params = st.session_state.get("simulation_params", all_params)
-
-        if len(sim_params.get('position_arrays', {}).get('strikes', [])) > 0:
-            render_scenario_dashboard_tab(params=sim_params)
-        else:
-            st.info("👈 Define a strategy to see stress scenario analysis.")
-
-
-# =============================================================================
-# TAB: CONVERGENCE (Shown when simulation exists)
-# =============================================================================
-
-if has_simulation or has_pnl:
-    with tab_convergence:
-        pnl_result = st.session_state.get("pnl_result")
-        simulation_result = st.session_state.get("simulation_result")
-        sim_params = st.session_state.get("simulation_params", all_params)
-
-        if simulation_result is not None:
-            render_convergence_analysis_tab(
-                simulation_result=simulation_result,
-                pnl_result=pnl_result,
-                params=sim_params
-            )
-        else:
-            st.info("👈 Run a simulation to see convergence analysis.")
-
-
-# =============================================================================
-# TAB: EDUCATION (Always shown)
-# =============================================================================
-
-with tab_edu:
-    st.subheader("📚 Model Education")
-
-    # Model selector for education
-    edu_model = st.selectbox(
-        "Select Model to Learn About",
-        options=MODEL_DISPLAY_ORDER,
-        format_func=lambda x: f"{MODEL_REGISTRY[x].short_name} - {MODEL_REGISTRY[x].name}",
-        key="edu_model_select"
-    )
-
-    model_spec = get_model(edu_model)
-
-    # Model overview
-    col1, col2 = st.columns([2, 1])
-
-    with col1:
-        st.markdown(f"### {model_spec.name}")
-        st.markdown(model_spec.description)
-
-        # Equations
-        st.markdown("#### Model Equations")
-        st.latex(model_spec.equation_main)
-
-        if model_spec.equation_vol:
-            st.markdown("*Volatility dynamics:*")
-            st.latex(model_spec.equation_vol)
-
-        if model_spec.equation_jump:
-            st.markdown("*Jump distribution:*")
-            st.latex(model_spec.equation_jump)
-
-    with col2:
-        st.markdown("#### Characteristics")
-
-        # Feature badges
-        if model_spec.has_stochastic_vol:
-            st.success("✓ Stochastic Volatility")
-        else:
-            st.info("○ Constant Volatility")
-
-        if model_spec.has_jumps:
-            st.success("✓ Jump Component")
-        else:
-            st.info("○ No Jumps")
-
-        st.markdown("**Pricing Methods:**")
-        for method in model_spec.pricing_methods:
-            if method == PricingMethod.ANALYTICAL:
-                st.markdown("- 🎯 Black-Scholes (Analytical)")
-            elif method == PricingMethod.FFT:
-                st.markdown("- 📊 FFT (Carr-Madan)")
-            elif method == PricingMethod.MONTE_CARLO:
-                st.markdown("- 🎲 Monte Carlo")
-
-    # Conditions
-    if model_spec.feller_condition or model_spec.stationarity_condition:
         st.markdown("---")
-        st.markdown("#### Model Conditions")
 
-        if model_spec.feller_condition:
-            st.info(f"**Feller Condition:** ${model_spec.feller_condition}$\n\nEnsures variance stays positive in Heston-type models.")
+        # Run convergence on-demand
+        if st.button("Run Convergence Study", type="primary", key="run_conv"):
+            with st.spinner("Running convergence study (9 simulations)..."):
+                study = run_convergence_study(
+                    model_key=sim_model,
+                    params=sim_params,
+                    strike=conv_strike,
+                    time_to_maturity=T_val,
+                    spot=spot_val,
+                    risk_free_rate=r_val,
+                    is_call=conv_call,
+                    n_steps=n_steps_val,
+                )
+                st.session_state.convergence_study = study
 
-        if model_spec.stationarity_condition:
-            st.info(f"**Stationarity Condition:** ${model_spec.stationarity_condition}$\n\nEnsures volatility mean-reverts to long-run level.")
+        study = st.session_state.get("convergence_study")
+        if study is not None:
+            st.subheader("MC Convergence")
+            render_convergence_chart(study)
 
-    # Parameters
-    st.markdown("---")
-    st.markdown("#### Parameters")
+            # Convergence formula
+            st.latex(
+                r"\text{SE}(\hat{C}_{\mathrm{MC}}) = "
+                r"\frac{\sigma_{\text{payoff}}}{\sqrt{N}}"
+                r"\quad\Longrightarrow\quad"
+                r"\text{Error} = O\!\left(\frac{1}{\sqrt{N}}\right)"
+            )
 
-    import pandas as pd
-    param_data = []
-    for p in model_spec.parameters:
-        param_data.append({
-            "Parameter": p.display_name,
-            "Symbol": p.name,
-            "Default": p.default,
-            "Range": f"[{p.min_value}, {p.max_value}]",
-            "Description": p.description
-        })
+            st.markdown("---")
 
-    if param_data:
-        st.dataframe(pd.DataFrame(param_data), use_container_width=True, hide_index=True)
-
-    # Model comparison
-    st.markdown("---")
-    st.markdown("#### All Models Comparison")
-    render_model_comparison_table()
+            st.subheader("Method Comparison")
+            render_method_comparison(
+                model_key=sim_model,
+                params=sim_params,
+                terminal_prices=result.terminal_prices,
+                strike=conv_strike,
+                time_to_maturity=T_val,
+                spot=spot_val,
+                risk_free_rate=r_val,
+                is_call=conv_call,
+            )
+        else:
+            st.info("Click **Run Convergence Study** to compare MC pricing against the reference price.")
 
 
-# =============================================================================
+# ═════════════════════════════════════════════════════════════════════════
+# MODEL EQUATIONS (collapsible, bottom of page)
+# ═════════════════════════════════════════════════════════════════════════
+
+active_model = st.session_state.get("simulation_model", model_key)
+spec = get_model(active_model)
+with st.expander(f"Model Equations — {spec.name}", expanded=False):
+    st.latex(spec.equation_main)
+    if spec.equation_vol:
+        st.caption("Volatility dynamics:")
+        st.latex(spec.equation_vol)
+    if spec.equation_jump:
+        st.caption("Jump distribution:")
+        st.latex(spec.equation_jump)
+
+# ═════════════════════════════════════════════════════════════════════════
 # FOOTER
-# =============================================================================
+# ═════════════════════════════════════════════════════════════════════════
 
 st.markdown(footer_html(), unsafe_allow_html=True)

@@ -239,6 +239,7 @@ class BSAnalyticEngine(PricingEngine):
         is_call = option.is_call
 
         sigma = initial_guess
+        diff = float('nan')
 
         for i in range(max_iter):
             bs_price = self._bs_price(s0, k, t, r, q, sigma, is_call)
@@ -253,6 +254,7 @@ class BSAnalyticEngine(PricingEngine):
 
             sigma = sigma - diff / vega
             sigma = max(sigma, 0.001)  # Keep positive
+            sigma = min(sigma, 10.0)   # Cap at 1000% vol
 
         raise ValueError(
             f"IV did not converge after {max_iter} iterations. "

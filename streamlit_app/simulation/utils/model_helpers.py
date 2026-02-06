@@ -196,8 +196,8 @@ def get_equation_with_values(
         )
 
     elif model_lower == "garch":
-        omega = params.get("omega", 0.000001)
-        alpha = params.get("alpha", 0.05)
+        omega = params.get("omega", 0.002)
+        alpha = params.get("alpha", 0.06)
         beta = params.get("beta", 0.90)
         return rf"\sigma_t^2 = {omega:.2e} + {alpha:.3f} \epsilon_{{t-1}}^2 + {beta:.2f} \sigma_{{t-1}}^2"
 
