@@ -33,9 +33,12 @@ from components.strategy_builder import render_strategy_builder, export_position
 from charts.simulation_paths import render_simulation_chart, render_path_controls
 from charts.pnl_analysis import render_payoff_with_distribution, render_3d_pnl_chart
 from charts.pricing_comparison import (
-    run_convergence_study,
-    render_convergence_chart,
-    render_method_comparison,
+    extract_legs,
+    compute_reference_prices,
+    render_legs_summary,
+    run_animated_convergence,
+    render_static_convergence,
+    render_final_table,
 )
 
 from services.simulation_service import (
@@ -164,6 +167,7 @@ with st.sidebar:
                 else:
                     st.session_state.pnl_result = None
 
+                st.session_state.convergence_result = None
                 st.success(f"Done — {dt*1000:.0f} ms")
             except Exception as e:
                 st.error(str(e))
@@ -303,47 +307,33 @@ else:
         method_str = " · ".join(m.replace("_", " ").title() for m in methods)
         st.caption(f"Available methods for {MODEL_NAMES.get(sim_model, sim_model)}: **{method_str}**")
 
-        # Option configuration
-        col_k, col_type = st.columns(2)
-        with col_k:
-            default_strike = float(spot_val)
-            if has_strategy:
-                pa = sim_params.get("position_arrays", {})
-                strikes_arr = pa.get("strikes", [])
-                if len(strikes_arr) > 0:
-                    default_strike = float(strikes_arr[0])
-            conv_strike = st.number_input(
-                "Strike", value=default_strike, min_value=1.0, step=5.0,
-                format="%.1f", key="conv_strike",
-            )
-        with col_type:
-            conv_call = st.selectbox(
-                "Option Type", ["Call", "Put"], index=0, key="conv_type"
-            ) == "Call"
+        # Extract legs from strategy (read-only)
+        pa = sim_params.get("position_arrays", {})
+        legs = extract_legs(pa, spot_val)
+        compute_reference_prices(sim_model, sim_params, legs, T_val, spot_val, r_val)
 
+        if not has_strategy:
+            st.info("No strategy defined — pricing a single ATM Call option.")
+
+        render_legs_summary(legs)
         st.markdown("---")
 
-        # Run convergence on-demand
-        if st.button("Run Convergence Study", type="primary", key="run_conv"):
-            with st.spinner("Running convergence study (9 simulations)..."):
-                study = run_convergence_study(
-                    model_key=sim_model,
-                    params=sim_params,
-                    strike=conv_strike,
-                    time_to_maturity=T_val,
-                    spot=spot_val,
-                    risk_free_rate=r_val,
-                    is_call=conv_call,
-                    n_steps=n_steps_val,
-                )
-                st.session_state.convergence_study = study
+        # Play button → animated convergence
+        played = False
+        if st.button("\u25B6  Play", type="primary", key="play_conv", use_container_width=True):
+            played = True
+            conv = run_animated_convergence(
+                model_key=sim_model, params=sim_params,
+                legs=legs, T=T_val, spot=spot_val, r=r_val,
+                n_steps=n_steps_val,
+            )
+            st.session_state.convergence_result = conv
 
-        study = st.session_state.get("convergence_study")
-        if study is not None:
-            st.subheader("MC Convergence")
-            render_convergence_chart(study)
+        conv = st.session_state.get("convergence_result")
+        if conv is not None:
+            if not played:
+                render_static_convergence(conv)
 
-            # Convergence formula
             st.latex(
                 r"\text{SE}(\hat{C}_{\mathrm{MC}}) = "
                 r"\frac{\sigma_{\text{payoff}}}{\sqrt{N}}"
@@ -352,20 +342,10 @@ else:
             )
 
             st.markdown("---")
-
-            st.subheader("Method Comparison")
-            render_method_comparison(
-                model_key=sim_model,
-                params=sim_params,
-                terminal_prices=result.terminal_prices,
-                strike=conv_strike,
-                time_to_maturity=T_val,
-                spot=spot_val,
-                risk_free_rate=r_val,
-                is_call=conv_call,
-            )
-        else:
-            st.info("Click **Run Convergence Study** to compare MC pricing against the reference price.")
+            st.subheader("Final Comparison (N = 50,000)")
+            render_final_table(conv)
+        elif not played:
+            st.info("Click **\u25B6  Play** to run the convergence study.")
 
 
 # ═════════════════════════════════════════════════════════════════════════
