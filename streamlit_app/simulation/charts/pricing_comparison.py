@@ -1,17 +1,14 @@
 """
-Pricing Comparison — Animated MC convergence to theoretical price (BS / FFT).
+Pricing Comparison — Plotly-native animated MC convergence.
 
-Automatically prices the strategy legs defined in the sidebar.
-Play button triggers a step-by-step animation showing MC error
-shrinking as the number of scenarios increases.
+All convergence data is pre-computed, then rendered as a Plotly figure
+with native Play/Pause buttons and a scenario slider.
 """
 
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 import streamlit as st
-import time
 from typing import Dict, Any, List
 
 from services.pricing_service import (
@@ -34,14 +31,6 @@ _LEGEND_COLOR = "#ffffff"
 _THEORY_LINE = "rgba(255,255,255,0.20)"
 
 LEG_COLORS = ["#60a5fa", "#34d399", "#fb923c", "#f472b6", "#a78bfa", "#fbbf24"]
-LEG_FILLS = [
-    "rgba(96,165,250,0.12)",
-    "rgba(52,211,153,0.12)",
-    "rgba(251,146,60,0.12)",
-    "rgba(244,114,182,0.12)",
-    "rgba(167,139,250,0.12)",
-    "rgba(251,191,36,0.12)",
-]
 
 _AXIS_STYLE = dict(
     gridcolor=_GRID,
@@ -71,7 +60,6 @@ def extract_legs(position_arrays: dict, default_spot: float) -> List[dict]:
             "quantity": 1.0,
             "premium": 0.0,
         }]
-
     return [
         {
             "strike": float(strikes[i]),
@@ -109,6 +97,12 @@ def compute_reference_prices(
             leg["ref_method"] = "FFT (Carr-Madan)"
 
 
+def _leg_label(leg: dict) -> str:
+    pos = "Long" if leg["direction"] == 1 else "Short"
+    typ = "C" if leg["is_call"] else "P"
+    return f"{pos} {typ} K={leg['strike']:.0f}"
+
+
 def render_legs_summary(legs: list) -> None:
     """Read-only table showing the legs being priced."""
     rows = []
@@ -120,22 +114,16 @@ def render_legs_summary(legs: list) -> None:
             "Position": "Long" if leg["direction"] == 1 else "Short",
             "Qty": int(leg["quantity"]),
             "Reference": f"${leg['ref_price']:.4f}" if leg.get("ref_price") else "MC only",
-            "Method": leg.get("ref_method") or "—",
+            "Method": leg.get("ref_method") or "\u2014",
         })
     st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Animated convergence
+# Pre-computation
 # ═══════════════════════════════════════════════════════════════════════════
 
-def _leg_label(leg: dict) -> str:
-    pos = "Long" if leg["direction"] == 1 else "Short"
-    typ = "C" if leg["is_call"] else "P"
-    return f"{pos} {typ} K={leg['strike']:.0f}"
-
-
-def run_animated_convergence(
+def precompute_convergence(
     model_key: str,
     params: dict,
     legs: list,
@@ -145,28 +133,21 @@ def run_animated_convergence(
     n_steps: int = 252,
     seed: int = 42,
 ) -> dict:
-    """Animate MC convergence step by step, returning final results."""
-
+    """Run all MC simulations at once and return the full convergence data."""
     model_params = _extract_model_params(model_key, params)
     simulator = create_simulator(model_key, **model_params)
     has_ref = any(leg.get("ref_price") is not None for leg in legs)
-
-    chart_ph = st.empty()
-    progress = st.progress(0)
 
     acc = {
         i: {"prices": [], "errors": [], "se": [], "ci_lo": [], "ci_hi": []}
         for i in range(len(legs))
     }
-    n_done = []
 
-    for step, n_paths in enumerate(N_PATHS_GRID):
+    for n_paths in N_PATHS_GRID:
         terminal = simulator.simulate_terminal(
             s0=spot, mu=r, t=T,
             n_paths=n_paths, n_steps=n_steps, seed=seed,
         )
-        n_done.append(n_paths)
-
         for i, leg in enumerate(legs):
             mc = price_from_terminals(terminal, leg["strike"], T, r, leg["is_call"])
             acc[i]["prices"].append(mc["price"])
@@ -176,138 +157,203 @@ def run_animated_convergence(
             ref = leg.get("ref_price")
             acc[i]["errors"].append(abs(mc["price"] - ref) if ref else mc["std_error"])
 
-        fig = _build_figure(legs, n_done, acc, has_ref)
-        chart_ph.plotly_chart(fig, use_container_width=True)
-
-        progress.progress((step + 1) / len(N_PATHS_GRID))
-        if step < len(N_PATHS_GRID) - 1:
-            time.sleep(0.3)
-
-    progress.empty()
-
-    return {"n_done": n_done, "acc": acc, "legs": legs, "has_ref": has_ref}
-
-
-def render_static_convergence(conv: dict) -> None:
-    """Render the final convergence chart (no animation)."""
-    fig = _build_figure(
-        conv["legs"], conv["n_done"], conv["acc"], conv["has_ref"],
-    )
-    st.plotly_chart(fig, use_container_width=True)
+    return {
+        "n_done": list(N_PATHS_GRID),
+        "acc": acc,
+        "legs": legs,
+        "has_ref": has_ref,
+    }
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Figure builder
+# Plotly-native animated chart
 # ═══════════════════════════════════════════════════════════════════════════
 
-def _build_figure(legs, n_list, acc, has_ref):
-    """Two-row chart: MC price convergence (top) + error (bottom)."""
+def render_animated_error_chart(conv: dict) -> None:
+    """Plotly figure with frames, Play/Pause buttons, and a slider."""
+    legs = conv["legs"]
+    n_all = conv["n_done"]
+    acc = conv["acc"]
+    has_ref = conv["has_ref"]
+    n_frames = len(n_all)
+    n_legs = len(legs)
 
-    fig = make_subplots(
-        rows=2, cols=1,
-        shared_xaxes=True,
-        vertical_spacing=0.12,
-        row_heights=[0.55, 0.45],
-        subplot_titles=(
-            "MC Price vs Reference",
-            "Absolute Error" if has_ref else "Standard Error",
-        ),
-    )
+    # Theoretical O(1/√N) fitted from first leg
+    c_fit = acc[0]["errors"][0] * np.sqrt(n_all[0])
+
+    # ── Initial traces (first frame data) ──────────────────────────────
+    fig = go.Figure()
 
     for i, leg in enumerate(legs):
         c = LEG_COLORS[i % len(LEG_COLORS)]
-        fill = LEG_FILLS[i % len(LEG_FILLS)]
-        label = _leg_label(leg)
-
-        # ── Top: MC price with CI band ─────────────────────────────────
         fig.add_trace(go.Scatter(
-            x=n_list, y=acc[i]["ci_hi"],
-            mode="lines", line=dict(width=0),
-            showlegend=False, hoverinfo="skip",
-        ), row=1, col=1)
-        fig.add_trace(go.Scatter(
-            x=n_list, y=acc[i]["ci_lo"],
-            mode="lines", line=dict(width=0),
-            fill="tonexty", fillcolor=fill,
-            showlegend=False, hoverinfo="skip",
-        ), row=1, col=1)
-        fig.add_trace(go.Scatter(
-            x=n_list, y=acc[i]["prices"],
+            x=[n_all[0]], y=[acc[i]["errors"][0]],
             mode="lines+markers",
-            line=dict(width=2, color=c),
-            marker=dict(size=5, color=c),
-            name=label,
+            line=dict(width=2.5, color=c),
+            marker=dict(size=7, color=c, symbol="circle"),
+            name=_leg_label(leg),
             hovertemplate=(
-                f"{label}<br>N=%{{x:,.0f}}<br>"
-                f"MC=$%{{y:.4f}}<extra></extra>"
+                f"{_leg_label(leg)}<br>"
+                "N=%{x:,.0f}<br>"
+                f"{'|Error|' if has_ref else 'SE'}=$%{{y:.5f}}"
+                "<extra></extra>"
             ),
-        ), row=1, col=1)
+        ))
 
-        # Reference line
-        ref = leg.get("ref_price")
-        if ref is not None:
-            fig.add_hline(
-                y=ref, line_dash="dash", line_color=c, line_width=1,
-                row=1, col=1,
-            )
+    # Theory line (initial: single point)
+    fig.add_trace(go.Scatter(
+        x=[n_all[0]],
+        y=[c_fit / np.sqrt(n_all[0])],
+        mode="lines",
+        line=dict(width=1.5, color=_THEORY_LINE, dash="dot"),
+        name="O(1/\u221AN)",
+    ))
 
-        # ── Bottom: error ──────────────────────────────────────────────
-        fig.add_trace(go.Scatter(
-            x=n_list, y=acc[i]["errors"],
-            mode="lines+markers",
-            line=dict(width=2, color=c),
-            marker=dict(size=5, color=c),
-            showlegend=False,
-            hovertemplate=(
-                f"{label}<br>N=%{{x:,.0f}}<br>"
-                f"{'|Err|' if has_ref else 'SE'}=$%{{y:.5f}}<extra></extra>"
-            ),
-        ), row=2, col=1)
+    # ── Frames ─────────────────────────────────────────────────────────
+    frames = []
+    for k in range(n_frames):
+        n_sub = n_all[: k + 1]
+        fdata = []
 
-    # Theoretical O(1/√N) fitted from first leg
-    if len(n_list) >= 2:
-        c_fit = acc[0]["errors"][0] * np.sqrt(n_list[0])
-        n_smooth = np.linspace(n_list[0], n_list[-1], 100)
-        theory = c_fit / np.sqrt(n_smooth)
-        fig.add_trace(go.Scatter(
-            x=n_smooth.tolist(), y=theory.tolist(),
+        for i in range(n_legs):
+            c = LEG_COLORS[i % len(LEG_COLORS)]
+            fdata.append(go.Scatter(
+                x=n_sub,
+                y=acc[i]["errors"][: k + 1],
+                mode="lines+markers",
+                line=dict(width=2.5, color=c),
+                marker=dict(size=7, color=c, symbol="circle"),
+            ))
+
+        # Theory extends to current x-range
+        if k >= 1:
+            n_sm = np.linspace(n_all[0], n_all[k], 120)
+            th = c_fit / np.sqrt(n_sm)
+        else:
+            n_sm = np.array([n_all[0]])
+            th = np.array([c_fit / np.sqrt(n_all[0])])
+
+        fdata.append(go.Scatter(
+            x=n_sm.tolist(),
+            y=th.tolist(),
             mode="lines",
             line=dict(width=1.5, color=_THEORY_LINE, dash="dot"),
-            name="O(1/\u221aN)",
-        ), row=2, col=1)
+        ))
+
+        frames.append(go.Frame(data=fdata, name=f"{n_all[k]:,}"))
+
+    fig.frames = frames
+
+    # ── Animation controls ─────────────────────────────────────────────
+    slider_steps = [
+        dict(
+            args=[
+                [f"{n:,}"],
+                {
+                    "frame": {"duration": 400, "redraw": True},
+                    "mode": "immediate",
+                    "transition": {"duration": 250},
+                },
+            ],
+            label=f"{n:,}",
+            method="animate",
+        )
+        for n in n_all
+    ]
+
+    fig.update_layout(
+        updatemenus=[
+            dict(
+                type="buttons",
+                showactive=False,
+                y=1.18,
+                x=0.0,
+                xanchor="left",
+                buttons=[
+                    dict(
+                        label="\u25B6  Play",
+                        method="animate",
+                        args=[
+                            None,
+                            {
+                                "frame": {"duration": 500, "redraw": True},
+                                "fromcurrent": True,
+                                "transition": {
+                                    "duration": 300,
+                                    "easing": "cubic-in-out",
+                                },
+                            },
+                        ],
+                    ),
+                    dict(
+                        label="\u23F8  Pause",
+                        method="animate",
+                        args=[
+                            [None],
+                            {
+                                "frame": {"duration": 0, "redraw": False},
+                                "mode": "immediate",
+                                "transition": {"duration": 0},
+                            },
+                        ],
+                    ),
+                ],
+                font=dict(color=_AXIS_LABEL, size=12),
+                bgcolor="rgba(255,255,255,0.08)",
+                bordercolor="rgba(255,255,255,0.25)",
+            )
+        ],
+        sliders=[
+            dict(
+                active=0,
+                steps=slider_steps,
+                x=0.0,
+                len=1.0,
+                y=-0.08,
+                currentvalue=dict(
+                    prefix="N = ",
+                    visible=True,
+                    xanchor="center",
+                    font=dict(size=13, color=_AXIS_LABEL),
+                ),
+                font=dict(size=9, color=_TICK_COLOR),
+                tickcolor="rgba(255,255,255,0.3)",
+                bordercolor="rgba(255,255,255,0.15)",
+                bgcolor="rgba(255,255,255,0.05)",
+            )
+        ],
+    )
 
     # ── Layout ─────────────────────────────────────────────────────────
     fig.update_layout(
-        height=620,
+        height=500,
         paper_bgcolor=_PAPER_BG,
         plot_bgcolor=_PLOT_BG,
         hovermode="x unified",
+        xaxis=dict(
+            type="log",
+            title="Number of Scenarios (log scale)",
+            range=[np.log10(n_all[0]) - 0.15, np.log10(n_all[-1]) + 0.15],
+            **_AXIS_STYLE,
+        ),
+        yaxis=dict(
+            title="|Error| ($)" if has_ref else "Std Error ($)",
+            rangemode="tozero",
+            **_AXIS_STYLE,
+        ),
         legend=dict(
             orientation="h",
-            yanchor="bottom", y=1.06,
-            xanchor="center", x=0.5,
+            yanchor="bottom",
+            y=1.10,
+            xanchor="center",
+            x=0.5,
             font=dict(size=11, color=_LEGEND_COLOR),
             bgcolor="rgba(0,0,0,0)",
         ),
-        margin=dict(t=70, b=45, l=65, r=20),
+        margin=dict(t=80, b=95, l=65, r=20),
     )
 
-    for ann in fig.layout.annotations:
-        ann.font.color = _AXIS_LABEL
-        ann.font.size = 13
-
-    fig.update_xaxes(type="log", row=1, col=1, **_AXIS_STYLE)
-    fig.update_xaxes(
-        type="log", title_text="Number of Scenarios (log scale)",
-        row=2, col=1, **_AXIS_STYLE,
-    )
-    fig.update_yaxes(title_text="Option Price ($)", row=1, col=1, **_AXIS_STYLE)
-    fig.update_yaxes(
-        title_text="|Error| ($)" if has_ref else "Std Error ($)",
-        row=2, col=1, **_AXIS_STYLE,
-    )
-
-    return fig
+    st.plotly_chart(fig, use_container_width=True)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -315,9 +361,10 @@ def _build_figure(legs, n_list, acc, has_ref):
 # ═══════════════════════════════════════════════════════════════════════════
 
 def render_final_table(conv: dict) -> None:
-    """Summary table after convergence (last step = 50k paths)."""
+    """Summary table with per-leg MC price vs reference at max N."""
     legs = conv["legs"]
     acc = conv["acc"]
+    max_n = conv["n_done"][-1]
     rows = []
     for i, leg in enumerate(legs):
         mc = acc[i]["prices"][-1]
@@ -326,10 +373,10 @@ def render_final_table(conv: dict) -> None:
         err = abs(mc - ref) if ref else None
         rows.append({
             "Leg": _leg_label(leg),
-            "MC Price (50k)": f"${mc:.4f}",
+            f"MC Price ({max_n:,})": f"${mc:.4f}",
             "Std Error": f"${se:.4f}",
-            "Reference": f"${ref:.4f}" if ref else "—",
-            "|Error|": f"${err:.4f}" if err is not None else "—",
-            "Error (%)": f"{err / ref * 100:.2f}%" if err is not None and ref else "—",
+            "Reference": f"${ref:.4f}" if ref else "\u2014",
+            "|Error|": f"${err:.4f}" if err is not None else "\u2014",
+            "Error (%)": f"{err / ref * 100:.2f}%" if err is not None and ref else "\u2014",
         })
     st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)

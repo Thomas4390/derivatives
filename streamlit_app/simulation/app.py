@@ -36,8 +36,8 @@ from charts.pricing_comparison import (
     extract_legs,
     compute_reference_prices,
     render_legs_summary,
-    run_animated_convergence,
-    render_static_convergence,
+    precompute_convergence,
+    render_animated_error_chart,
     render_final_table,
 )
 
@@ -304,7 +304,7 @@ else:
         n_steps_val = int(sim_params.get("n_steps", 252))
 
         methods = get_available_pricing_methods(sim_model)
-        method_str = " · ".join(m.replace("_", " ").title() for m in methods)
+        method_str = " \u00b7 ".join(m.replace("_", " ").title() for m in methods)
         st.caption(f"Available methods for {MODEL_NAMES.get(sim_model, sim_model)}: **{method_str}**")
 
         # Extract legs from strategy (read-only)
@@ -313,39 +313,34 @@ else:
         compute_reference_prices(sim_model, sim_params, legs, T_val, spot_val, r_val)
 
         if not has_strategy:
-            st.info("No strategy defined — pricing a single ATM Call option.")
+            st.info("No strategy defined \u2014 pricing a single ATM Call option.")
 
         render_legs_summary(legs)
         st.markdown("---")
 
-        # Play button → animated convergence
-        played = False
-        if st.button("\u25B6  Play", type="primary", key="play_conv", use_container_width=True):
-            played = True
-            conv = run_animated_convergence(
-                model_key=sim_model, params=sim_params,
-                legs=legs, T=T_val, spot=spot_val, r=r_val,
-                n_steps=n_steps_val,
-            )
-            st.session_state.convergence_result = conv
-
+        # Auto-compute convergence on first access
         conv = st.session_state.get("convergence_result")
-        if conv is not None:
-            if not played:
-                render_static_convergence(conv)
+        if conv is None:
+            with st.spinner("Computing convergence (9 simulations)\u2026"):
+                conv = precompute_convergence(
+                    model_key=sim_model, params=sim_params,
+                    legs=legs, T=T_val, spot=spot_val, r=r_val,
+                    n_steps=n_steps_val,
+                )
+                st.session_state.convergence_result = conv
 
-            st.latex(
-                r"\text{SE}(\hat{C}_{\mathrm{MC}}) = "
-                r"\frac{\sigma_{\text{payoff}}}{\sqrt{N}}"
-                r"\quad\Longrightarrow\quad"
-                r"\text{Error} = O\!\left(\frac{1}{\sqrt{N}}\right)"
-            )
+        render_animated_error_chart(conv)
 
-            st.markdown("---")
-            st.subheader("Final Comparison (N = 50,000)")
-            render_final_table(conv)
-        elif not played:
-            st.info("Click **\u25B6  Play** to run the convergence study.")
+        st.latex(
+            r"\text{SE}(\hat{C}_{\mathrm{MC}}) = "
+            r"\frac{\sigma_{\text{payoff}}}{\sqrt{N}}"
+            r"\quad\Longrightarrow\quad"
+            r"\text{Error} = O\!\left(\frac{1}{\sqrt{N}}\right)"
+        )
+
+        st.markdown("---")
+        st.subheader("Final Comparison (N = 50,000)")
+        render_final_table(conv)
 
 
 # ═════════════════════════════════════════════════════════════════════════
