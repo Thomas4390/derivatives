@@ -37,7 +37,7 @@ from charts.pricing_comparison import (
     compute_reference_prices,
     render_legs_summary,
     precompute_convergence,
-    render_animated_error_chart,
+    render_animated_convergence_chart,
     render_final_table,
 )
 
@@ -318,18 +318,22 @@ else:
         render_legs_summary(legs)
         st.markdown("---")
 
-        # Auto-compute convergence on first access
+        # Auto-compute convergence (invalidate if n_paths changed)
+        n_paths_val = int(sim_params.get("n_paths", 10000))
         conv = st.session_state.get("convergence_result")
+        if conv is not None and conv["n_done"][-1] != n_paths_val:
+            conv = None
         if conv is None:
-            with st.spinner("Computing convergence (9 simulations)\u2026"):
+            n_sims = len([n for n in [100, 250, 500, 1000, 2500, 5000, 10000, 25000, 50000, 100000] if n < n_paths_val]) + 1
+            with st.spinner(f"Computing convergence ({n_sims} simulations up to N={n_paths_val:,})\u2026"):
                 conv = precompute_convergence(
                     model_key=sim_model, params=sim_params,
                     legs=legs, T=T_val, spot=spot_val, r=r_val,
-                    n_steps=n_steps_val,
+                    n_steps=n_steps_val, max_n=n_paths_val,
                 )
                 st.session_state.convergence_result = conv
 
-        render_animated_error_chart(conv)
+        render_animated_convergence_chart(conv)
 
         st.latex(
             r"\text{SE}(\hat{C}_{\mathrm{MC}}) = "
@@ -339,7 +343,8 @@ else:
         )
 
         st.markdown("---")
-        st.subheader("Final Comparison (N = 50,000)")
+        max_n_display = conv["n_done"][-1]
+        st.subheader(f"Final Comparison (N = {max_n_display:,})")
         render_final_table(conv)
 
 

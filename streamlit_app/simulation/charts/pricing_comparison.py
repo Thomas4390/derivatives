@@ -1,15 +1,17 @@
 """
 Pricing Comparison — Plotly-native animated MC convergence.
 
-All convergence data is pre-computed, then rendered as a Plotly figure
-with native Play/Pause buttons and a scenario slider.
+Two-panel chart: MC price convergence (top) + error convergence (bottom),
+both animated with Play/Pause and scenario slider.
+All data is pre-computed, then rendered via Plotly frames.
 """
 
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 import streamlit as st
-from typing import Dict, Any, List
+from typing import List
 
 from services.pricing_service import (
     price_with_analytical,
@@ -29,8 +31,13 @@ _AXIS_LABEL = "#ffffff"
 _TICK_COLOR = "rgba(255,255,255,0.70)"
 _LEGEND_COLOR = "#ffffff"
 _THEORY_LINE = "rgba(255,255,255,0.20)"
+_REF_LINE = "rgba(255, 215, 0, 0.50)"
 
 LEG_COLORS = ["#60a5fa", "#34d399", "#fb923c", "#f472b6", "#a78bfa", "#fbbf24"]
+LEG_FILLS = [
+    "rgba(96,165,250,0.12)", "rgba(52,211,153,0.12)", "rgba(251,146,60,0.12)",
+    "rgba(244,114,182,0.12)", "rgba(167,139,250,0.12)", "rgba(251,191,36,0.12)",
+]
 
 _AXIS_STYLE = dict(
     gridcolor=_GRID,
@@ -42,7 +49,16 @@ _AXIS_STYLE = dict(
     title_font=dict(size=12, color=_AXIS_LABEL),
 )
 
-N_PATHS_GRID = [100, 250, 500, 1_000, 2_500, 5_000, 10_000, 25_000, 50_000]
+
+def _build_n_paths_grid(max_n: int) -> list:
+    """Build a logarithmically-spaced grid ending at max_n."""
+    base = [100, 250, 500, 1_000, 2_500, 5_000, 10_000, 25_000, 50_000, 100_000]
+    grid = [n for n in base if n < max_n]
+    grid.append(max_n)
+    # Ensure at least 4 points
+    if len(grid) < 4:
+        grid = sorted(set([max(50, max_n // 8), max(100, max_n // 4), max(200, max_n // 2), max_n]))
+    return grid
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -131,9 +147,12 @@ def precompute_convergence(
     spot: float,
     r: float,
     n_steps: int = 252,
+    max_n: int = 50_000,
     seed: int = 42,
 ) -> dict:
     """Run all MC simulations at once and return the full convergence data."""
+    n_paths_grid = _build_n_paths_grid(max_n)
+
     model_params = _extract_model_params(model_key, params)
     simulator = create_simulator(model_key, **model_params)
     has_ref = any(leg.get("ref_price") is not None for leg in legs)
@@ -143,7 +162,7 @@ def precompute_convergence(
         for i in range(len(legs))
     }
 
-    for n_paths in N_PATHS_GRID:
+    for n_paths in n_paths_grid:
         terminal = simulator.simulate_terminal(
             s0=spot, mu=r, t=T,
             n_paths=n_paths, n_steps=n_steps, seed=seed,
@@ -158,7 +177,7 @@ def precompute_convergence(
             acc[i]["errors"].append(abs(mc["price"] - ref) if ref else mc["std_error"])
 
     return {
-        "n_done": list(N_PATHS_GRID),
+        "n_done": n_paths_grid,
         "acc": acc,
         "legs": legs,
         "has_ref": has_ref,
@@ -166,11 +185,22 @@ def precompute_convergence(
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Plotly-native animated chart
+# Plotly-native animated two-panel chart
 # ═══════════════════════════════════════════════════════════════════════════
 
-def render_animated_error_chart(conv: dict) -> None:
-    """Plotly figure with frames, Play/Pause buttons, and a slider."""
+def render_animated_convergence_chart(conv: dict) -> None:
+    """Two-panel Plotly animation: MC price (top) + error (bottom).
+
+    Trace order (must match between initial traces and frame data):
+      Row 1 — price panel:
+        [0 .. n_legs-1]              price lines
+        [n_legs + 2*i]               CI upper for leg i
+        [n_legs + 2*i + 1]           CI lower for leg i  (fill="tonexty")
+      Row 2 — error panel:
+        [3*n_legs .. 4*n_legs-1]     error lines
+        [4*n_legs]                   O(1/√N) theory line
+      Total: 4*n_legs + 1
+    """
     legs = conv["legs"]
     n_all = conv["n_done"]
     acc = conv["acc"]
@@ -178,54 +208,163 @@ def render_animated_error_chart(conv: dict) -> None:
     n_frames = len(n_all)
     n_legs = len(legs)
 
-    # Theoretical O(1/√N) fitted from first leg
+    # ── Compute fixed y-axis ranges from all data ─────────────────────
+    all_ci_lo, all_ci_hi, all_prices = [], [], []
+    for i in range(n_legs):
+        all_prices.extend(acc[i]["prices"])
+        all_ci_lo.extend(acc[i]["ci_lo"])
+        all_ci_hi.extend(acc[i]["ci_hi"])
+        ref = legs[i].get("ref_price")
+        if ref is not None:
+            all_prices.append(ref)
+
+    price_min = min(all_ci_lo) if all_ci_lo else min(all_prices)
+    price_max = max(all_ci_hi) if all_ci_hi else max(all_prices)
+    price_pad = (price_max - price_min) * 0.12 if price_max > price_min else 0.5
+    price_range = [price_min - price_pad, price_max + price_pad]
+
+    all_errors = []
+    for i in range(n_legs):
+        all_errors.extend(acc[i]["errors"])
+    err_max = max(all_errors) if all_errors else 1.0
+    err_range = [0, err_max * 1.15]
+
     c_fit = acc[0]["errors"][0] * np.sqrt(n_all[0])
+    x_range = [np.log10(n_all[0]) - 0.15, np.log10(n_all[-1]) + 0.15]
 
-    # ── Initial traces (first frame data) ──────────────────────────────
-    fig = go.Figure()
+    # ── Create subplots ───────────────────────────────────────────────
+    fig = make_subplots(
+        rows=2, cols=1,
+        row_heights=[0.55, 0.45],
+        vertical_spacing=0.10,
+        subplot_titles=["MC Price Convergence", "Pricing Error Convergence"],
+    )
 
+    # ── Row 1: Price lines [0 .. n_legs-1] ────────────────────────────
+    for i, leg in enumerate(legs):
+        c = LEG_COLORS[i % len(LEG_COLORS)]
+        fig.add_trace(go.Scatter(
+            x=[n_all[0]], y=[acc[i]["prices"][0]],
+            mode="lines+markers",
+            line=dict(width=2.5, color=c),
+            marker=dict(size=6, color=c, symbol="circle"),
+            name=_leg_label(leg),
+            legendgroup=f"leg{i}",
+            hovertemplate=(
+                f"{_leg_label(leg)}<br>"
+                "N=%{x:,.0f}<br>"
+                "MC=$%{y:.4f}<extra></extra>"
+            ),
+        ), row=1, col=1)
+
+    # Row 1: CI bands — interleaved upper/lower per leg [n_legs .. 3*n_legs-1]
+    for i in range(n_legs):
+        fill_c = LEG_FILLS[i % len(LEG_FILLS)]
+        # CI upper (invisible boundary)
+        fig.add_trace(go.Scatter(
+            x=[n_all[0]], y=[acc[i]["ci_hi"][0]],
+            mode="lines", line=dict(width=0),
+            showlegend=False, legendgroup=f"leg{i}",
+            hoverinfo="skip",
+        ), row=1, col=1)
+        # CI lower (fill to the CI upper immediately above)
+        fig.add_trace(go.Scatter(
+            x=[n_all[0]], y=[acc[i]["ci_lo"][0]],
+            mode="lines", line=dict(width=0),
+            fill="tonexty", fillcolor=fill_c,
+            showlegend=False, legendgroup=f"leg{i}",
+            hoverinfo="skip",
+        ), row=1, col=1)
+
+    # ── Row 2: Error lines [3*n_legs .. 4*n_legs-1] ──────────────────
     for i, leg in enumerate(legs):
         c = LEG_COLORS[i % len(LEG_COLORS)]
         fig.add_trace(go.Scatter(
             x=[n_all[0]], y=[acc[i]["errors"][0]],
             mode="lines+markers",
             line=dict(width=2.5, color=c),
-            marker=dict(size=7, color=c, symbol="circle"),
-            name=_leg_label(leg),
+            marker=dict(size=6, color=c, symbol="circle"),
+            legendgroup=f"leg{i}",
+            showlegend=False,
             hovertemplate=(
                 f"{_leg_label(leg)}<br>"
                 "N=%{x:,.0f}<br>"
                 f"{'|Error|' if has_ref else 'SE'}=$%{{y:.5f}}"
                 "<extra></extra>"
             ),
-        ))
+        ), row=2, col=1)
 
-    # Theory line (initial: single point)
+    # Row 2: Theory line [4*n_legs]
     fig.add_trace(go.Scatter(
         x=[n_all[0]],
         y=[c_fit / np.sqrt(n_all[0])],
         mode="lines",
         line=dict(width=1.5, color=_THEORY_LINE, dash="dot"),
         name="O(1/\u221AN)",
-    ))
+        showlegend=True,
+    ), row=2, col=1)
 
-    # ── Frames ─────────────────────────────────────────────────────────
+    # ── Reference price hlines (layout shapes — persist across frames)
+    for i, leg in enumerate(legs):
+        ref = leg.get("ref_price")
+        if ref is not None:
+            c = LEG_COLORS[i % len(LEG_COLORS)]
+            fig.add_hline(
+                y=ref, row=1, col=1,
+                line_dash="dash", line_color=c, line_width=1.2,
+                opacity=0.6,
+                annotation_text=f"Ref {_leg_label(leg)}: ${ref:.4f}",
+                annotation_font_size=9,
+                annotation_font_color=c,
+                annotation_position="top left" if i % 2 == 0 else "bottom left",
+            )
+
+    # ── Build frames ──────────────────────────────────────────────────
     frames = []
     for k in range(n_frames):
         n_sub = n_all[: k + 1]
         fdata = []
 
+        # Row 1: price lines
         for i in range(n_legs):
             c = LEG_COLORS[i % len(LEG_COLORS)]
             fdata.append(go.Scatter(
-                x=n_sub,
-                y=acc[i]["errors"][: k + 1],
+                x=n_sub, y=acc[i]["prices"][: k + 1],
                 mode="lines+markers",
                 line=dict(width=2.5, color=c),
-                marker=dict(size=7, color=c, symbol="circle"),
+                marker=dict(size=6, color=c, symbol="circle"),
+                xaxis="x", yaxis="y",
             ))
 
-        # Theory extends to current x-range
+        # Row 1: CI bands (interleaved upper/lower per leg)
+        for i in range(n_legs):
+            fill_c = LEG_FILLS[i % len(LEG_FILLS)]
+            # CI upper
+            fdata.append(go.Scatter(
+                x=n_sub, y=acc[i]["ci_hi"][: k + 1],
+                mode="lines", line=dict(width=0),
+                xaxis="x", yaxis="y",
+            ))
+            # CI lower (fill to upper)
+            fdata.append(go.Scatter(
+                x=n_sub, y=acc[i]["ci_lo"][: k + 1],
+                mode="lines", line=dict(width=0),
+                fill="tonexty", fillcolor=fill_c,
+                xaxis="x", yaxis="y",
+            ))
+
+        # Row 2: error lines
+        for i in range(n_legs):
+            c = LEG_COLORS[i % len(LEG_COLORS)]
+            fdata.append(go.Scatter(
+                x=n_sub, y=acc[i]["errors"][: k + 1],
+                mode="lines+markers",
+                line=dict(width=2.5, color=c),
+                marker=dict(size=6, color=c, symbol="circle"),
+                xaxis="x2", yaxis="y2",
+            ))
+
+        # Row 2: theory line
         if k >= 1:
             n_sm = np.linspace(n_all[0], n_all[k], 120)
             th = c_fit / np.sqrt(n_sm)
@@ -234,17 +373,17 @@ def render_animated_error_chart(conv: dict) -> None:
             th = np.array([c_fit / np.sqrt(n_all[0])])
 
         fdata.append(go.Scatter(
-            x=n_sm.tolist(),
-            y=th.tolist(),
+            x=n_sm.tolist(), y=th.tolist(),
             mode="lines",
             line=dict(width=1.5, color=_THEORY_LINE, dash="dot"),
+            xaxis="x2", yaxis="y2",
         ))
 
         frames.append(go.Frame(data=fdata, name=f"{n_all[k]:,}"))
 
     fig.frames = frames
 
-    # ── Animation controls ─────────────────────────────────────────────
+    # ── Animation controls ────────────────────────────────────────────
     slider_steps = [
         dict(
             args=[
@@ -266,7 +405,7 @@ def render_animated_error_chart(conv: dict) -> None:
             dict(
                 type="buttons",
                 showactive=False,
-                y=1.18,
+                y=1.08,
                 x=0.0,
                 xanchor="left",
                 buttons=[
@@ -309,7 +448,7 @@ def render_animated_error_chart(conv: dict) -> None:
                 steps=slider_steps,
                 x=0.0,
                 len=1.0,
-                y=-0.08,
+                y=-0.05,
                 currentvalue=dict(
                     prefix="N = ",
                     visible=True,
@@ -324,33 +463,55 @@ def render_animated_error_chart(conv: dict) -> None:
         ],
     )
 
-    # ── Layout ─────────────────────────────────────────────────────────
+    # ── Layout ────────────────────────────────────────────────────────
     fig.update_layout(
-        height=500,
+        height=750,
         paper_bgcolor=_PAPER_BG,
         plot_bgcolor=_PLOT_BG,
         hovermode="x unified",
-        xaxis=dict(
-            type="log",
-            title="Number of Scenarios (log scale)",
-            range=[np.log10(n_all[0]) - 0.15, np.log10(n_all[-1]) + 0.15],
-            **_AXIS_STYLE,
-        ),
-        yaxis=dict(
-            title="|Error| ($)" if has_ref else "Std Error ($)",
-            rangemode="tozero",
-            **_AXIS_STYLE,
-        ),
         legend=dict(
             orientation="h",
             yanchor="bottom",
-            y=1.10,
+            y=1.03,
             xanchor="center",
             x=0.5,
             font=dict(size=11, color=_LEGEND_COLOR),
             bgcolor="rgba(0,0,0,0)",
         ),
-        margin=dict(t=80, b=95, l=65, r=20),
+        margin=dict(t=75, b=80, l=65, r=20),
+    )
+
+    # Subplot title styling
+    for ann in fig.layout.annotations:
+        ann.font = dict(size=12, color=_AXIS_LABEL)
+
+    # Row 1 axes (price)
+    fig.update_xaxes(
+        type="log", title="",
+        range=x_range,
+        **_AXIS_STYLE,
+        row=1, col=1,
+    )
+    fig.update_yaxes(
+        title="MC Price ($)",
+        range=price_range,
+        **_AXIS_STYLE,
+        row=1, col=1,
+    )
+
+    # Row 2 axes (error)
+    fig.update_xaxes(
+        type="log",
+        title="Number of Scenarios (log scale)",
+        range=x_range,
+        **_AXIS_STYLE,
+        row=2, col=1,
+    )
+    fig.update_yaxes(
+        title="|Error| ($)" if has_ref else "Std Error ($)",
+        range=err_range,
+        **_AXIS_STYLE,
+        row=2, col=1,
     )
 
     st.plotly_chart(fig, use_container_width=True)
