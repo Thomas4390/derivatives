@@ -141,7 +141,6 @@ def _add_vol_references(
 ) -> None:
     """Add initial-vol and long-run-vol dashed reference lines to the vol panel."""
     model_lower = model_key.lower()
-    ann_kw = dict(font_size=10, xanchor="left", x=0.02)
 
     # ── Initial volatility ──────────────────────────────────────────────
     if model_lower in ("heston", "bates"):
@@ -149,7 +148,8 @@ def _add_vol_references(
         fig.add_hline(
             y=v0_pct, line_dash="dash", line_color=_VOL_REF_INIT, line_width=1,
             annotation_text=f"\u221aV\u2080 = {v0_pct:.1f}%",
-            annotation_font_color=_VOL_REF_INIT, **ann_kw,
+            annotation_font_size=10, annotation_font_color=_VOL_REF_INIT,
+            annotation_position="top left",
             row=2, col=1,
         )
     elif model_lower in ("garch", "ngarch", "gjr_garch"):
@@ -157,7 +157,8 @@ def _add_vol_references(
         fig.add_hline(
             y=s0_pct, line_dash="dash", line_color=_VOL_REF_INIT, line_width=1,
             annotation_text=f"\u03c3\u2080 = {s0_pct:.1f}%",
-            annotation_font_color=_VOL_REF_INIT, **ann_kw,
+            annotation_font_size=10, annotation_font_color=_VOL_REF_INIT,
+            annotation_position="top left",
             row=2, col=1,
         )
 
@@ -167,9 +168,8 @@ def _add_vol_references(
         fig.add_hline(
             y=theta_pct, line_dash="dot", line_color=_VOL_REF_LR, line_width=1,
             annotation_text=f"\u221a\u03b8 = {theta_pct:.1f}%",
-            annotation_font_color=_VOL_REF_LR,
+            annotation_font_size=10, annotation_font_color=_VOL_REF_LR,
             annotation_position="bottom left",
-            **ann_kw,
             row=2, col=1,
         )
     elif model_lower in ("garch", "ngarch", "gjr_garch"):
@@ -179,8 +179,7 @@ def _add_vol_references(
             fig.add_hline(
                 y=lr_pct, line_dash="dot", line_color=_VOL_REF_LR, line_width=1,
                 annotation_text=f"LR = {lr_pct:.1f}%",
-                annotation_font_color=_VOL_REF_LR,
+                annotation_font_size=10, annotation_font_color=_VOL_REF_LR,
                 annotation_position="bottom left",
-                **ann_kw,
                 row=2, col=1,
             )
