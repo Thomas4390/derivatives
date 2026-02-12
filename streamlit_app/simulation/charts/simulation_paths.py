@@ -16,7 +16,11 @@ import streamlit as st
 from typing import Dict, Any, Optional
 
 from backend.simulation.base import SimulationResult
-from services.simulation_service import get_model_characteristics, get_initial_volatility
+from services.simulation_service import (
+    get_model_characteristics,
+    get_initial_volatility,
+    compute_long_run_volatility,
+)
 
 # ── Color palette ─────────────────────────────────────────────────────────
 _GREEN = "rgba(34, 197, 94, 0.40)"
@@ -25,9 +29,14 @@ _BLUE = "rgba(99, 160, 255, 0.35)"
 _BAND_FILL = "rgba(250, 204, 21, 0.12)"
 _BAND_EDGE = "#e5b820"
 _VOL_ORANGE = "rgba(255, 160, 50, 0.35)"
-_VOL_BAND_FILL = "rgba(255, 160, 50, 0.13)"
+_VOL_BAND_FILL = "rgba(255, 160, 50, 0.18)"
+_VOL_BAND_EDGE = "#ffa032"
 _SPOT_LINE = "rgba(255, 255, 255, 0.45)"
 _BE_LINE = "#a78bfa"
+
+# Vol reference lines
+_VOL_REF_INIT = "#78c8ff"   # bright cyan — initial vol (V0, sigma0)
+_VOL_REF_LR = "#a078ff"     # bright purple — long-run vol (theta, LR)
 
 # Chart background — dark enough to contrast with Streamlit's grey UI
 _PAPER_BG = "#0e1117"
@@ -111,14 +120,14 @@ def render_simulation_chart(
             x=time_grid, y=pct[1], mode="lines",
             line=dict(width=1.2, color=_BAND_EDGE, dash="dot"),
             name="95th pct", legendgroup="band",
-            hovertemplate="95th: $%{y:.2f}<extra></extra>",
+            hovertemplate="Time: %{x:.2f} yr | 95th Percentile: $%{y:.2f}<extra></extra>",
         ), row=1, col=1)
         fig.add_trace(go.Scatter(
             x=time_grid, y=pct[0], mode="lines",
             line=dict(width=1.2, color=_BAND_EDGE, dash="dot"),
             fill="tonexty", fillcolor=_BAND_FILL,
             name="5th pct", legendgroup="band",
-            hovertemplate="5th: $%{y:.2f}<extra></extra>",
+            hovertemplate="Time: %{x:.2f} yr | 5th Percentile: $%{y:.2f}<extra></extra>",
         ), row=1, col=1)
 
     # Spot reference
@@ -148,29 +157,35 @@ def render_simulation_chart(
         if has_pnl:
             _add_paths(fig, time_grid, vol_paths * 100,
                        idx_sample[profit_mask], _GREEN, None, "profit",
-                       row=2, show_legend=False)
+                       row=2, show_legend=False, hover_fmt="Volatility: %{y:.2f}%")
             _add_paths(fig, time_grid, vol_paths * 100,
                        idx_sample[~profit_mask], _RED, None, "loss",
-                       row=2, show_legend=False)
+                       row=2, show_legend=False, hover_fmt="Volatility: %{y:.2f}%")
         else:
             _add_paths(fig, time_grid, vol_paths * 100,
                        idx_sample, _VOL_ORANGE, "Vol Path", "vol",
-                       row=2)
+                       row=2, hover_fmt="Volatility: %{y:.2f}%")
 
-        # Vol bands
+        # Vol 5-95 percentile bands
         if show_bands:
             vol_pct = np.percentile(vol_paths * 100, [5, 95], axis=0)
             fig.add_trace(go.Scatter(
                 x=time_grid, y=vol_pct[1], mode="lines",
-                line=dict(width=0.8, color="rgba(255,160,50,0.30)", dash="dot"),
-                showlegend=False, hoverinfo="skip",
+                line=dict(width=1.2, color=_VOL_BAND_EDGE, dash="dot"),
+                name="Vol 95th", legendgroup="vol_band",
+                hovertemplate="Time: %{x:.2f} yr | Volatility 95th: %{y:.2f}%<extra></extra>",
             ), row=2, col=1)
             fig.add_trace(go.Scatter(
                 x=time_grid, y=vol_pct[0], mode="lines",
-                line=dict(width=0.8, color="rgba(255,160,50,0.30)", dash="dot"),
+                line=dict(width=1.2, color=_VOL_BAND_EDGE, dash="dot"),
                 fill="tonexty", fillcolor=_VOL_BAND_FILL,
-                name="Vol 5-95 %", legendgroup="vol_band",
+                name="Vol 5th", legendgroup="vol_band",
+                hovertemplate="Time: %{x:.2f} yr | Volatility 5th: %{y:.2f}%<extra></extra>",
             ), row=2, col=1)
+
+        # Vol reference lines (V0, theta, sigma0, long-run)
+        _add_vol_references(fig, model_key, params)
+
     else:
         # Constant vol (GBM, Merton)
         initial_vol = get_initial_volatility(model_key, params) * 100
@@ -178,6 +193,7 @@ def render_simulation_chart(
             x=time_grid, y=[initial_vol] * len(time_grid),
             mode="lines", line=dict(width=1.5, color="rgba(255,160,50,0.7)"),
             name=f"\u03c3 = {initial_vol:.1f} %",
+            hovertemplate="Time: %{x:.2f} yr | Volatility: " + f"{initial_vol:.2f}%" + "<extra></extra>",
         ), row=2, col=1)
 
     # ── Layout ────────────────────────────────────────────────────────────
@@ -197,7 +213,7 @@ def render_simulation_chart(
         height=chart_height,
         paper_bgcolor=_PAPER_BG,
         plot_bgcolor=_PLOT_BG,
-        hovermode="x unified",
+        hovermode="closest",
         legend=dict(
             orientation="h",
             yanchor="bottom", y=1.02,
@@ -210,35 +226,29 @@ def render_simulation_chart(
         margin=dict(t=50, b=35, l=60, r=20),
     )
 
-    # Time axis ticks: "Time: X.XX yr"
-    t_max = float(time_grid[-1])
-    _tvals = np.linspace(0, t_max, 6).tolist()
-    _ttexts = [f"Time: {v:.2f} yr" for v in _tvals]
-    _time_kw = dict(tickmode="array", tickvals=_tvals, ticktext=_ttexts)
-
-    # Price subplot axes
+    # Y-axes
     fig.update_yaxes(title_text="Price ($)", row=1, col=1, **_axis_style)
-    fig.update_xaxes(
-        showticklabels=not has_vol,
-        row=1, col=1, **_axis_style, **_time_kw,
-    )
-
-    # Vol subplot axes
     fig.update_yaxes(title_text=vol_label, row=2, col=1, **_axis_style)
-    fig.update_xaxes(
-        row=2, col=1, **_axis_style, **_time_kw,
-    )
 
-    st.plotly_chart(fig, width="stretch")
+    # X-axes
+    fig.update_xaxes(row=1, col=1, **_axis_style)
+    fig.update_xaxes(title_text="Time (years)", row=2, col=1, **_axis_style)
+
+    # Hide x-axis labels on row 1 when shared
+    if has_vol:
+        fig.update_xaxes(showticklabels=False, row=1, col=1)
+
+    st.plotly_chart(fig, use_container_width=True)
 
 
 # ── helpers ───────────────────────────────────────────────────────────────
 
 def _add_paths(
     fig, time_grid, data, indices, color, legend_name, legend_group,
-    row=1, show_legend=True,
+    row=1, show_legend=True, hover_fmt="Price: $%{y:.2f}",
 ):
     """Add a batch of paths to the figure."""
+    ht = f"Time: %{{x:.2f}} yr | {hover_fmt}<extra></extra>"
     first = True
     for idx in indices:
         fig.add_trace(go.Scatter(
@@ -247,9 +257,60 @@ def _add_paths(
             name=legend_name if (first and show_legend) else None,
             showlegend=(first and show_legend and legend_name is not None),
             legendgroup=legend_group,
-            hoverinfo="skip",
+            hovertemplate=ht,
         ), row=row, col=1)
         first = False
+
+
+def _add_vol_references(
+    fig: go.Figure,
+    model_key: str,
+    params: Dict[str, Any],
+) -> None:
+    """Add initial-vol and long-run-vol reference lines to the vol panel."""
+    model_lower = model_key.lower()
+
+    # ── Initial volatility ──────────────────────────────────────────────
+    if model_lower in ("heston", "bates"):
+        v0_pct = np.sqrt(params.get("v0", 0.04)) * 100
+        fig.add_hline(
+            y=v0_pct, line_dash="dash", line_color=_VOL_REF_INIT, line_width=1.5,
+            annotation_text=f"\u221aV\u2080 = {v0_pct:.1f}%",
+            annotation_font_size=11, annotation_font_color=_VOL_REF_INIT,
+            annotation_position="top left",
+            row=2, col=1,
+        )
+    elif model_lower in ("garch", "ngarch", "gjr_garch"):
+        s0_pct = params.get("sigma0", 0.20) * 100
+        fig.add_hline(
+            y=s0_pct, line_dash="dash", line_color=_VOL_REF_INIT, line_width=1.5,
+            annotation_text=f"\u03c3\u2080 = {s0_pct:.1f}%",
+            annotation_font_size=11, annotation_font_color=_VOL_REF_INIT,
+            annotation_position="top left",
+            row=2, col=1,
+        )
+
+    # ── Long-run volatility ─────────────────────────────────────────────
+    if model_lower in ("heston", "bates"):
+        theta_pct = np.sqrt(params.get("theta", 0.04)) * 100
+        fig.add_hline(
+            y=theta_pct, line_dash="dot", line_color=_VOL_REF_LR, line_width=1.5,
+            annotation_text=f"\u221a\u03b8 = {theta_pct:.1f}%",
+            annotation_font_size=11, annotation_font_color=_VOL_REF_LR,
+            annotation_position="bottom left",
+            row=2, col=1,
+        )
+    elif model_lower in ("garch", "ngarch", "gjr_garch"):
+        lr_vol = compute_long_run_volatility(model_key, params)
+        if lr_vol is not None:
+            lr_pct = lr_vol * 100
+            fig.add_hline(
+                y=lr_pct, line_dash="dot", line_color=_VOL_REF_LR, line_width=1.5,
+                annotation_text=f"LR = {lr_pct:.1f}%",
+                annotation_font_size=11, annotation_font_color=_VOL_REF_LR,
+                annotation_position="bottom left",
+                row=2, col=1,
+            )
 
 
 def render_path_controls() -> Dict[str, Any]:

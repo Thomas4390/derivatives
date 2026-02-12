@@ -32,8 +32,8 @@ _SPOT_LINE = "rgba(255,255,255,0.45)"
 _PRICE_COLOR = "#58a6ff"      # bright blue
 _VOL_COLOR = "#f0883e"        # bright orange
 _VOL_FLAT_COLOR = "rgba(255,160,50,0.7)"
-_VOL_REF_INIT = "rgba(120,200,255,0.55)"   # light cyan — initial vol
-_VOL_REF_LR = "rgba(160,120,255,0.55)"     # light purple — long-run vol
+_VOL_REF_INIT = "#78c8ff"   # bright cyan — initial vol
+_VOL_REF_LR = "#a078ff"     # bright purple — long-run vol
 
 
 def render_path_explorer_chart(
@@ -61,6 +61,7 @@ def render_path_explorer_chart(
         mode="lines",
         line=dict(width=1.8, color=_PRICE_COLOR),
         name="S(t)",
+        hovertemplate="Time: %{x:.2f} yr | Price: $%{y:.2f}<extra></extra>",
     ), row=1, col=1)
 
     # S0 reference
@@ -82,6 +83,7 @@ def render_path_explorer_chart(
             mode="lines",
             line=dict(width=1.8, color=_VOL_COLOR),
             name="\u03c3(t)",
+            hovertemplate="Time: %{x:.2f} yr | Volatility: %{y:.2f}%<extra></extra>",
         ), row=2, col=1)
 
         # Reference lines — initial & long-run volatility
@@ -94,6 +96,7 @@ def render_path_explorer_chart(
             mode="lines",
             line=dict(width=1.5, color=_VOL_FLAT_COLOR),
             name=f"\u03c3 = {init_vol:.1f}%",
+            hovertemplate="Time: %{x:.2f} yr | Volatility: " + f"{init_vol:.2f}%" + "<extra></extra>",
         ), row=2, col=1)
 
     # ── Layout ─────────────────────────────────────────────────────────────
@@ -114,7 +117,7 @@ def render_path_explorer_chart(
         height=520,
         paper_bgcolor=_PAPER_BG,
         plot_bgcolor=_PLOT_BG,
-        hovermode="x unified",
+        hovermode="closest",
         legend=dict(
             orientation="h",
             yanchor="bottom", y=1.02,
@@ -125,17 +128,11 @@ def render_path_explorer_chart(
         margin=dict(t=40, b=35, l=60, r=20),
     )
 
-    # Time axis ticks: "Time: X.XX yr"
-    t_max = float(time_grid[-1])
-    _tvals = np.linspace(0, t_max, 6).tolist()
-    _ttexts = [f"Time: {v:.2f} yr" for v in _tvals]
-    _time_kw = dict(tickmode="array", tickvals=_tvals, ticktext=_ttexts)
-
     fig.update_yaxes(title_text="Price ($)", row=1, col=1, **_ax)
-    fig.update_xaxes(showticklabels=False, row=1, col=1, **_ax, **_time_kw)
+    fig.update_xaxes(showticklabels=False, row=1, col=1, **_ax)
 
     fig.update_yaxes(title_text=vol_label, row=2, col=1, **_ax)
-    fig.update_xaxes(row=2, col=1, **_ax, **_time_kw)
+    fig.update_xaxes(title_text="Time (years)", row=2, col=1, **_ax)
 
     st.plotly_chart(fig, use_container_width=True)
 
@@ -152,18 +149,18 @@ def _add_vol_references(
     if model_lower in ("heston", "bates"):
         v0_pct = np.sqrt(params.get("v0", 0.04)) * 100
         fig.add_hline(
-            y=v0_pct, line_dash="dash", line_color=_VOL_REF_INIT, line_width=1,
+            y=v0_pct, line_dash="dash", line_color=_VOL_REF_INIT, line_width=1.5,
             annotation_text=f"\u221aV\u2080 = {v0_pct:.1f}%",
-            annotation_font_size=10, annotation_font_color=_VOL_REF_INIT,
+            annotation_font_size=11, annotation_font_color=_VOL_REF_INIT,
             annotation_position="top left",
             row=2, col=1,
         )
     elif model_lower in ("garch", "ngarch", "gjr_garch"):
         s0_pct = params.get("sigma0", 0.20) * 100
         fig.add_hline(
-            y=s0_pct, line_dash="dash", line_color=_VOL_REF_INIT, line_width=1,
+            y=s0_pct, line_dash="dash", line_color=_VOL_REF_INIT, line_width=1.5,
             annotation_text=f"\u03c3\u2080 = {s0_pct:.1f}%",
-            annotation_font_size=10, annotation_font_color=_VOL_REF_INIT,
+            annotation_font_size=11, annotation_font_color=_VOL_REF_INIT,
             annotation_position="top left",
             row=2, col=1,
         )
@@ -172,9 +169,9 @@ def _add_vol_references(
     if model_lower in ("heston", "bates"):
         theta_pct = np.sqrt(params.get("theta", 0.04)) * 100
         fig.add_hline(
-            y=theta_pct, line_dash="dot", line_color=_VOL_REF_LR, line_width=1,
+            y=theta_pct, line_dash="dot", line_color=_VOL_REF_LR, line_width=1.5,
             annotation_text=f"\u221a\u03b8 = {theta_pct:.1f}%",
-            annotation_font_size=10, annotation_font_color=_VOL_REF_LR,
+            annotation_font_size=11, annotation_font_color=_VOL_REF_LR,
             annotation_position="bottom left",
             row=2, col=1,
         )
@@ -185,7 +182,7 @@ def _add_vol_references(
             fig.add_hline(
                 y=lr_pct, line_dash="dot", line_color=_VOL_REF_LR, line_width=1,
                 annotation_text=f"LR = {lr_pct:.1f}%",
-                annotation_font_size=10, annotation_font_color=_VOL_REF_LR,
+                annotation_font_size=11, annotation_font_color=_VOL_REF_LR,
                 annotation_position="bottom left",
                 row=2, col=1,
             )

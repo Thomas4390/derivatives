@@ -129,7 +129,7 @@ def render_legs_summary(legs: list) -> None:
             "Strike": f"${leg['strike']:.1f}",
             "Position": "Long" if leg["direction"] == 1 else "Short",
             "Qty": int(leg["quantity"]),
-            "Reference": f"${leg['ref_price']:.4f}" if leg.get("ref_price") else "MC only",
+            "Reference": f"${leg['ref_price']:.2f}" if leg.get("ref_price") else "MC only",
             "Method": leg.get("ref_method") or "\u2014",
         })
     st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
@@ -253,7 +253,7 @@ def render_animated_convergence_chart(conv: dict) -> None:
             hovertemplate=(
                 f"{_leg_label(leg)}<br>"
                 "N=%{x:,.0f}<br>"
-                "MC=$%{y:.4f}<extra></extra>"
+                "MC=$%{y:.2f}<extra></extra>"
             ),
         ), row=1, col=1)
 
@@ -289,7 +289,7 @@ def render_animated_convergence_chart(conv: dict) -> None:
             hovertemplate=(
                 f"{_leg_label(leg)}<br>"
                 "N=%{x:,.0f}<br>"
-                f"{'|Error|' if has_ref else 'SE'}=$%{{y:.5f}}"
+                f"{'|Error|' if has_ref else 'SE'}=$%{{y:.4f}}"
                 "<extra></extra>"
             ),
         ), row=2, col=1)
@@ -534,9 +534,9 @@ def render_final_table(conv: dict) -> None:
         err = abs(mc - ref) if ref else None
         rows.append({
             "Leg": _leg_label(leg),
-            f"MC Price ({max_n:,})": f"${mc:.4f}",
+            f"MC Price ({max_n:,})": f"${mc:.2f}",
             "Std Error": f"${se:.4f}",
-            "Reference": f"${ref:.4f}" if ref else "\u2014",
+            "Reference": f"${ref:.2f}" if ref else "\u2014",
             "|Error|": f"${err:.4f}" if err is not None else "\u2014",
             "Error (%)": f"{err / ref * 100:.2f}%" if err is not None and ref else "\u2014",
         })
