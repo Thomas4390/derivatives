@@ -13,7 +13,11 @@ import streamlit as st
 from typing import Dict, Any
 
 from backend.simulation.base import SimulationResult
-from services.simulation_service import get_model_characteristics, get_initial_volatility
+from services.simulation_service import (
+    get_model_characteristics,
+    get_initial_volatility,
+    compute_long_run_volatility,
+)
 
 # ── Theme (matches simulation_paths.py) ────────────────────────────────────
 _PAPER_BG = "#0e1117"
@@ -28,6 +32,8 @@ _SPOT_LINE = "rgba(255,255,255,0.45)"
 _PRICE_COLOR = "#58a6ff"      # bright blue
 _VOL_COLOR = "#f0883e"        # bright orange
 _VOL_FLAT_COLOR = "rgba(255,160,50,0.7)"
+_VOL_REF_INIT = "rgba(120,200,255,0.55)"   # light cyan — initial vol
+_VOL_REF_LR = "rgba(160,120,255,0.55)"     # light purple — long-run vol
 
 
 def render_path_explorer_chart(
@@ -77,6 +83,9 @@ def render_path_explorer_chart(
             line=dict(width=1.8, color=_VOL_COLOR),
             name="\u03c3(t)",
         ), row=2, col=1)
+
+        # Reference lines — initial & long-run volatility
+        _add_vol_references(fig, model_key, params)
     else:
         init_vol = get_initial_volatility(model_key, params) * 100
         fig.add_trace(go.Scatter(
@@ -123,3 +132,55 @@ def render_path_explorer_chart(
     fig.update_xaxes(title_text="Time (years)", row=2, col=1, **_ax)
 
     st.plotly_chart(fig, use_container_width=True)
+
+
+def _add_vol_references(
+    fig: go.Figure,
+    model_key: str,
+    params: Dict[str, Any],
+) -> None:
+    """Add initial-vol and long-run-vol dashed reference lines to the vol panel."""
+    model_lower = model_key.lower()
+    ann_kw = dict(font_size=10, xanchor="left", x=0.02)
+
+    # ── Initial volatility ──────────────────────────────────────────────
+    if model_lower in ("heston", "bates"):
+        v0_pct = np.sqrt(params.get("v0", 0.04)) * 100
+        fig.add_hline(
+            y=v0_pct, line_dash="dash", line_color=_VOL_REF_INIT, line_width=1,
+            annotation_text=f"\u221aV\u2080 = {v0_pct:.1f}%",
+            annotation_font_color=_VOL_REF_INIT, **ann_kw,
+            row=2, col=1,
+        )
+    elif model_lower in ("garch", "ngarch", "gjr_garch"):
+        s0_pct = params.get("sigma0", 0.20) * 100
+        fig.add_hline(
+            y=s0_pct, line_dash="dash", line_color=_VOL_REF_INIT, line_width=1,
+            annotation_text=f"\u03c3\u2080 = {s0_pct:.1f}%",
+            annotation_font_color=_VOL_REF_INIT, **ann_kw,
+            row=2, col=1,
+        )
+
+    # ── Long-run volatility ─────────────────────────────────────────────
+    if model_lower in ("heston", "bates"):
+        theta_pct = np.sqrt(params.get("theta", 0.04)) * 100
+        fig.add_hline(
+            y=theta_pct, line_dash="dot", line_color=_VOL_REF_LR, line_width=1,
+            annotation_text=f"\u221a\u03b8 = {theta_pct:.1f}%",
+            annotation_font_color=_VOL_REF_LR,
+            annotation_position="bottom left",
+            **ann_kw,
+            row=2, col=1,
+        )
+    elif model_lower in ("garch", "ngarch", "gjr_garch"):
+        lr_vol = compute_long_run_volatility(model_key, params)
+        if lr_vol is not None:
+            lr_pct = lr_vol * 100
+            fig.add_hline(
+                y=lr_pct, line_dash="dot", line_color=_VOL_REF_LR, line_width=1,
+                annotation_text=f"LR = {lr_pct:.1f}%",
+                annotation_font_color=_VOL_REF_LR,
+                annotation_position="bottom left",
+                **ann_kw,
+                row=2, col=1,
+            )
