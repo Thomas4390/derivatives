@@ -259,7 +259,7 @@ def render_percentile_table(result: SimulationResult):
         "Return": [f"{r:+.1f}%" for r in returns],
     })
 
-    st.dataframe(df, use_container_width=True, hide_index=True)
+    st.dataframe(df, width="stretch", hide_index=True)
 
 
 def render_paths_summary(result: SimulationResult, n_display: int = 5):
@@ -285,7 +285,7 @@ def render_paths_summary(result: SimulationResult, n_display: int = 5):
             "Terminal": [f"${terminal_prices[i]:.2f}" for i in best_idx],
             "Return": [f"{(terminal_prices[i]/initial_price - 1)*100:+.1f}%" for i in best_idx],
         }
-        st.dataframe(pd.DataFrame(best_data), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(best_data), width="stretch", hide_index=True)
 
     with col2:
         st.markdown("**Worst Performing Paths**")
@@ -294,7 +294,7 @@ def render_paths_summary(result: SimulationResult, n_display: int = 5):
             "Terminal": [f"${terminal_prices[i]:.2f}" for i in worst_idx],
             "Return": [f"{(terminal_prices[i]/initial_price - 1)*100:+.1f}%" for i in worst_idx],
         }
-        st.dataframe(pd.DataFrame(worst_data), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(worst_data), width="stretch", hide_index=True)
 
 
 def render_model_equations(model_key: str, params: Dict[str, Any]):

@@ -135,7 +135,7 @@ def render_model_selector_radio(
             if st.button(
                 f"{icon} {model.short_name}",
                 key=f"{key}_{model_key}",
-                use_container_width=True,
+                width="stretch",
                 type="primary" if model_key == current_model else "secondary"
             ):
                 st.session_state.selected_model = model_key
@@ -149,7 +149,7 @@ def render_model_selector_radio(
             if st.button(
                 f"{icon} {model.short_name}",
                 key=f"{key}_{model_key}",
-                use_container_width=True,
+                width="stretch",
                 type="primary" if model_key == current_model else "secondary"
             ):
                 st.session_state.selected_model = model_key
@@ -178,7 +178,7 @@ def render_model_comparison_table():
     st.dataframe(
         df,
         hide_index=True,
-        use_container_width=True,
+        width="stretch",
         column_config={
             "Model": st.column_config.TextColumn("Model", width="medium"),
             "Volatility": st.column_config.TextColumn("Volatility", width="medium"),

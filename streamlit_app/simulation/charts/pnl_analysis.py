@@ -160,7 +160,7 @@ def render_payoff_with_distribution(
     fig.update_xaxes(title_text="Count", row=1, col=2, showticklabels=False, **_AXIS_STYLE)
     fig.update_yaxes(row=1, col=2, showticklabels=False, **_AXIS_STYLE)
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
 
 def render_3d_pnl_chart(
@@ -257,7 +257,7 @@ def render_3d_pnl_chart(
         ),
     )
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
     # Realized vol formula — adaptive to selected N and T
     ann_ratio = f"{n_steps}" if time_horizon == 1.0 else rf"\frac{{{n_steps}}}{{{time_horizon:.2g}}}"

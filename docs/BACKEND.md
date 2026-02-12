@@ -1,6 +1,6 @@
 # Backend Module Documentation
 
-**Version**: 5.1.0
+**Version**: 5.2.0
 **Author**: Thomas
 **Created**: 2025
 
@@ -19,8 +19,9 @@
 11. [Portfolio Module](#portfolio-module)
 12. [Utils Module](#utils-module)
 13. [Math Kernels Module](#math-kernels-module)
-14. [Inter-Module Relationships](#inter-module-relationships)
-15. [Complete Examples](#complete-examples)
+14. [Cross-Cutting Conventions](#cross-cutting-conventions)
+15. [Inter-Module Relationships](#inter-module-relationships)
+16. [Complete Examples](#complete-examples)
 
 ---
 
@@ -117,26 +118,26 @@ print(f"Price: ${price.price:.4f}")
 The framework follows a clean separation of concerns:
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    PRICING WORKFLOW                         │
-├─────────────────────────────────────────────────────────────┤
-│                                                             │
-│   Instrument          Model              Engine             │
-│   ──────────         ─────              ──────             │
-│   (What)             (Physics)          (How)              │
-│                                                             │
-│   VanillaOption  +   GBMModel      +   BSAnalyticEngine    │
-│   EuropeanCall       HestonModel       FFTEngine           │
-│   AmericanPut        BatesModel        MonteCarloEngine    │
-│   OptionStrategy     MertonModel                           │
-│                      GARCHModel                            │
-│                                                             │
-│   ─────────────────────────────────────────────────────    │
-│                           ↓                                 │
-│                    PricingResult                            │
-│                    (price, greeks, metadata)                │
-│                                                             │
-└─────────────────────────────────────────────────────────────┘
++---------------------------------------------------------+
+|                    PRICING WORKFLOW                       |
++---------------------------------------------------------+
+|                                                           |
+|   Instrument          Model              Engine           |
+|   ----------         -----              ------           |
+|   (What)             (Physics)          (How)            |
+|                                                           |
+|   VanillaOption  +   GBMModel      +   BSAnalyticEngine  |
+|   EuropeanCall       HestonModel       FFTEngine         |
+|   AmericanPut        BatesModel        MonteCarloEngine  |
+|   OptionStrategy     MertonModel                         |
+|                      GARCHModel                          |
+|                                                           |
+|   -----------------------------------------------        |
+|                           |                               |
+|                    PricingResult                          |
+|                    (price, greeks, metadata)              |
+|                                                           |
++---------------------------------------------------------+
 ```
 
 ### Example: Three Pillars in Action
@@ -186,73 +187,78 @@ print(f"Price: ${result.price:.4f}")
 
 ```
 backend/
-├── __init__.py              # Unified API exports
-├── core/                    # Abstract interfaces and base types
-│   ├── __init__.py
-│   ├── interfaces.py        # Instrument, Model, PricingEngine protocols
-│   ├── market.py            # MarketEnvironment
-│   └── results.py           # PricingResult, ExerciseStyle
-├── models/                  # Pricing models
-│   ├── __init__.py
-│   ├── base.py              # BaseModel, PricingCapability
-│   ├── gbm.py               # GBMModel
-│   ├── heston.py            # HestonModel
-│   ├── merton.py            # MertonModel
-│   ├── bates.py             # BatesModel
-│   ├── garch.py             # GARCHModel, NGARCHModel, GJRGARCHModel
-│   └── characteristic_functions/  # CFs for FFT pricing
-│       ├── heston_cf.py
-│       ├── merton_cf.py
-│       └── bates_cf.py
-├── engines/                 # Pricing engines
-│   ├── __init__.py
-│   ├── unified.py           # BSAnalyticEngine, FFTEngine, MonteCarloEngine
-│   ├── fourier/
-│   │   └── carr_madan.py    # Carr-Madan FFT algorithm
-│   └── monte_carlo/
-│       ├── mc_base.py       # Generic MC engine
-│       └── garch_pricer.py  # GARCH-specific pricer with LRNVR
-├── simulation/              # Monte Carlo simulators
-│   ├── __init__.py
-│   ├── base.py              # BaseSimulator, SimulationResult
-│   ├── enums.py             # ModelType, DiscretizationScheme, Measure
-│   ├── factory.py           # create_simulator factory
-│   ├── risk_engine.py       # RiskMetrics, compute_risk_metrics
-│   └── models/              # Concrete simulators
-│       ├── gbm.py
-│       ├── heston.py
-│       ├── merton.py
-│       ├── bates.py
-│       └── garch.py         # GARCH, NGARCH, GJR-GARCH
-├── instruments/             # Financial instruments
-│   ├── __init__.py
-│   ├── options.py           # VanillaOption, EuropeanCall, etc.
-│   ├── payoffs.py           # VanillaCallPayoff, VanillaPutPayoff
-│   └── strategies.py        # OptionStrategy, IronCondor, Straddle
-├── greeks/                  # Greeks calculation
-│   ├── __init__.py
-│   ├── calculator.py        # GreeksCalculator, calculate_greeks
-│   ├── analytic.py          # bs_greeks_*, analytical formulas
-│   └── numerical.py         # finite_difference_greeks
-├── portfolio/               # Portfolio management
-│   ├── __init__.py
-│   ├── portfolio.py         # OptionsPortfolio
-│   ├── positions.py         # PortfolioPosition, StockPosition
-│   ├── breakeven.py         # BreakevenCalculator
-│   ├── risk_analysis.py     # RiskProfile, check_unlimited_risk
-│   ├── greeks_surfaces.py   # 3D Greeks surfaces (Numba-optimized)
-│   ├── pnl.py               # P&L calculations, RiskMetrics
-│   └── factory.py           # long_call, short_put, etc.
-├── utils/                   # Utility functions
-│   ├── __init__.py
-│   ├── math.py              # bs_price, implied_vol
-│   └── distributions.py     # norm_cdf, norm_pdf (Numba)
-└── math_kernels/            # Low-level numerical kernels
-    ├── __init__.py
-    ├── sde_kernels.py       # Euler, Milstein, QE discretization
-    ├── payoff_kernels.py    # Vectorized payoff computation
-    ├── regression.py        # Longstaff-Schwartz for Americans
-    └── random.py            # Correlated Brownian, antithetic
++-- __init__.py              # Unified API exports
++-- core/                    # Abstract interfaces and base types
+|   +-- __init__.py
+|   +-- interfaces.py        # Instrument, Model, PricingEngine protocols
+|   +-- market.py            # MarketEnvironment
+|   +-- result_types.py      # PricingResult, GreeksResult, ExerciseStyle
+|   +-- registry.py          # EngineRegistry, price() convenience
++-- models/                  # Pricing models
+|   +-- __init__.py
+|   +-- base.py              # BaseModel, Measure
+|   +-- gbm.py               # GBMModel
+|   +-- heston.py            # HestonModel
+|   +-- merton.py            # MertonModel
+|   +-- bates.py             # BatesModel
+|   +-- garch.py             # GARCHModel, NGARCHModel, GJRGARCHModel
+|   +-- vol_bump.py          # create_vol_bumped_model, create_vol_bumped_pair
+|   +-- registry.py          # ModelRegistry
+|   +-- characteristic_functions/  # CFs for FFT pricing
+|       +-- heston_cf.py
+|       +-- merton_cf.py
+|       +-- bates_cf.py
++-- engines/                 # Pricing engines
+|   +-- __init__.py
+|   +-- unified.py           # BSAnalyticEngine, FFTEngine, MonteCarloEngine
+|   +-- vectorized_bs.py     # Numba-vectorized BS Greeks
+|   +-- fourier/
+|   |   +-- carr_madan.py    # Carr-Madan FFT algorithm
+|   +-- monte_carlo/
+|       +-- mc_base.py       # Generic MC engine
+|       +-- garch_pricer.py  # GARCH-specific pricer with LRNVR
++-- simulation/              # Monte Carlo simulators
+|   +-- __init__.py
+|   +-- base.py              # BaseSimulator, SimulationResult
+|   +-- enums.py             # ModelType, DiscretizationScheme, Measure
+|   +-- factory.py           # create_simulator factory
+|   +-- risk_engine.py       # RiskMetrics, compute_risk_metrics
+|   +-- models/              # Concrete simulators
+|       +-- gbm.py
+|       +-- heston.py
+|       +-- merton.py
+|       +-- bates.py
+|       +-- garch.py         # GARCH, NGARCH, GJR-GARCH
++-- instruments/             # Financial instruments
+|   +-- __init__.py
+|   +-- options.py           # VanillaOption, DigitalOption, exotics
+|   +-- payoffs.py           # VanillaCallPayoff, exotic payoffs
+|   +-- strategies.py        # OptionStrategy, IronCondor, Straddle
+|   +-- exercise.py          # EuropeanExercise, AmericanExercise, BermudanExercise
++-- greeks/                  # Greeks calculation
+|   +-- __init__.py
+|   +-- calculator.py        # GreeksCalculator, calculate_greeks
+|   +-- analytic.py          # bs_greeks_*, analytical formulas
+|   +-- numerical.py         # finite_difference_greeks
++-- portfolio/               # Portfolio management
+|   +-- __init__.py
+|   +-- portfolio.py         # OptionsPortfolio
+|   +-- positions.py         # PortfolioPosition, StockPosition
+|   +-- breakeven.py         # BreakevenCalculator
+|   +-- risk_analysis.py     # RiskProfile, check_unlimited_risk
+|   +-- greeks_surfaces.py   # 3D Greeks surfaces (Numba-optimized)
+|   +-- pnl.py               # P&L calculations, RiskMetrics
+|   +-- factory.py           # long_call, short_put, etc.
++-- utils/                   # Utility functions
+|   +-- __init__.py
+|   +-- math.py              # bs_price, implied_vol, Greeks
+|   +-- distributions.py     # norm_cdf, norm_pdf (Numba)
++-- math_kernels/            # Low-level numerical kernels
+    +-- __init__.py
+    +-- sde_kernels.py       # Euler, Milstein, QE discretization
+    +-- payoff_kernels.py    # Vectorized payoff computation
+    +-- regression.py        # Longstaff-Schwartz for Americans
+    +-- random.py            # Correlated Brownian, antithetic
 ```
 
 ---
@@ -273,23 +279,193 @@ The core module defines abstract interfaces and base types used throughout the f
 | `Payoff` | Protocol for option payoffs |
 | `MarketEnvironment` | Container for market data |
 | `PricingResult` | Result container with price and metadata |
-| `ExerciseStyle` | Enum for European/American exercise |
+| `GreeksResult` | Result container for all 13 Greeks |
+| `ExerciseStyle` | Enum for European/American/Bermudan exercise |
+| `PricingCapability` | Enum for engine types |
+| `EngineRegistry` | Factory for auto-selecting optimal engine |
 
-### Example
+### MarketEnvironment
+
+Immutable snapshot of market conditions. Frozen dataclass enabling clean bumping for Greeks.
 
 ```python
-from backend import MarketEnvironment, PricingResult, ExerciseStyle
+@dataclass(frozen=True)
+class MarketEnvironment:
+    spot: float                          # Current underlying price
+    rate: float                          # Risk-free rate (annualized)
+    dividend_yield: float = 0.0          # Continuous dividend yield
+    valuation_date: Optional[str] = None # Date for logging/audit
+```
 
-# Create market environment
-market = MarketEnvironment(
-    spot=100.0,
-    rate=0.05,
-    dividend_yield=0.02
-)
+**Bump methods** (return new instances with modified values):
 
-# Check exercise style
-print(ExerciseStyle.EUROPEAN)  # ExerciseStyle.EUROPEAN
-print(ExerciseStyle.AMERICAN)  # ExerciseStyle.AMERICAN
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `bump_spot(delta)` | `(float) -> MarketEnvironment` | `spot + delta` |
+| `bump_rate(delta, validate=True)` | `(float, bool) -> MarketEnvironment` | `rate + delta` |
+| `bump_dividend(delta, validate=True)` | `(float, bool) -> MarketEnvironment` | `dividend_yield + delta` |
+| `with_spot(spot)` | `(float) -> MarketEnvironment` | Replace spot |
+| `with_rate(rate, validate=False)` | `(float, bool) -> MarketEnvironment` | Replace rate (bypasses validation) |
+| `with_dividend(dividend_yield, validate=False)` | `(float, bool) -> MarketEnvironment` | Replace dividend (bypasses validation) |
+
+```python
+from backend import MarketEnvironment
+
+market = MarketEnvironment(spot=100, rate=0.05, dividend_yield=0.02)
+
+# Bump pattern for numerical delta
+market_up = market.bump_spot(+0.5)    # spot = 100.5
+market_dn = market.bump_spot(-0.5)    # spot =  99.5
+# delta ~ (price_up - price_dn) / (2 * 0.5)
+
+# Replace spot entirely
+market_new = market.with_spot(110.0)  # spot = 110
+
+# Stress testing with extreme rates (bypass validation)
+market_stress = market.with_rate(2.0)  # No ValueError
+```
+
+### PricingResult
+
+```python
+@dataclass(frozen=True)
+class PricingResult:
+    price: float                   # Option price (premium)
+    engine: str = ""               # Name of engine that produced result
+    model: str = ""                # Name of model used
+    error: Optional[float] = None  # Standard error (MC methods)
+```
+
+### GreeksResult
+
+Full 13-Greek container with arithmetic support for portfolio aggregation.
+
+```python
+@dataclass(frozen=True)
+class GreeksResult:
+    # First order
+    delta: float = 0.0   # dV/dS
+    theta: float = 0.0   # dV/dt
+    vega: float = 0.0    # dV/dsigma
+    rho: float = 0.0     # dV/dr
+    # Second order
+    gamma: float = 0.0   # d2V/dS2
+    vanna: float = 0.0   # d2V/dS dsigma
+    volga: float = 0.0   # d2V/dsigma2
+    charm: float = 0.0   # d2V/dS dt
+    veta: float = 0.0    # d2V/dsigma dt
+    # Third order
+    speed: float = 0.0   # d3V/dS3
+    zomma: float = 0.0   # d3V/dS2 dsigma
+    color: float = 0.0   # d3V/dS2 dt
+    ultima: float = 0.0  # d3V/dsigma3
+```
+
+**Operators** (all return new `GreeksResult` instances):
+
+| Operator | Usage | Description |
+|----------|-------|-------------|
+| `+` | `g1 + g2` | Sum Greeks for portfolio aggregation |
+| `-` | `g1 - g2` | Subtract Greeks for hedging |
+| `*` | `g * 10` or `10 * g` | Scale by scalar (position size) |
+| `/` | `g / 2` | Divide by scalar (normalization) |
+| `-` (unary) | `-g` | Negate (short positions) |
+
+**Properties and methods**:
+
+| Member | Returns | Description |
+|--------|---------|-------------|
+| `.vomma` | `float` | Alias for `.volga` |
+| `.delta_decay` | `float` | Alias for `.charm` |
+| `.first_order()` | `dict` | `{delta, theta, vega, rho}` |
+| `.second_order()` | `dict` | `{gamma, vanna, volga, charm, veta}` |
+| `.third_order()` | `dict` | `{speed, zomma, color, ultima}` |
+| `.to_dict()` | `dict` | All 13 Greeks as dictionary |
+
+```python
+from backend import GreeksResult
+
+# Portfolio aggregation
+call_greeks = GreeksResult(delta=0.55, gamma=0.02, vega=0.20, theta=-0.05)
+put_greeks = GreeksResult(delta=-0.45, gamma=0.02, vega=0.20, theta=-0.05)
+portfolio = call_greeks + put_greeks  # delta = 0.10
+
+# Scale by position size
+scaled = call_greeks * 100  # 100 contracts
+
+# Short position
+short = -call_greeks  # delta = -0.55
+```
+
+### ExerciseStyle Enum
+
+```python
+class ExerciseStyle(Enum):
+    EUROPEAN = auto()
+    AMERICAN = auto()
+    BERMUDAN = auto()
+```
+
+### PricingCapability Enum
+
+```python
+class PricingCapability(Enum):
+    ANALYTICAL = auto()
+    FFT = auto()
+    MONTE_CARLO = auto()
+```
+
+### EngineRegistry
+
+Factory that auto-selects the optimal pricing engine. Priority: `ANALYTICAL > FFT > MONTE_CARLO`.
+
+```python
+class EngineRegistry:
+    PRIORITY = [PricingCapability.ANALYTICAL, PricingCapability.FFT, PricingCapability.MONTE_CARLO]
+```
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `register()` | `(model_name: str, capability: PricingCapability, engine_provider: EngineProvider) -> None` | Register engine for model/capability |
+| `unregister()` | `(model_name: str, capability: PricingCapability) -> bool` | Remove registration |
+| `clear()` | `() -> None` | Remove all registrations |
+| `get_engine()` | `(instrument, model, preferred=None) -> PricingEngine` | Get optimal engine |
+| `price()` | `(instrument, model, market, preferred=None) -> PricingResult` | Get engine + price in one call |
+| `list_engines()` | `() -> List[Tuple[str, str]]` | List all registered (model, capability) pairs |
+
+**Module-level convenience function**:
+
+```python
+from backend.core import price, MarketEnvironment
+from backend.instruments import EuropeanCall
+from backend.models import GBMModel
+
+result = price(EuropeanCall(strike=100, maturity=0.5), GBMModel(sigma=0.20),
+               MarketEnvironment(spot=100, rate=0.05))
+```
+
+### Model ABC
+
+Abstract base class for all pricing models.
+
+```python
+class Model(ABC):
+    @property
+    @abstractmethod
+    def name(self) -> str: ...
+
+    @property
+    @abstractmethod
+    def supported_engines(self) -> List[PricingCapability]: ...
+
+    @abstractmethod
+    def get_parameters(self) -> Dict[str, Any]: ...
+
+    def characteristic_function(self, u: complex, s0: float, t: float, r: float, q: float = 0.0) -> complex: ...
+    def characteristic_function_vectorized(self, u_arr: np.ndarray, s0: float, t: float, r: float, q: float = 0.0) -> np.ndarray: ...
+    def drift(self, s: float, v: float, t: float, r: float, q: float) -> float: ...
+    def diffusion(self, s: float, v: float, t: float) -> float: ...
+    def create_simulator(self, **kwargs) -> BaseSimulator: ...
 ```
 
 ---
@@ -298,7 +474,7 @@ print(ExerciseStyle.AMERICAN)  # ExerciseStyle.AMERICAN
 
 **Location**: `backend/models/`
 
-Pricing models define the stochastic dynamics of the underlying asset.
+Pricing models define the stochastic dynamics of the underlying asset. All models are frozen dataclasses implementing the `Model` ABC.
 
 ### Available Models
 
@@ -312,55 +488,194 @@ Pricing models define the stochastic dynamics of the underlying asset.
 | `NGARCHModel` | Nonlinear GARCH | GARCH + `theta` (asymmetry) |
 | `GJRGARCHModel` | GJR-GARCH | GARCH + `gamma` (leverage) |
 
-### Model Capabilities
+### HestonModel
 
-Each model declares its pricing capabilities:
+Heston (1993) stochastic volatility: `dS = (r-q)S dt + sqrt(V)S dW_S`, `dV = kappa(theta-V)dt + xi sqrt(V) dW_V`.
 
-```python
-from backend import HestonModel, PricingCapability
+**Properties**:
 
-model = HestonModel(v0=0.04, kappa=2.0, theta=0.04, xi=0.3, rho=-0.7)
+| Property | Type | Description |
+|----------|------|-------------|
+| `feller_satisfied` | `bool` | `True` if `2*kappa*theta > xi^2` |
+| `feller_ratio` | `float` | `2*kappa*theta / xi^2` (>1 means satisfied) |
+| `long_run_volatility` | `float` | `sqrt(theta)` |
+| `initial_volatility` | `float` | `sqrt(v0)` |
 
-# Check what the model supports
-print(model.capabilities)
-# {PricingCapability.ANALYTIC_CALL, PricingCapability.FFT,
-#  PricingCapability.MONTE_CARLO, PricingCapability.SIMULATION}
-```
+**Methods**:
 
-### Example: GBM Model
-
-```python
-from backend import GBMModel
-
-model = GBMModel(sigma=0.2)
-
-# Model provides characteristic function for FFT
-cf = model.characteristic_function(s0=100, t=0.5, r=0.05)
-u = 1.0 + 0.5j
-phi = cf(u)
-
-# Model provides terminal simulator for MC
-simulator = model.terminal_simulator(s0=100, t=0.5, r=0.05)
-terminals = simulator(n_paths=10000, n_steps=100, seed=42)
-```
-
-### Example: Heston Model
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `variance_drift(v)` | `(float) -> float` | `kappa * (theta - v)` |
+| `variance_diffusion(v)` | `(float) -> float` | `xi * sqrt(max(v, 0))` |
+| `mean_variance(t)` | `(float) -> float` | `E[V_t] = theta + (v0-theta)*exp(-kappa*t)` |
+| `expected_variance(t)` | `(float) -> float` | Alias for `mean_variance` |
+| `total_variance(t=1.0)` | `(float) -> float` | Integrated expected variance over `[0, t]` |
+| `total_volatility(t=1.0)` | `(float) -> float` | `sqrt(total_variance(t) / t)` |
+| `create_simulator(**kwargs)` | `(**kwargs) -> HestonSimulator` | Create MC simulator |
 
 ```python
 from backend import HestonModel
 
-model = HestonModel(
-    v0=0.04,      # Initial variance (20% vol)
-    kappa=2.0,    # Mean reversion speed
-    theta=0.04,   # Long-run variance
-    xi=0.3,       # Volatility of variance
-    rho=-0.7      # Correlation (negative = leverage effect)
-)
+model = HestonModel(v0=0.04, kappa=2.0, theta=0.04, xi=0.3, rho=-0.7)
 
-# Check Feller condition: 2*kappa*theta > xi^2
-feller = 2 * model.kappa * model.theta > model.xi ** 2
-print(f"Feller condition satisfied: {feller}")  # True
+print(f"Feller satisfied: {model.feller_satisfied}")   # True
+print(f"Feller ratio: {model.feller_ratio:.2f}")        # 1.78
+print(f"Initial vol: {model.initial_volatility:.1%}")   # 20.0%
+print(f"Long-run vol: {model.long_run_volatility:.1%}") # 20.0%
+print(f"E[V_1]: {model.mean_variance(1.0):.4f}")        # 0.04
 ```
+
+### MertonModel
+
+Merton (1976) jump-diffusion: `dS = (r-q-lambda_j*k)S dt + sigma S dW + (J-1)S dN`.
+
+**Properties**:
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `expected_jump_size` | `float` | `E[J-1] = exp(mu_j + 0.5*sigma_j^2) - 1` |
+| `expected_jump_return` | `float` | `expected_jump_size * 100` (percentage) |
+| `variance` | `float` | `sigma^2` (annualized diffusion variance) |
+
+**Methods**:
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `expected_jumps_per_year()` | `() -> float` | Returns `lambda_j` |
+| `jump_contribution_to_variance()` | `() -> float` | `lambda_j * (mu_j^2 + sigma_j^2)` |
+| `total_variance(t=1.0)` | `(float) -> float` | Diffusion + jump variance |
+| `total_volatility(t=1.0)` | `(float) -> float` | `sqrt(total_variance(t) / t)` |
+| `to_gbm()` | `() -> GBMModel` | Drop jumps, keep diffusion `sigma` |
+| `create_simulator(**kwargs)` | `(**kwargs) -> MertonSimulator` | Create MC simulator |
+
+```python
+from backend import MertonModel
+
+model = MertonModel(sigma=0.20, lambda_j=0.5, mu_j=-0.1, sigma_j=0.2)
+
+print(f"Expected jump size: {model.expected_jump_size:.2%}")
+print(f"Jump variance: {model.jump_contribution_to_variance():.4f}")
+print(f"Total vol: {model.total_volatility():.1%}")
+
+gbm = model.to_gbm()  # GBMModel(sigma=0.2)
+```
+
+### BatesModel
+
+Bates (1996): Heston stochastic volatility + Merton-style jumps.
+
+Has all Heston properties (`feller_satisfied`, `feller_ratio`, `long_run_volatility`, `initial_volatility`, `mean_variance`, `total_variance`, `total_volatility`) plus all Merton jump properties (`expected_jump_size`, `expected_jump_return`, `expected_jumps_per_year`, `jump_contribution_to_variance`).
+
+**Additional methods**:
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `to_heston()` | `() -> HestonModel` | Drop jumps, keep SV params |
+| `variance_drift(v)` | `(float) -> float` | `kappa * (theta - v)` |
+| `variance_diffusion(v)` | `(float) -> float` | `xi * sqrt(max(v, 0))` |
+| `create_simulator(**kwargs)` | `(**kwargs) -> BatesSimulator` | Create MC simulator |
+
+```python
+from backend import BatesModel
+
+model = BatesModel(
+    v0=0.04, kappa=2.0, theta=0.04, xi=0.3, rho=-0.7,
+    lambda_j=0.5, mu_j=-0.1, sigma_j=0.2
+)
+heston = model.to_heston()  # Drop jumps
+```
+
+### GARCH Family
+
+All GARCH models inherit from `BaseGARCHModel` and share common properties:
+
+**Shared properties** (`BaseGARCHModel`):
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `persistence` | `float` | Model-specific (abstract), must be < 1 |
+| `long_run_variance` | `float` | `omega / (1 - persistence)` |
+| `long_run_volatility` | `float` | `sqrt(long_run_variance)` |
+| `half_life` | `float` | `ln(2) / (-ln(persistence))` time steps |
+
+**Shared methods**:
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `create_simulator(**kwargs)` | `() -> Simulator` | Model-specific simulator |
+| `create_pricer(n_paths=100000, n_steps=252)` | `(int, int) -> GARCHMCPricer` | MC pricer with LRNVR |
+
+**Model-specific persistence formulas**:
+
+| Model | Persistence | Stationarity Condition |
+|-------|-------------|----------------------|
+| `GARCHModel` | `alpha + beta` | `alpha + beta < 1` |
+| `NGARCHModel` | `alpha*(1 + theta^2) + beta` | `alpha*(1+theta^2) + beta < 1` |
+| `GJRGARCHModel` | `alpha + 0.5*gamma + beta` | `alpha + 0.5*gamma + beta < 1` |
+
+```python
+from backend import GARCHModel, NGARCHModel, GJRGARCHModel
+
+garch = GARCHModel(sigma0=0.20, omega=0.002, alpha=0.05, beta=0.90)
+print(f"Persistence: {garch.persistence:.3f}")          # 0.950
+print(f"Long-run vol: {garch.long_run_volatility:.1%}") # 20.0%
+print(f"Half-life: {garch.half_life:.1f} steps")         # 13.5
+
+# Create pricer with LRNVR measure change
+pricer = garch.create_pricer(n_paths=100_000)
+result = pricer.price(s0=100, k=100, t=0.25, r=0.05)
+```
+
+### Characteristic Functions
+
+Numba-optimized characteristic functions for FFT pricing.
+
+| Function | Signature |
+|----------|-----------|
+| `heston_characteristic_function(u, s0, v0, t, r, kappa, theta, xi, rho)` | Scalar CF |
+| `heston_cf_vectorized(u_arr, s0, v0, t, r, kappa, theta, xi, rho)` | Vectorized CF |
+| `merton_characteristic_function(u, s0, t, r, sigma, lambda_j, mu_j, sigma_j)` | Scalar CF |
+| `merton_cf_vectorized(u_arr, s0, t, r, sigma, lambda_j, mu_j, sigma_j)` | Vectorized CF |
+| `bates_characteristic_function(u, s0, v0, t, r, kappa, theta, xi, rho, lambda_j, mu_j, sigma_j)` | Scalar CF |
+| `bates_cf_vectorized(u_arr, s0, v0, t, r, kappa, theta, xi, rho, lambda_j, mu_j, sigma_j)` | Vectorized CF |
+
+### ModelRegistry
+
+Singleton pattern for model lookup by name.
+
+```python
+from backend.models import registry, ModelRegistry
+
+models = registry.list_models()  # All registered model names
+model = registry.create("heston", v0=0.04, kappa=2.0, theta=0.04, xi=0.3, rho=-0.7)
+```
+
+### Vol Bump Utilities
+
+**Location**: `backend/models/vol_bump.py`
+
+Utilities for creating volatility-bumped model copies (used for numerical vega).
+
+```python
+from backend.models.vol_bump import create_vol_bumped_model, create_vol_bumped_pair
+
+model = HestonModel(v0=0.04, kappa=2.0, theta=0.04, xi=0.3, rho=-0.7)
+
+# Single bump: for Heston, bumps in vol space: v0_new = (sqrt(v0) + h)^2
+model_up = create_vol_bumped_model(model, vol_bump=0.01)
+
+# Pair for central difference
+model_up, model_down = create_vol_bumped_pair(model, vol_bump=0.01)
+```
+
+**Bump semantics by model type**:
+
+| Model | Bump Target | Formula |
+|-------|-------------|---------|
+| GBM | `sigma` | `sigma + h` |
+| Merton | `sigma` | `sigma + h` (preserves jump params) |
+| Heston/Bates | `v0` | `v0_new = (sqrt(v0) + h)^2` (bump in vol space) |
+| GARCH family | `sigma0` | `sigma0 + h` |
 
 ---
 
@@ -385,6 +700,133 @@ Engines implement the pricing algorithms.
 | `CarrMadanFFTEngine` | Generic FFT with characteristic function |
 | `GenericMCEngine` | Generic MC with terminal simulator |
 | `GARCHMCPricer` | GARCH-specific with LRNVR measure change |
+
+### BSAnalyticEngine
+
+```python
+class BSAnalyticEngine(PricingEngine):
+    def price(self, instrument, model, market) -> PricingResult: ...
+    def implied_volatility(self, price, instrument, market) -> float: ...
+```
+
+The `implied_volatility()` method inverts the BS formula using Newton-Raphson.
+
+### FFTConfig
+
+Configuration for FFT pricing:
+
+```python
+@dataclass
+class FFTConfig:
+    alpha: float = 1.5     # Dampening factor (must be > 0)
+    n_fft: int = 4096      # FFT grid size (must be power of 2)
+    eta: float = 0.25      # Grid spacing in frequency domain (must be > 0)
+```
+
+**Validation constraints**: `alpha > 0`, `n_fft` must be a power of 2, `eta > 0`.
+
+**Log-strike spacing**: `lambda_spacing = 2 * pi / (n_fft * eta)`.
+
+### CarrMadanFFTEngine
+
+```python
+class CarrMadanFFTEngine:
+    def __init__(self, config: FFTConfig = FFTConfig()): ...
+    def price_call(self, s0, k, t, r, q, cf_func) -> float: ...
+    def price_put(self, s0, k, t, r, q, cf_func) -> float: ...
+    def price_strikes(self, s0, strikes, t, r, q, cf_func) -> np.ndarray: ...
+```
+
+### MCConfig
+
+```python
+@dataclass
+class MCConfig:
+    n_paths: int = 100_000   # Number of Monte Carlo paths
+    n_steps: int = 252       # Number of time steps
+    seed: Optional[int] = None  # Random seed for reproducibility
+    antithetic: bool = True  # Antithetic variance reduction
+```
+
+### MCResult
+
+```python
+@dataclass
+class MCResult:
+    price: float           # Estimated option price
+    std_error: float       # Standard error of estimate
+    n_paths: int           # Number of paths used
+```
+
+### GARCHMCPricer
+
+Monte Carlo pricer for GARCH family with LRNVR (Locally Risk-Neutral Valuation Relationship) measure change.
+
+```python
+class GARCHMCPricer:
+    def __init__(
+        self,
+        garch_type: GARCHType,  # GARCH, NGARCH, or GJR_GARCH
+        sigma0: float, omega: float, alpha: float, beta: float,
+        theta: float = 0.0, gamma: float = 0.0,
+        n_paths: int = 100_000, n_steps: int = 252
+    ): ...
+
+    def price(self, s0, k, t, r, option_type='call', n_paths=None, n_steps=None, seed=None) -> GARCHPricingResult: ...
+    def price_surface(self, s0, strikes, maturities, r, option_type='call') -> np.ndarray: ...
+
+    @property
+    def persistence(self) -> float: ...
+    def long_run_variance(self) -> float: ...
+    def long_run_volatility(self) -> float: ...
+```
+
+**Convenience factories**:
+
+```python
+from backend.engines.monte_carlo.garch_pricer import (
+    create_garch_pricer, create_ngarch_pricer, create_gjr_garch_pricer
+)
+
+pricer = create_garch_pricer(sigma0=0.20, omega=0.002, alpha=0.05, beta=0.90)
+result = pricer.price(s0=100, k=100, t=0.25, r=0.05)
+```
+
+### Vectorized Black-Scholes
+
+**Location**: `backend/engines/vectorized_bs.py`
+
+Numba-compiled vectorized Greeks. Uses `option_type: int` convention (1=call, 0=put).
+
+```python
+def calculate_first_order_greeks(spot, strike, time_to_expiry, risk_free_rate, volatility, option_type: int) -> tuple:
+    """Returns (price, delta, gamma, vega, theta, rho)."""
+
+def calculate_all_greeks(spot, strike, time_to_expiry, risk_free_rate, volatility, option_type: int) -> np.ndarray:
+    """Returns array of 14 Greeks."""
+
+def calculate_greeks_vectorized(spot_range: np.ndarray, strike, time_to_expiry, risk_free_rate, volatility, option_type: int) -> np.ndarray:
+    """Returns (n_spots, 14) array. Numba-parallel over spots."""
+```
+
+**Greek index constants** (for indexing into the 14-element arrays):
+
+```python
+GREEK_PRICE  = 0   # Option price
+GREEK_DELTA  = 1   # dV/dS
+GREEK_GAMMA  = 2   # d2V/dS2
+GREEK_VEGA   = 3   # dV/dsigma (per 1% vol)
+GREEK_THETA  = 4   # dV/dt (per day)
+GREEK_RHO    = 5   # dV/dr (per 1% rate)
+GREEK_VANNA  = 6   # d2V/dS dsigma
+GREEK_VOLGA  = 7   # d2V/dsigma2
+GREEK_CHARM  = 8   # d2V/dS dt
+GREEK_VETA   = 9   # d2V/dsigma dt
+GREEK_SPEED  = 10  # d3V/dS3
+GREEK_ZOMMA  = 11  # d3V/dS2 dsigma
+GREEK_COLOR  = 12  # d3V/dS2 dt
+GREEK_ULTIMA = 13  # d3V/dsigma3
+```
 
 ### Example: Black-Scholes Engine
 
@@ -436,7 +878,7 @@ config = MCConfig(n_paths=100_000, n_steps=252, seed=42)
 engine = MonteCarloEngine(config=config)
 
 result = engine.price(option, model, market)
-print(f"Bates Call Price: ${result.price:.4f} ± ${result.std_error:.4f}")
+print(f"Bates Call Price: ${result.price:.4f} +/- ${result.std_error:.4f}")
 ```
 
 ---
@@ -459,73 +901,176 @@ The simulation module provides Monte Carlo simulators for path generation.
 | `NGARCHSimulator` | NGARCH | Price + volatility paths |
 | `GJRGARCHSimulator` | GJR-GARCH | Price + volatility paths |
 
-### Discretization Schemes
+### SimulationResult
 
-For stochastic volatility models:
+Full API for simulation output analysis.
 
-| Scheme | Description |
-|--------|-------------|
-| `EULER` | Simple Euler (can have negative variance) |
-| `FULL_TRUNCATION` | Variance floored at 0 |
-| `REFLECTION` | Negative variance reflected |
-| `QE` | Quadratic Exponential (most accurate) |
-
-### Example: Path Simulation
+**Core fields**:
 
 ```python
-from backend import HestonSimulator, DiscretizationScheme
-
-# Create simulator
-simulator = HestonSimulator(
-    v0=0.04,
-    kappa=2.0,
-    theta=0.04,
-    xi=0.3,
-    rho=-0.7,
-    scheme=DiscretizationScheme.QE  # Best accuracy
-)
-
-# Simulate paths
-result = simulator.simulate_paths(
-    s0=100.0,
-    mu=0.08,        # Expected return (P-measure)
-    t=1.0,          # 1 year
-    n_paths=10_000,
-    n_steps=252,    # Daily
-    seed=42
-)
-
-print(f"Paths shape: {result.price_paths.shape}")
-print(f"Terminal mean: ${result.terminal_mean:.2f}")
-print(f"Has volatility: {result.has_volatility}")
+class SimulationResult:
+    price_paths: np.ndarray      # Shape (n_paths, n_steps+1)
+    time_grid: np.ndarray        # Shape (n_steps+1,)
+    model_name: str
+    computation_time: float
+    n_paths: int
+    n_steps: int
+    volatility_paths: Optional[np.ndarray] = None  # For SV models
 ```
 
-### Example: Factory Pattern
+**Computed properties**:
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `terminal_prices` | `np.ndarray` | `price_paths[:, -1]` |
+| `mean_path` | `np.ndarray` | Mean across paths at each step |
+| `std_path` | `np.ndarray` | Std dev across paths at each step |
+| `terminal_mean` | `float` | Mean of terminal prices |
+| `terminal_std` | `float` | Std of terminal prices |
+| `has_volatility` | `bool` | Whether volatility paths exist |
+| `terminal_volatility` | `Optional[np.ndarray]` | Terminal vol values |
+| `mean_volatility_path` | `Optional[np.ndarray]` | Mean vol path |
+
+**Methods**:
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `percentile_paths(pcts)` | `(List[float]) -> np.ndarray` | Shape `(len(pcts), n_steps+1)` |
+| `log_returns()` | `() -> np.ndarray` | Period-by-period log returns |
+| `realized_volatility()` | `() -> np.ndarray` | Per-path realized vol |
+
+### StochasticVolatilityMixin
+
+Mixin providing volatility analysis for SV simulators.
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `long_run_variance()` | `float` | Theoretical long-run variance |
+| `long_run_volatility()` | `float` | `sqrt(long_run_variance())` |
+| `feller_condition_satisfied()` | `bool` | `2*kappa*theta > xi^2` |
+
+### GBMSimulator
+
+```python
+class GBMSimulator(BaseSimulator):
+    def __init__(self, sigma: float, antithetic: bool = True): ...
+```
+
+The `antithetic` parameter enables antithetic variance reduction (default: `True`).
+
+### HestonSimulator
+
+```python
+class HestonSimulator(BaseSimulator, StochasticVolatilityMixin):
+    def __init__(
+        self,
+        v0: float, kappa: float, theta: float, xi: float, rho: float,
+        scheme: DiscretizationScheme = DiscretizationScheme.FULL_TRUNCATION
+    ): ...
+```
+
+**Discretization schemes comparison**:
+
+| Scheme | Variance Handling | Accuracy | Speed |
+|--------|------------------|----------|-------|
+| `EULER` | No protection (can go negative) | Low | Fast |
+| `FULL_TRUNCATION` | `V = max(V, 0)` in drift+diffusion | Good | Fast |
+| `REFLECTION` | `V = abs(V)` if negative | Good | Fast |
+| `QE` | Quadratic-Exponential (Andersen 2008) | Best | Moderate |
+
+### DiscretizationScheme Enum
+
+```python
+class DiscretizationScheme(Enum):
+    EULER = auto()
+    FULL_TRUNCATION = auto()
+    REFLECTION = auto()
+    QE = auto()
+
+    @classmethod
+    def default(cls) -> DiscretizationScheme:
+        return cls.FULL_TRUNCATION
+```
+
+### ModelType Enum
+
+```python
+class ModelType(Enum):
+    GBM = "Geometric Brownian Motion"
+    HESTON = "Heston Stochastic Volatility"
+    BATES = "Bates (Heston + Jumps)"
+    MERTON = "Merton Jump Diffusion"
+    GARCH = "GARCH(1,1)"
+    NGARCH = "NGARCH (Nonlinear Asymmetric)"
+    GJR_GARCH = "GJR-GARCH"
+```
+
+**Classification methods**:
+
+| Method | Returns |
+|--------|---------|
+| `ModelType.continuous_time_models()` | `[GBM, HESTON, BATES, MERTON]` |
+| `ModelType.discrete_time_models()` | `[GARCH, NGARCH, GJR_GARCH]` |
+| `ModelType.stochastic_vol_models()` | `[HESTON, BATES, GARCH, NGARCH, GJR_GARCH]` |
+| `ModelType.jump_models()` | `[MERTON, BATES]` |
+
+### Measure Enum
+
+```python
+class Measure(Enum):
+    P_MEASURE = "Physical (Real-World)"
+    Q_MEASURE = "Risk-Neutral"
+```
+
+### Factory Functions
 
 ```python
 from backend import create_simulator, ModelType
 
-# Create by string name
+# By string (case-insensitive, supports aliases)
 sim = create_simulator("heston", v0=0.04, kappa=2.0, theta=0.04, xi=0.3, rho=-0.7)
 
-# Create by enum
+# By enum
 sim = create_simulator(ModelType.GARCH, sigma0=0.2, omega=1e-6, alpha=0.1, beta=0.85)
 ```
 
-### Example: Risk Metrics
+**Convenience factory functions**:
+
+| Function | Signature |
+|----------|-----------|
+| `create_gbm(sigma, antithetic=True)` | `-> GBMSimulator` |
+| `create_heston(v0, kappa, theta, xi, rho, scheme=FULL_TRUNCATION)` | `-> HestonSimulator` |
+| `create_merton(sigma, lambda_j, mu_j, sigma_j)` | `-> MertonSimulator` |
+| `create_bates(v0, kappa, theta, xi, rho, lambda_j, mu_j, sigma_j)` | `-> BatesSimulator` |
+| `create_garch(sigma0, omega, alpha, beta)` | `-> GARCHSimulator` |
+| `create_ngarch(sigma0, omega, alpha, beta, theta)` | `-> NGARCHSimulator` |
+| `create_gjr_garch(sigma0, omega, alpha, beta, gamma)` | `-> GJRGARCHSimulator` |
+
+**Name alias map** (all resolve via `create_simulator()`):
+
+| Alias | Maps To |
+|-------|---------|
+| `"gbm"`, `"geometric_brownian_motion"` | `ModelType.GBM` |
+| `"heston"` | `ModelType.HESTON` |
+| `"merton"`, `"merton_jump"`, `"jump_diffusion"` | `ModelType.MERTON` |
+| `"bates"`, `"heston_jump"` | `ModelType.BATES` |
+| `"garch"`, `"garch11"` | `ModelType.GARCH` |
+| `"ngarch"`, `"nagarch"` | `ModelType.NGARCH` |
+| `"gjr"`, `"gjr_garch"`, `"tgarch"` | `ModelType.GJR_GARCH` |
+
+**Factory helpers**:
 
 ```python
-from backend import GBMSimulator, compute_risk_metrics
+from backend.simulation.factory import list_models, get_model_info
 
-simulator = GBMSimulator(sigma=0.2)
-result = simulator.simulate_paths(s0=100, mu=0.08, t=1.0, n_paths=10_000, n_steps=252)
+# List all available models
+models = list_models()  # {"GBM": "Geometric Brownian Motion", ...}
 
-# Compute risk metrics
-metrics = compute_risk_metrics(result, confidence=0.95)
-
-print(f"VaR (95%): ${metrics.var_95:.2f}")
-print(f"CVaR (95%): ${metrics.cvar_95:.2f}")
-print(f"Max Drawdown: {metrics.max_drawdown*100:.1f}%")
+# Get detailed info
+info = get_model_info("heston")
+# {'name': 'HESTON', 'description': '...', 'class': 'HestonSimulator',
+#  'is_stochastic_vol': True, 'has_jumps': False, 'is_continuous_time': True,
+#  'parameters': {...}}
 ```
 
 ---
@@ -541,67 +1086,98 @@ The instruments module defines tradeable contracts.
 | Class | Description |
 |-------|-------------|
 | `VanillaOption` | Generic vanilla option |
-| `EuropeanCall` | European call (convenience) |
-| `EuropeanPut` | European put (convenience) |
-| `AmericanCall` | American call |
-| `AmericanPut` | American put |
+| `DigitalOption` | Digital (binary) option |
+| `AsianOption` | Asian (average price) option |
+| `BarrierOption` | Barrier option |
+| `LookbackOption` | Lookback option |
+
+**Convenience factory functions** (return configured `VanillaOption` instances):
+
+| Function | Exercise | Type |
+|----------|----------|------|
+| `EuropeanCall(strike, maturity)` | European | Call |
+| `EuropeanPut(strike, maturity)` | European | Put |
+| `AmericanCall(strike, maturity)` | American | Call |
+| `AmericanPut(strike, maturity)` | American | Put |
+| `BermudanCall(strike, maturity)` | Bermudan | Call |
+| `BermudanPut(strike, maturity)` | Bermudan | Put |
+
+**Exotic option factories**:
+
+| Function | Description |
+|----------|-------------|
+| `AsianCall(strike, maturity)` | Asian arithmetic call |
+| `AsianPut(strike, maturity)` | Asian arithmetic put |
+| `BarrierUpOutCall(strike, maturity, barrier)` | Up-and-out call |
+| `BarrierDownOutPut(strike, maturity, barrier)` | Down-and-out put |
+| `LookbackCall(strike, maturity)` | Floating lookback call |
+| `LookbackPut(strike, maturity)` | Floating lookback put |
 
 ### Payoffs
 
-| Class | Description |
-|-------|-------------|
-| `VanillaCallPayoff` | max(S - K, 0) |
-| `VanillaPutPayoff` | max(K - S, 0) |
-| `CompositePayoff` | Combination of payoffs |
+| Class | Formula |
+|-------|---------|
+| `VanillaCallPayoff(strike)` | `max(S - K, 0)` |
+| `VanillaPutPayoff(strike)` | `max(K - S, 0)` |
+| `DigitalCallPayoff(strike)` | `1 if S > K else 0` |
+| `DigitalPutPayoff(strike)` | `1 if S < K else 0` |
+| `CompositePayoff(payoffs, weights)` | Weighted sum |
+| `AsianCallPayoff(strike)` | `max(S_avg - K, 0)` |
+| `AsianPutPayoff(strike)` | `max(K - S_avg, 0)` |
+| `BarrierUpOutCallPayoff(strike, barrier)` | Call that dies if S > barrier |
+| `BarrierDownOutPutPayoff(strike, barrier)` | Put that dies if S < barrier |
+| `LookbackFloatingCallPayoff()` | `S_T - S_min` |
+| `LookbackFloatingPutPayoff()` | `S_max - S_T` |
 
 ### Strategies
 
 | Class | Description | Legs |
 |-------|-------------|------|
 | `OptionStrategy` | Generic multi-leg strategy | Any |
-| `IronCondor` | Short strangle + long wings | 4 |
-| `Straddle` | ATM call + ATM put | 2 |
-| `Butterfly` | Bull + bear spread | 3 |
+| `Straddle(strike, maturity)` | ATM call + ATM put | 2 |
+| `Strangle(put_strike, call_strike, maturity)` | OTM call + OTM put | 2 |
+| `Butterfly(k1, k2, k3, maturity)` | Bull + bear spread | 3 |
+| `IronCondor(k1, k2, k3, k4, maturity)` | Short strangle + long wings | 4 |
+| `IronButterfly(k1, k2, k3, maturity)` | Short straddle + long wings | 4 |
+| `CallSpread(k_long, k_short, maturity)` | Bull call spread | 2 |
+| `PutSpread(k_long, k_short, maturity)` | Bear put spread | 2 |
 
-### Example: Vanilla Option
+**StrategyLeg dataclass**:
 
 ```python
-from backend import VanillaOption, EuropeanCall
-
-# Generic creation
-option = VanillaOption(
-    strike=100.0,
-    expiry=0.5,
-    is_call=True,
-    style="european"
-)
-
-# Convenience class
-call = EuropeanCall(strike=100.0, expiry=0.5)
-put = EuropeanPut(strike=100.0, expiry=0.5)
+@dataclass
+class StrategyLeg:
+    strike: float
+    is_call: bool
+    quantity: int  # positive=long, negative=short
 ```
 
-### Example: Iron Condor Strategy
+`CallSpread` and `PutSpread` expose a `max_profit` property.
+
+### Exercise Schedules
+
+| Class | Description |
+|-------|-------------|
+| `EuropeanExercise(maturity)` | Exercise only at maturity |
+| `AmericanExercise(maturity, start_time=0.0)` | Exercise any time |
+| `BermudanExercise(exercise_dates)` | Exercise at discrete dates |
+
+**Common interface** (all exercise classes):
+
+| Method | Description |
+|--------|-------------|
+| `exercise_type` | Returns `ExerciseStyle` enum |
+| `maturity` | Final exercise date |
+| `can_exercise(t, tol=1e-8)` | Whether exercise is allowed at time `t` |
+| `get_exercise_times(...)` | Array of exercise times |
+
+**BermudanExercise.from_schedule() factory**:
 
 ```python
-from backend import IronCondor, GBMModel, BSAnalyticEngine, MarketEnvironment
-
-# Create iron condor
-strategy = IronCondor(
-    expiry=0.25,
-    put_long_strike=90,
-    put_short_strike=95,
-    call_short_strike=105,
-    call_long_strike=110
+bermudan = BermudanExercise.from_schedule(
+    start=0.25, end=1.0, frequency='monthly'
 )
-
-# Price the strategy
-model = GBMModel(sigma=0.2)
-market = MarketEnvironment(spot=100, rate=0.05)
-engine = BSAnalyticEngine()
-
-result = engine.price(strategy, model, market)
-print(f"Iron Condor Price: ${result.price:.4f}")
+# frequency: 'daily', 'weekly', 'monthly', 'quarterly', 'semiannual', 'annual'
 ```
 
 ---
@@ -612,86 +1188,121 @@ print(f"Iron Condor Price: ${result.price:.4f}")
 
 Comprehensive Greeks calculation with analytic and numerical methods.
 
-### First Order Greeks
+### Scaling Conventions
 
-| Greek | Formula | Interpretation |
-|-------|---------|----------------|
-| Delta (Δ) | ∂V/∂S | Price sensitivity to spot |
-| Vega (ν) | ∂V/∂σ | Price sensitivity to volatility |
-| Theta (Θ) | ∂V/∂t | Time decay |
-| Rho (ρ) | ∂V/∂r | Interest rate sensitivity |
+All Greeks are scaled to market-standard values:
 
-### Second Order Greeks
+| Greek | Scale Factor | Meaning |
+|-------|-------------|---------|
+| Delta | 1 (raw) | Sensitivity to $1 spot move |
+| Gamma | 1 (raw) | Change in delta per $1 spot move |
+| **Vega** | **/ 100** | Per 1% vol change |
+| **Theta** | **/ 365** | Per calendar day |
+| **Rho** | **/ 100** | Per 1% rate change |
+| **Vanna** | **/ 100** | Per 1% vol change |
+| **Volga** | **/ 10,000** | Per 1%^2 vol change |
+| **Charm** | **/ 365** | Per calendar day |
+| **Veta** | **/ 36,500** | Per day per 1% vol |
+| Speed | 1 (raw) | d3V/dS3 |
+| **Zomma** | **/ 100** | Per 1% vol |
+| **Color** | **/ 365** | Per calendar day |
+| **Ultima** | **/ 1,000,000** | Per 1%^3 vol |
 
-| Greek | Formula | Interpretation |
-|-------|---------|----------------|
-| Gamma (Γ) | ∂²V/∂S² | Delta sensitivity |
-| Vanna | ∂²V/∂S∂σ | Delta-vol cross |
-| Volga | ∂²V/∂σ² | Vega convexity |
-| Charm | ∂²V/∂S∂t | Delta decay |
-
-### Third Order Greeks
-
-| Greek | Formula |
-|-------|---------|
-| Speed | ∂³V/∂S³ |
-| Zomma | ∂³V/∂S²∂σ |
-| Color | ∂³V/∂S²∂t |
-| Ultima | ∂³V/∂σ³ |
-
-### Example: Analytic Greeks
+**Constants** (from `backend/greeks/analytic.py`):
 
 ```python
-from backend import bs_all_greeks
-
-greeks = bs_all_greeks(
-    s=100.0,
-    k=100.0,
-    t=0.5,
-    r=0.05,
-    sigma=0.2,
-    is_call=True
-)
-
-print(f"Delta: {greeks['delta']:.4f}")
-print(f"Gamma: {greeks['gamma']:.6f}")
-print(f"Vega: {greeks['vega']:.4f}")
-print(f"Theta: {greeks['theta']:.4f}")
-print(f"Rho: {greeks['rho']:.4f}")
+VEGA_SCALE = 100.0
+RHO_SCALE = 100.0
+THETA_SCALE = 365.0  # DAYS_PER_YEAR
+VANNA_SCALE = 100.0
+VOLGA_SCALE = 10000.0
+CHARM_SCALE = 365.0
+VETA_SCALE = 36500.0  # 365 * 100
+ZOMMA_SCALE = 100.0
+COLOR_SCALE = 365.0
+ULTIMA_SCALE = 1000000.0
 ```
 
-### Example: Calculator Interface
+### Result NamedTuples
 
 ```python
-from backend import GreeksCalculator, VanillaOption, GBMModel, MarketEnvironment
+class FirstOrderGreeks(NamedTuple):
+    delta: float; gamma: float; vega: float; theta: float; rho: float
 
-calculator = GreeksCalculator()
+class SecondOrderGreeks(NamedTuple):
+    vanna: float; volga: float; charm: float; veta: float
 
-option = VanillaOption(strike=100, expiry=0.5, is_call=True)
-model = GBMModel(sigma=0.2)
-market = MarketEnvironment(spot=100, rate=0.05)
+class ThirdOrderGreeks(NamedTuple):
+    speed: float; zomma: float; color: float; ultima: float
 
-greeks = calculator.calculate(option, model, market)
-print(f"Delta: {greeks.delta:.4f}")
-print(f"Gamma: {greeks.gamma:.6f}")
+class AllGreeksResult(NamedTuple):
+    price: float
+    delta: float; gamma: float; vega: float; theta: float; rho: float
+    vanna: float; volga: float; charm: float; veta: float
+    speed: float; zomma: float; color: float; ultima: float
 ```
 
-### Example: Numerical Greeks
+### Analytic Greeks Functions
+
+Individual BS Greeks (from `backend/greeks/analytic.py`, delegate to `backend/utils/math`):
+
+| Function | Signature | Returns |
+|----------|-----------|---------|
+| `bs_delta(s, k, t, r, sigma, is_call)` | `-> float` | Delta |
+| `bs_gamma(s, k, t, r, sigma)` | `-> float` | Gamma (same for calls/puts) |
+| `bs_vega(s, k, t, r, sigma)` | `-> float` | Vega (scaled) |
+| `bs_theta(s, k, t, r, sigma, is_call)` | `-> float` | Theta (scaled) |
+| `bs_rho(s, k, t, r, sigma, is_call)` | `-> float` | Rho (scaled) |
+| `bs_first_order_greeks(s, k, t, r, sigma, is_call)` | `-> FirstOrderGreeks` | All first-order |
+| `bs_second_order_greeks(s, k, t, r, sigma)` | `-> SecondOrderGreeks` | All second-order |
+| `bs_third_order_greeks(s, k, t, r, sigma)` | `-> ThirdOrderGreeks` | All third-order |
+| `bs_all_greeks(s, k, t, r, sigma, is_call)` | `-> AllGreeksResult` | All 14 values |
+
+### GreeksCalculator
 
 ```python
-from backend import finite_difference_greeks
+class GreeksCalculator:
+    def __init__(self, method: str = "analytic"): ...
+    def calculate(self, option, model, market) -> GreeksResult: ...
+    def calculate_surface(self, option, model, market, spot_range, vol_range=None) -> np.ndarray: ...
+```
 
-greeks = finite_difference_greeks(
-    s=100.0,
-    k=100.0,
-    t=0.5,
-    r=0.05,
-    sigma=0.2,
-    is_call=True,
-    h_spot=0.01,
-    h_vol=0.001,
-    h_time=1/252
-)
+### Numerical Greeks
+
+**GreeksBumpConfig**:
+
+```python
+@dataclass(frozen=True)
+class GreeksBumpConfig:
+    spot_bump: float = 0.01        # 1% relative
+    vol_bump: float = 0.01         # 1% absolute
+    time_bump_days: float = 1.0    # 1 calendar day
+    rate_bump: float = 0.0001      # 1 basis point
+```
+
+**Finite difference functions** (all take `price_func: Callable, ...` and bump config):
+
+| Function | Description |
+|----------|-------------|
+| `finite_difference_delta(price_func, spot, bump, **kwargs)` | Central diff delta |
+| `finite_difference_gamma(price_func, spot, bump, **kwargs)` | Central diff gamma |
+| `finite_difference_vega(price_func, vol, bump, **kwargs)` | Central diff vega |
+| `finite_difference_theta(price_func, t, bump_days, **kwargs)` | Forward diff theta |
+| `finite_difference_rho(price_func, r, bump, **kwargs)` | Central diff rho |
+| `finite_difference_vanna(price_func, spot, vol, ...)` | Cross partial |
+| `finite_difference_volga(price_func, vol, bump, ...)` | Vol-vol sensitivity |
+| `finite_difference_charm(price_func, spot, t, ...)` | Spot-time cross |
+| `finite_difference_speed(price_func, spot, bump, ...)` | Third order spot |
+| `finite_difference_zomma(price_func, spot, vol, ...)` | Gamma-vol cross |
+| `finite_difference_color(price_func, spot, t, ...)` | Gamma-time cross |
+| `finite_difference_ultima(price_func, vol, bump, ...)` | Third order vol |
+
+**ModelNumericalGreeks class**:
+
+```python
+class ModelNumericalGreeks:
+    def __init__(self, engine, model, market, config=GreeksBumpConfig()): ...
+    def calculate(self, instrument) -> GreeksResult: ...
 ```
 
 ---
@@ -702,249 +1313,188 @@ greeks = finite_difference_greeks(
 
 Portfolio management with P&L analysis and breakeven calculation.
 
-### Components
+### OptionsPortfolio
 
-| Class | Description |
-|-------|-------------|
-| `OptionsPortfolio` | Main portfolio container |
-| `PortfolioPosition` | Option position |
-| `StockPosition` | Stock/underlying position |
-| `BreakevenCalculator` | Find breakeven prices |
-| `RiskProfile` | Risk analysis results (NamedTuple) |
+Main portfolio container.
 
-### Risk Analysis Functions
+```python
+class OptionsPortfolio:
+    def __init__(self, model=None): ...
+```
 
-| Function | Description |
-|----------|-------------|
-| `check_unlimited_risk()` | Detect unlimited profit/loss from positions |
-| `check_unlimited_risk_from_portfolio()` | Same, from OptionsPortfolio |
-| `analyze_portfolio_risk()` | Full risk analysis returning RiskProfile |
-| `get_risk_summary()` | Human-readable risk summary |
+**Methods**:
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `add(position)` | `(PortfolioPosition) -> None` | Add position |
+| `add_position(position)` | `(PortfolioPosition) -> None` | Alias for `add` |
+| `remove_position(index)` | `(int) -> None` | Remove by index |
+| `clear()` | `() -> None` | Remove all positions |
+| `value(market)` | `(MarketEnvironment) -> float` | Current portfolio value |
+| `pnl_at_expiry(spots)` | `(np.ndarray) -> np.ndarray` | P&L at expiry |
+| `pnl_at_expiry_fast(spots)` | `(np.ndarray) -> np.ndarray` | Numba-optimized P&L |
+| `payoff_curve(spots)` | `(np.ndarray) -> np.ndarray` | Raw payoff (no premium) |
+| `find_breakevens(spot_range)` | `(tuple) -> BreakevenResult` | Find breakeven prices |
+| `risk_metrics_from_simulation(sim_result)` | `(SimulationResult) -> RiskMetrics` | Risk from MC |
+| `greeks(market)` | `(MarketEnvironment) -> GreeksResult` | Aggregate Greeks |
+| `calculate_greeks_surface(market, ...)` | `(...) -> np.ndarray` | Greeks surface |
+| `summary()` | `() -> dict` | Portfolio summary |
+| `total_premium()` | `() -> float` | Net premium paid/received |
+
+**Properties**:
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `positions` | `List[PortfolioPosition]` | All option positions |
+| `stock` | `Optional[StockPosition]` | Stock position if any |
+| `n_positions` | `int` | Number of positions |
+
+### PortfolioPosition
+
+```python
+class PortfolioPosition:
+    def __init__(self, strike, maturity, is_call, quantity, premium=0.0): ...
+```
+
+**Properties**:
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `sign` | `int` | `+1` for long, `-1` for short |
+| `is_long` | `bool` | `quantity > 0` |
+| `strike` | `float` | Strike price |
+| `maturity` | `float` | Time to expiry |
+| `is_call` | `bool` | Call or put |
+
+**Methods**:
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `payoff_at_expiry(spot)` | `(float) -> float` | Single-point payoff |
+| `intrinsic_value(spot)` | `(float) -> float` | `max(S-K, 0)` or `max(K-S, 0)` |
+
+### StockPosition
+
+```python
+class StockPosition:
+    def __init__(self, quantity, entry_price): ...
+```
+
+| Member | Type | Description |
+|--------|------|-------------|
+| `quantity` | `int` | Positive=long, negative=short |
+| `entry_price` | `float` | Entry price |
+| `is_long` | `bool` | `quantity > 0` |
+| `delta` | `float` | Always `quantity` (stock delta = 1 per share) |
+| `pnl(current_price)` | `float` | `quantity * (current_price - entry_price)` |
 
 ### Factory Functions
 
-| Function | Position |
-|----------|----------|
-| `long_call(strike, expiry, premium, quantity)` | +1 call |
-| `short_call(strike, expiry, premium, quantity)` | -1 call |
-| `long_put(strike, expiry, premium, quantity)` | +1 put |
-| `short_put(strike, expiry, premium, quantity)` | -1 put |
-| `long_stock(price, quantity)` | +N shares |
-| `short_stock(price, quantity)` | -N shares |
+| Function | Parameters | Position |
+|----------|------------|----------|
+| `long_call(strike, maturity, premium=0, quantity=1)` | | +1 call |
+| `short_call(strike, maturity, premium=0, quantity=1)` | | -1 call |
+| `long_put(strike, maturity, premium=0, quantity=1)` | | +1 put |
+| `short_put(strike, maturity, premium=0, quantity=1)` | | -1 put |
+| `long_stock(quantity, entry_price)` | | +N shares |
+| `short_stock(quantity, entry_price)` | | -N shares |
 
-### Example: Building a Portfolio
+### P&L Engine (`pnl.py`)
 
-```python
-from backend import (
-    OptionsPortfolio,
-    long_call, short_call, long_put, short_put,
-    find_breakevens_from_portfolio
-)
-
-# Build a bull call spread
-portfolio = OptionsPortfolio()
-portfolio.add_position(long_call(strike=100, expiry=0.25, premium=5.50))
-portfolio.add_position(short_call(strike=110, expiry=0.25, premium=2.00))
-
-# Analyze P&L at various prices
-import numpy as np
-spot_range = np.linspace(80, 130, 100)
-pnl = portfolio.compute_pnl_at_expiry(spot_range)
-
-# Find breakeven points
-breakevens = find_breakevens_from_portfolio(portfolio, spot_range=(80, 130))
-print(f"Breakeven: ${breakevens.breakevens[0]:.2f}")
-```
-
-### Example: Complex Strategy
+**RiskMetrics NamedTuple** (11 fields):
 
 ```python
-from backend import OptionsPortfolio, long_call, short_call, long_put, short_put
-
-# Iron Condor
-portfolio = OptionsPortfolio()
-portfolio.add_position(long_put(strike=90, expiry=0.25, premium=1.00))
-portfolio.add_position(short_put(strike=95, expiry=0.25, premium=2.50))
-portfolio.add_position(short_call(strike=105, expiry=0.25, premium=2.50))
-portfolio.add_position(long_call(strike=110, expiry=0.25, premium=1.00))
-
-# Net credit received
-net_premium = portfolio.total_premium()
-print(f"Net credit: ${net_premium:.2f}")
+class RiskMetrics(NamedTuple):
+    mean_return: float
+    std_return: float
+    var_95: float           # Value at Risk (95%)
+    cvar_95: float          # Conditional VaR (95%)
+    var_99: float           # Value at Risk (99%)
+    cvar_99: float          # Conditional VaR (99%)
+    max_drawdown: float
+    skewness: float
+    kurtosis: float
+    percentile_5: float
+    percentile_95: float
 ```
+
+**P&L functions**:
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `calculate_portfolio_pnl_vectorized(...)` | Numba arrays | Core vectorized P&L |
+| `calculate_portfolio_pnl_with_stock(...)` | Numba arrays | P&L including stock |
+| `compute_risk_metrics(sim_result, confidence)` | `-> RiskMetrics` | Risk from simulation |
+| `compute_payoff_curve(spot_range, ...)` | `-> np.ndarray` | Payoff across spots |
+| `prepare_position_arrays(portfolio)` | `-> tuple` | Convert positions to arrays |
+
+### Breakeven Analysis (`breakeven.py`)
+
+**BreakevenResult**:
+
+```python
+class BreakevenResult:
+    breakevens: List[float]     # Breakeven spot prices
+    max_profit: float           # Maximum profit
+    max_loss: float             # Maximum loss (negative)
+    max_profit_spot: float      # Spot at max profit
+    max_loss_spot: float        # Spot at max loss
+    profit_zones: List[Tuple[float, float]]  # (low, high) ranges
+    loss_zones: List[Tuple[float, float]]    # (low, high) ranges
+```
+
+**BreakevenCalculator class**:
+
+```python
+class BreakevenCalculator:
+    def __init__(self, portfolio): ...
+    def calculate(self, spot_range, n_points=1000) -> BreakevenResult: ...
+```
+
+**Convenience functions**:
+
+```python
+from backend.portfolio import find_breakevens, find_breakevens_from_portfolio
+
+result = find_breakevens_from_portfolio(portfolio, spot_range=(80, 120))
+```
+
+### Greeks Surfaces (`greeks_surfaces.py`)
+
+Numba-parallel 3D Greeks surface calculations.
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `portfolio_greeks_surface_dte(...)` | `-> np.ndarray` | Greeks surface vs DTE |
+| `portfolio_greeks_surface_iv(...)` | `-> np.ndarray` | Greeks surface vs IV |
+| `single_option_greeks_surface_strike(...)` | `-> np.ndarray` | Single option vs strike |
+| `calculate_pnl_curve(...)` | `-> np.ndarray` | P&L curve |
+| `calculate_portfolio_pnl_at_expiry_arrays(...)` | `-> np.ndarray` | Expiry P&L (arrays) |
+
+Same Greek index constants as `vectorized_bs.py` (`GREEK_PRICE`, `GREEK_DELTA`, etc.).
 
 ### Risk Analysis
 
 **Location**: `backend/portfolio/risk_analysis.py`
 
-The risk analysis module provides tools to detect unlimited profit/loss potential and perform comprehensive risk assessment on portfolios.
-
-#### RiskProfile
-
-A named tuple containing complete risk analysis results:
-
 ```python
 class RiskProfile(NamedTuple):
-    has_unlimited_profit: bool      # True if profit is theoretically unlimited
-    has_unlimited_loss: bool        # True if loss is theoretically unlimited
-    max_profit: Optional[float]     # Maximum profit (None if unknown, inf if unlimited)
-    max_loss: Optional[float]       # Maximum loss (None if unknown, -inf if unlimited)
-    max_profit_spot: Optional[float]  # Spot price at max profit
-    max_loss_spot: Optional[float]    # Spot price at max loss
+    has_unlimited_profit: bool
+    has_unlimited_loss: bool
+    max_profit: Optional[float]
+    max_loss: Optional[float]
+    max_profit_spot: Optional[float]
+    max_loss_spot: Optional[float]
 ```
 
-#### Risk Detection Functions
-
-| Function | Input | Description |
-|----------|-------|-------------|
-| `check_unlimited_risk(positions, stock)` | `List[PortfolioPosition]`, `StockPosition` | Detect unlimited risk from position objects |
-| `check_unlimited_risk_from_portfolio(portfolio)` | `OptionsPortfolio` | Convenience wrapper for OptionsPortfolio |
-| `check_unlimited_risk_arrays(...)` | NumPy arrays | Numba-optimized for direct array inputs |
-| `analyze_portfolio_risk(...)` | Positions + breakeven data | Full risk analysis returning `RiskProfile` |
-| `analyze_portfolio_risk_from_portfolio(...)` | `OptionsPortfolio` | Convenience wrapper for full analysis |
-| `get_risk_summary(risk_profile)` | `RiskProfile` | Human-readable risk summary dict |
-
-#### Unlimited Risk Logic
-
-The module uses the following logic to detect unlimited risk:
-
-- **Stock Positions**:
-  - Long stock → Unlimited profit (price can rise indefinitely), limited loss (max loss = entry price)
-  - Short stock → Limited profit (max = entry price), unlimited loss (price can rise indefinitely)
-
-- **Option Positions**:
-  - Net long calls > net short calls → Unlimited profit potential
-  - Net short calls > net long calls → Unlimited loss potential (naked short calls)
-  - Puts alone → Always limited in both directions
-
-#### Example: Basic Risk Detection
-
-```python
-from backend.portfolio import (
-    check_unlimited_risk,
-    long_call, short_call, long_put, short_put,
-    long_stock, short_stock
-)
-
-# Long call: unlimited profit, limited loss
-positions = [long_call(strike=100, maturity=0.5)]
-unlimited_profit, unlimited_loss = check_unlimited_risk(positions)
-print(f"Long Call - Unlimited Profit: {unlimited_profit}")  # True
-print(f"Long Call - Unlimited Loss: {unlimited_loss}")      # False
-
-# Short call (naked): limited profit, unlimited loss
-positions = [short_call(strike=100, maturity=0.5)]
-unlimited_profit, unlimited_loss = check_unlimited_risk(positions)
-print(f"Short Call - Unlimited Profit: {unlimited_profit}") # False
-print(f"Short Call - Unlimited Loss: {unlimited_loss}")     # True
-
-# Bull call spread: limited both ways
-positions = [
-    long_call(strike=100, maturity=0.5),
-    short_call(strike=110, maturity=0.5)
-]
-unlimited_profit, unlimited_loss = check_unlimited_risk(positions)
-print(f"Spread - Unlimited Profit: {unlimited_profit}")     # False
-print(f"Spread - Unlimited Loss: {unlimited_loss}")         # False
-```
-
-#### Example: With Stock Position
-
-```python
-from backend.portfolio import check_unlimited_risk, long_call, long_stock
-
-# Covered call (long stock + short call)
-positions = [short_call(strike=110, maturity=0.5)]
-stock = long_stock(quantity=100, entry_price=100)
-
-unlimited_profit, unlimited_loss = check_unlimited_risk(positions, stock)
-print(f"Covered Call - Unlimited Profit: {unlimited_profit}") # True (from stock)
-print(f"Covered Call - Unlimited Loss: {unlimited_loss}")     # False
-```
-
-#### Example: Using OptionsPortfolio
-
-```python
-from backend.portfolio import (
-    OptionsPortfolio,
-    check_unlimited_risk_from_portfolio,
-    long_call, short_call
-)
-from backend.models import GBMModel
-
-# Build portfolio
-portfolio = OptionsPortfolio(GBMModel(sigma=0.2))
-portfolio.add(long_call(strike=100, maturity=0.5))
-portfolio.add(short_call(strike=110, maturity=0.5))
-
-# Check risk
-unlimited_profit, unlimited_loss = check_unlimited_risk_from_portfolio(portfolio)
-print(f"Portfolio risk: profit={unlimited_profit}, loss={unlimited_loss}")
-```
-
-#### Example: Full Risk Analysis
-
-```python
-from backend.portfolio import (
-    OptionsPortfolio,
-    analyze_portfolio_risk_from_portfolio,
-    find_breakevens_from_portfolio,
-    calculate_portfolio_pnl_at_expiry,
-    get_risk_summary,
-    long_call, short_put
-)
-from backend.models import GBMModel
-import numpy as np
-
-# Build portfolio
-portfolio = OptionsPortfolio(GBMModel(sigma=0.2))
-portfolio.add(long_call(strike=100, maturity=0.5))
-portfolio.add(short_put(strike=95, maturity=0.5))
-
-# Calculate supporting data
-spot_range = np.linspace(70, 130, 200)
-breakeven_result = find_breakevens_from_portfolio(portfolio, spot_range=(70, 130))
-expiry_pnl = calculate_portfolio_pnl_at_expiry(portfolio, spot_range)
-
-# Full risk analysis
-risk_profile = analyze_portfolio_risk_from_portfolio(
-    portfolio, breakeven_result, expiry_pnl
-)
-
-print(f"Unlimited Profit: {risk_profile.has_unlimited_profit}")
-print(f"Unlimited Loss: {risk_profile.has_unlimited_loss}")
-print(f"Max Profit: ${risk_profile.max_profit:.2f}" if risk_profile.max_profit != float('inf') else "Unlimited")
-print(f"Max Loss: ${abs(risk_profile.max_loss):.2f}" if risk_profile.max_loss != float('-inf') else "Unlimited")
-
-# Human-readable summary
-summary = get_risk_summary(risk_profile)
-print(f"\nRisk Level: {summary['risk_level']}")
-print(f"Profit Potential: {summary['profit_potential']}")
-print(f"Loss Potential: {summary['loss_potential']}")
-for warning in summary['warnings']:
-    print(f"⚠️ {warning}")
-```
-
-#### Example: Numba-Optimized Array API
-
-For maximum performance when processing many portfolios:
-
-```python
-from backend.portfolio.risk_analysis import check_unlimited_risk_arrays
-import numpy as np
-
-# Arrays representing portfolio positions
-# option_types: 1.0 = call, -1.0 = put
-# position_types: 1.0 = long, -1.0 = short
-option_types = np.array([1.0, 1.0, -1.0])   # call, call, put
-position_types = np.array([1.0, -1.0, 1.0])  # long, short, long
-quantities = np.array([1.0, 1.0, 1.0])
-
-unlimited_profit, unlimited_loss = check_unlimited_risk_arrays(
-    option_types, position_types, quantities,
-    has_stock=False, stock_is_long=True
-)
-```
+| Function | Description |
+|----------|-------------|
+| `check_unlimited_risk(positions, stock=None)` | `-> (bool, bool)` profit/loss |
+| `check_unlimited_risk_from_portfolio(portfolio)` | Convenience wrapper |
+| `check_unlimited_risk_arrays(option_types, position_types, quantities, ...)` | Numba-optimized |
+| `analyze_portfolio_risk(positions, stock, breakeven_result, expiry_pnl)` | `-> RiskProfile` |
+| `analyze_portfolio_risk_from_portfolio(portfolio, breakeven_result, expiry_pnl)` | Convenience |
+| `get_risk_summary(risk_profile)` | `-> dict` with `risk_level`, `profit_potential`, etc. |
 
 ---
 
@@ -952,41 +1502,62 @@ unlimited_profit, unlimited_loss = check_unlimited_risk_arrays(
 
 **Location**: `backend/utils/`
 
-Low-level utility functions with Numba acceleration.
+Low-level utility functions with Numba acceleration. This module is the **single source of truth** for all BS formulas.
 
-### Functions
+### Distribution Functions
 
-| Function | Description |
-|----------|-------------|
-| `norm_cdf(x)` | Standard normal CDF |
-| `norm_pdf(x)` | Standard normal PDF |
-| `norm_cdf_vec(x)` | Vectorized CDF |
-| `norm_pdf_vec(x)` | Vectorized PDF |
-| `d1_d2(s, k, t, r, sigma)` | Black-Scholes d1, d2 |
-| `bs_price(s, k, t, r, sigma, is_call)` | Black-Scholes price |
-| `implied_vol(price, s, k, t, r, is_call)` | Newton-Raphson IV |
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `norm_cdf(x)` | `(float) -> float` | Standard normal CDF |
+| `norm_pdf(x)` | `(float) -> float` | Standard normal PDF |
+| `norm_inv_cdf(p)` | `(float) -> float` | Inverse CDF (quantile) |
+| `norm_cdf_vec(x)` | `(np.ndarray) -> np.ndarray` | Vectorized CDF |
+| `norm_pdf_vec(x)` | `(np.ndarray) -> np.ndarray` | Vectorized PDF |
 
-### Example
+### Black-Scholes Pricing
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `d1_d2(s, k, t, r, sigma)` | `-> (float, float)` | BS d1 and d2 |
+| `bs_price(s, k, t, r, sigma, is_call)` | `-> float` | BS option price |
+| `implied_vol(price, s, k, t, r, is_call)` | `-> float` | Newton-Raphson IV |
+
+### Financial Utilities
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `discount_factor(r, t)` | `(float, float) -> float` | `exp(-r*t)` |
+| `forward_price(s, r, q, t)` | `(float, float, float, float) -> float` | `S * exp((r-q)*t)` |
+| `log_moneyness(s, k)` | `(float, float) -> float` | `ln(S/K)` |
+| `forward_log_moneyness(s, k, r, q, t)` | `(...) -> float` | `ln(F/K)` |
+| `delta_to_strike(delta, s, t, r, sigma, is_call)` | `(...) -> float` | Convert delta to strike |
+
+### Individual BS Greeks
+
+All Numba-compiled:
+
+| Function | Signature | Returns |
+|----------|-----------|---------|
+| `bs_delta(s, k, t, r, sigma, is_call)` | `-> float` | Raw delta |
+| `bs_gamma(s, k, t, r, sigma)` | `-> float` | Raw gamma |
+| `bs_vega(s, k, t, r, sigma)` | `-> float` | Scaled per 1% vol |
+| `bs_theta(s, k, t, r, sigma, is_call)` | `-> float` | Scaled per day |
+| `bs_rho(s, k, t, r, sigma, is_call)` | `-> float` | Scaled per 1% rate |
+| `bs_greeks(s, k, t, r, sigma, is_call)` | `-> tuple` | `(price, delta, gamma, vega, theta, rho)` |
+| `bs_second_order_greeks(s, k, t, r, sigma)` | `-> tuple` | `(vanna, volga, charm, veta)` |
+| `bs_third_order_greeks(s, k, t, r, sigma)` | `-> tuple` | `(speed, zomma, color, ultima)` |
 
 ```python
-from backend import norm_cdf, d1_d2
-from backend.utils import bs_price, implied_vol
+from backend.utils.math import bs_price, implied_vol, bs_greeks
 
-# Normal distribution
-print(f"N(0) = {norm_cdf(0):.4f}")      # 0.5
-print(f"N(1.96) = {norm_cdf(1.96):.4f}")  # ~0.975
-
-# Black-Scholes d1, d2
-d1, d2 = d1_d2(s=100, k=100, t=0.5, r=0.05, sigma=0.2)
-print(f"d1 = {d1:.4f}, d2 = {d2:.4f}")
-
-# Price calculation
+# Price
 price = bs_price(s=100, k=100, t=0.5, r=0.05, sigma=0.2, is_call=True)
-print(f"BS Price: ${price:.4f}")
 
-# Implied volatility
+# Implied vol
 iv = implied_vol(price=price, s=100, k=100, t=0.5, r=0.05, is_call=True)
-print(f"Implied Vol: {iv*100:.1f}%")
+
+# All first-order Greeks in one call
+price, delta, gamma, vega, theta, rho = bs_greeks(100, 100, 0.5, 0.05, 0.2, True)
 ```
 
 ---
@@ -995,86 +1566,158 @@ print(f"Implied Vol: {iv*100:.1f}%")
 
 **Location**: `backend/math_kernels/`
 
-Low-level numerical kernels for advanced users.
+Low-level numerical kernels. These are **standalone reference implementations** separate from the production simulation pipeline. Useful for custom simulations, research, and validation.
 
-### Components
+### SDE Kernels (`sde_kernels.py`)
 
-| File | Contents |
-|------|----------|
-| `sde_kernels.py` | Euler, Milstein, GBM, Heston QE |
-| `payoff_kernels.py` | Vectorized payoff evaluation |
-| `regression.py` | Longstaff-Schwartz for American options |
-| `random.py` | Correlated Brownian, antithetic variates |
+**Generic schemes**:
 
-### Example: SDE Discretization
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `euler_step(x, drift, diffusion, dt, dw)` | `-> float` | Euler-Maruyama: `x + drift*dt + diffusion*dw` |
+| `milstein_step(x, drift, diffusion, diffusion_prime, dt, dw)` | `-> float` | Milstein with Ito correction |
 
-```python
-from backend.math_kernels.sde_kernels import (
-    euler_step,
-    milstein_step,
-    gbm_exact_step,
-    heston_qe_step
-)
-import numpy as np
+**GBM kernels**:
 
-# GBM exact step
-s0 = 100.0
-dt = 1/252
-r, sigma = 0.05, 0.2
-z = np.random.standard_normal()
-s1 = gbm_exact_step(s0, r, sigma, dt, z)
-```
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `gbm_exact_step(s, r, sigma, dt, dw)` | `-> float` | Exact GBM: `S * exp((r-0.5*sigma^2)*dt + sigma*dw)` |
+| `gbm_euler_step(s, r, sigma, dt, dw)` | `-> float` | Euler approximation |
 
-### Example: Longstaff-Schwartz
+**Heston variance kernels**:
 
-```python
-from backend.math_kernels.regression import longstaff_schwartz_price
-import numpy as np
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `heston_euler_step(v, kappa, theta, xi, dt, dw)` | `-> float` | Naive Euler (can go negative) |
+| `heston_truncation_step(v, kappa, theta, xi, dt, dw)` | `-> float` | `v = max(v, 0)` in drift/diffusion |
+| `heston_reflection_step(v, kappa, theta, xi, dt, dw)` | `-> float` | `v = abs(v)` if negative |
+| `heston_qe_step(v, kappa, theta, xi, dt, u1, u2)` | `-> float` | Quadratic-Exponential (Andersen) |
+| `heston_spot_step(s, r, v, rho, dt, dw_s)` | `-> float` | Spot process update |
 
-# Price American put
-terminals = np.random.lognormal(np.log(100), 0.2, 10000)
-price = longstaff_schwartz_price(
-    paths=terminals.reshape(-1, 1),
-    k=100.0,
-    r=0.05,
-    dt=1.0,
-    is_call=False
-)
-```
+**Jump kernel**:
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `merton_jump_step(s, r, sigma, lambda_j, mu_j, sigma_j, dt, dw, n_jumps, jump_sizes)` | `-> float` | GBM + Poisson jumps |
+
+### Random Number Generation (`random.py`)
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `generate_normal(n, seed=None)` | `-> np.ndarray` | Standard normals |
+| `generate_normal_2d(n_paths, n_steps, seed=None)` | `-> np.ndarray` | 2D normal array |
+| `generate_correlated_normals(n, rho, seed=None)` | `-> (np.ndarray, np.ndarray)` | Correlated pair |
+| `generate_correlated_brownian(n_paths, n_steps, rho, dt, seed=None)` | `-> (np.ndarray, np.ndarray)` | Correlated BM increments |
+| `generate_antithetic_normals(n, seed=None)` | `-> np.ndarray` | `[Z, -Z]` stacked |
+| `generate_antithetic_brownian(n_paths, n_steps, dt, seed=None)` | `-> np.ndarray` | Antithetic BM |
+| `compute_cholesky(rho)` | `-> np.ndarray` | 2x2 Cholesky factor |
+| `cholesky_transform(z1, z2, rho)` | `-> (np.ndarray, np.ndarray)` | Apply correlation |
+| `box_muller_transform(u1, u2)` | `-> (np.ndarray, np.ndarray)` | Uniform to normal |
+
+### Payoff Kernels (`payoff_kernels.py`)
+
+**Vanilla (scalar + vectorized)**:
+
+| Function | Description |
+|----------|-------------|
+| `call_payoff(s, k)` | `max(s - k, 0)` |
+| `put_payoff(s, k)` | `max(k - s, 0)` |
+| `call_payoff_vec(s_arr, k)` | Vectorized call |
+| `put_payoff_vec(s_arr, k)` | Vectorized put |
+
+**Digital**:
+
+| Function | Description |
+|----------|-------------|
+| `digital_call_payoff(s, k)` | `1.0 if s > k else 0.0` |
+| `digital_put_payoff(s, k)` | `1.0 if s < k else 0.0` |
+| `digital_call_payoff_vec(s_arr, k)` | Vectorized |
+| `digital_put_payoff_vec(s_arr, k)` | Vectorized |
+
+**Strategy payoffs**:
+
+| Function | Description |
+|----------|-------------|
+| `straddle_payoff(s_arr, k)` | `call + put` at same strike |
+| `strangle_payoff(s_arr, k_put, k_call)` | OTM call + OTM put |
+| `butterfly_payoff(s_arr, k1, k2, k3)` | Butterfly spread |
+
+**Exotic payoffs**:
+
+| Function | Description |
+|----------|-------------|
+| `asian_arithmetic_payoff(paths, k, is_call)` | Average price vs strike |
+| `barrier_up_out_call_payoff(paths, k, barrier)` | Knocked out if max > barrier |
+| `barrier_down_out_put_payoff(paths, k, barrier)` | Knocked out if min < barrier |
+
+### Regression (`regression.py`)
+
+For Longstaff-Schwartz American option pricing.
+
+**Basis functions**:
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `laguerre_basis(x, n_basis)` | `-> np.ndarray` | Laguerre polynomials |
+| `polynomial_basis(x, n_basis)` | `-> np.ndarray` | Standard polynomials |
+
+**Regression functions**:
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `lstsq_regression(X, y)` | `-> np.ndarray` | Least squares coefficients |
+| `continuation_value(X, coeffs)` | `-> np.ndarray` | Predicted continuation values |
+
+---
+
+## Cross-Cutting Conventions
+
+### Option Type Convention Warning
+
+Different modules use different conventions for `option_type`. Be careful when mixing:
+
+| Module | Convention | Call | Put |
+|--------|-----------|------|-----|
+| `portfolio/pnl.py` | `int` | `1` | `-1` |
+| `portfolio/greeks_surfaces.py` | `int` | `1` | `0` |
+| `engines/vectorized_bs.py` | `int` | `1` | `0` |
+| Model/Engine layer | `bool` | `is_call=True` | `is_call=False` |
+
+When converting between these, ensure the mapping is correct to avoid sign errors.
 
 ---
 
 ## Inter-Module Relationships
 
 ```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                         MODULE DEPENDENCY GRAPH                          │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                          │
-│                            ┌─────────┐                                   │
-│                            │  core   │ ◄── Interfaces & Types            │
-│                            └────┬────┘                                   │
-│                                 │                                        │
-│         ┌───────────────────────┼───────────────────────┐               │
-│         │                       │                       │               │
-│         ▼                       ▼                       ▼               │
-│    ┌─────────┐            ┌─────────┐            ┌─────────────┐        │
-│    │ models  │            │ engines │            │ instruments │        │
-│    └────┬────┘            └────┬────┘            └──────┬──────┘        │
-│         │                      │                        │               │
-│         │   ┌──────────────────┼────────────────┐      │               │
-│         │   │                  │                │      │               │
-│         ▼   ▼                  ▼                ▼      ▼               │
-│    ┌────────────┐        ┌──────────┐     ┌─────────────┐              │
-│    │ simulation │        │  greeks  │     │  portfolio  │              │
-│    └─────┬──────┘        └──────────┘     └─────────────┘              │
-│          │                                                              │
-│          ▼                                                              │
-│    ┌─────────────┐       ┌─────────┐                                   │
-│    │math_kernels │ ◄──── │  utils  │ ◄── Low-level utilities           │
-│    └─────────────┘       └─────────┘                                   │
-│                                                                          │
-└─────────────────────────────────────────────────────────────────────────┘
++-----------------------------------------------------------------------+
+|                         MODULE DEPENDENCY GRAPH                        |
++-----------------------------------------------------------------------+
+|                                                                         |
+|                            +---------+                                  |
+|                            |  core   | <-- Interfaces & Types           |
+|                            +----+----+                                  |
+|                                 |                                       |
+|         +-----------------------+-----------------------+              |
+|         |                       |                       |              |
+|         v                       v                       v              |
+|    +---------+            +---------+            +-------------+       |
+|    | models  |            | engines |            | instruments |       |
+|    +----+----+            +----+----+            +------+------+       |
+|         |                      |                        |              |
+|         |   +------------------+----------------+       |              |
+|         |   |                  |                |       |              |
+|         v   v                  v                v       v              |
+|    +------------+        +----------+     +-------------+             |
+|    | simulation |        |  greeks  |     |  portfolio  |             |
+|    +-----+------+        +----------+     +-------------+             |
+|          |                                                             |
+|          v                                                             |
+|    +-------------+       +---------+                                   |
+|    |math_kernels | <---- |  utils  | <-- Low-level utilities           |
+|    +-------------+       +---------+                                   |
+|                                                                         |
++-----------------------------------------------------------------------+
 
 Arrows indicate "depends on" relationships.
 ```
@@ -1136,39 +1779,26 @@ for name, model in models.items():
     print(f"{name:<10} ${result.price:>9.4f} {engine_name:<15}")
 ```
 
-### Example 2: Volatility Surface Generation
+### Example 2: Numerical Greeks via Bumping
 
 ```python
-from backend import HestonModel, FFTEngine, VanillaOption, MarketEnvironment
-import numpy as np
+from backend import MarketEnvironment, VanillaOption, GBMModel, BSAnalyticEngine
 
-# Model and market
-model = HestonModel(v0=0.04, kappa=2.0, theta=0.04, xi=0.3, rho=-0.7)
+option = VanillaOption(strike=100, expiry=0.5, is_call=True)
+model = GBMModel(sigma=0.2)
 market = MarketEnvironment(spot=100, rate=0.05)
-engine = FFTEngine()
+engine = BSAnalyticEngine()
 
-# Grid
-strikes = np.array([80, 90, 95, 100, 105, 110, 120])
-maturities = np.array([0.1, 0.25, 0.5, 1.0])
+# Numerical delta via market bumping
+h = 0.5
+price_up = engine.price(option, model, market.bump_spot(+h)).price
+price_dn = engine.price(option, model, market.bump_spot(-h)).price
+numerical_delta = (price_up - price_dn) / (2 * h)
 
-# Build surface
-surface = np.zeros((len(strikes), len(maturities)))
-for j, T in enumerate(maturities):
-    for i, K in enumerate(strikes):
-        option = VanillaOption(strike=K, expiry=T, is_call=True)
-        result = engine.price(option, model, market)
-        surface[i, j] = result.price
-
-print("Volatility Surface (Prices):")
-print(f"{'K/T':<8}", end="")
-for T in maturities:
-    print(f"{T:>8.2f}", end="")
-print()
-for i, K in enumerate(strikes):
-    print(f"{K:<8.0f}", end="")
-    for j in range(len(maturities)):
-        print(f"${surface[i,j]:>7.2f}", end="")
-    print()
+# Analytic delta for comparison
+result = engine.price(option, model, market)
+print(f"Numerical delta: {numerical_delta:.6f}")
+print(f"Analytic delta:  {result.greeks.delta:.6f}")
 ```
 
 ### Example 3: Monte Carlo Path Analysis
@@ -1185,35 +1815,27 @@ simulator = HestonSimulator(
 
 # Simulate paths
 result = simulator.simulate_paths(
-    s0=100.0,
-    mu=0.08,
-    t=1.0,
-    n_paths=10_000,
-    n_steps=252,
-    seed=42
+    s0=100.0, mu=0.08, t=1.0,
+    n_paths=10_000, n_steps=252, seed=42
 )
 
 # Analyze results
-print(f"Simulation Summary")
-print(f"=" * 40)
 print(f"Paths: {result.n_paths:,}")
-print(f"Steps: {result.n_steps}")
 print(f"Terminal mean: ${result.terminal_mean:.2f}")
 print(f"Terminal std: ${result.terminal_std:.2f}")
+print(f"Has volatility: {result.has_volatility}")
 
 # Percentiles
 pcts = result.percentile_paths([5, 50, 95])
-print(f"\nTerminal Distribution:")
-print(f"  5th percentile: ${pcts[0, -1]:.2f}")
-print(f" 50th percentile: ${pcts[1, -1]:.2f}")
-print(f" 95th percentile: ${pcts[2, -1]:.2f}")
+print(f"5th percentile: ${pcts[0, -1]:.2f}")
+print(f"50th percentile: ${pcts[1, -1]:.2f}")
+print(f"95th percentile: ${pcts[2, -1]:.2f}")
 
 # Risk metrics
 metrics = compute_risk_metrics(result, confidence=0.95)
-print(f"\nRisk Metrics (95% confidence):")
-print(f"  VaR: ${metrics.var_95:.2f}")
-print(f"  CVaR: ${metrics.cvar_95:.2f}")
-print(f"  Max Drawdown: {metrics.max_drawdown*100:.1f}%")
+print(f"VaR (95%): ${metrics.var_95:.2f}")
+print(f"CVaR (95%): ${metrics.cvar_95:.2f}")
+print(f"Max Drawdown: {metrics.max_drawdown*100:.1f}%")
 ```
 
 ### Example 4: Full Greeks Analysis
@@ -1281,6 +1903,22 @@ print(f"Max Profit: ${result.max_profit:.2f}")
 print(f"Max Loss: ${result.max_loss:.2f}")
 ```
 
+### Example 6: GARCH Pricing
+
+```python
+from backend import GARCHModel
+
+model = GARCHModel(sigma0=0.20, omega=0.002, alpha=0.05, beta=0.90)
+print(f"Persistence: {model.persistence:.3f}")
+print(f"Long-run vol: {model.long_run_volatility:.1%}")
+print(f"Half-life: {model.half_life:.1f} steps")
+
+# Price via LRNVR Monte Carlo
+pricer = model.create_pricer(n_paths=100_000)
+result = pricer.price(s0=100, k=100, t=0.25, r=0.05)
+print(f"Call price: ${result.price:.4f} +/- ${result.std_error:.4f}")
+```
+
 ---
 
 ## Running Smoke Tests
@@ -1304,6 +1942,7 @@ pytest tests/ -v
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 5.2.0 | 2025 | Comprehensive API documentation enrichment |
 | 5.1.0 | 2025 | Added risk_analysis module with RiskProfile, check_unlimited_risk |
 | 5.0.0 | 2025 | Three Pillars Architecture, unified API |
 | 4.0.0 | 2025 | Added GARCH family models |

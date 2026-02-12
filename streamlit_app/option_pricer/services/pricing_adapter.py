@@ -31,7 +31,7 @@ from backend.portfolio.greeks_surfaces import (
     portfolio_greeks_surface_dte as calculate_portfolio_greeks_3d_dte_vectorized,
     portfolio_greeks_surface_iv as calculate_portfolio_greeks_3d_iv_vectorized,
     single_option_greeks_surface_strike as calculate_greeks_3d_strike_vectorized,
-    calculate_portfolio_pnl_at_expiry as _calculate_pnl_numba,
+    calculate_portfolio_pnl_at_expiry_arrays as _calculate_pnl_numba,
     calculate_pnl_curve,
 )
 

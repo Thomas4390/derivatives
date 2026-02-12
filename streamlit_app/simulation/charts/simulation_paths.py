@@ -220,7 +220,7 @@ def render_simulation_chart(
     if has_vol:
         fig.update_xaxes(showticklabels=False, row=1, col=1)
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
 
 # ── helpers ───────────────────────────────────────────────────────────────

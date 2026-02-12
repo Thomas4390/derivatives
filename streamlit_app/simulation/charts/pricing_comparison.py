@@ -132,7 +132,7 @@ def render_legs_summary(legs: list) -> None:
             "Reference": f"${leg['ref_price']:.4f}" if leg.get("ref_price") else "MC only",
             "Method": leg.get("ref_method") or "\u2014",
         })
-    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+    st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -514,7 +514,7 @@ def render_animated_convergence_chart(conv: dict) -> None:
         row=2, col=1,
     )
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -540,4 +540,4 @@ def render_final_table(conv: dict) -> None:
             "|Error|": f"${err:.4f}" if err is not None else "\u2014",
             "Error (%)": f"{err / ref * 100:.2f}%" if err is not None and ref else "\u2014",
         })
-    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+    st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)

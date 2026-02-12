@@ -280,6 +280,6 @@ def render_strike_comparison(
             "FFT Price": "${:.4f}" if fft_prices is not None else None,
             "MC - FFT": "{:+.6f}" if fft_prices is not None else None,
         }),
-        use_container_width=True,
+        width="stretch",
         hide_index=True
     )

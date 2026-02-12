@@ -32,6 +32,7 @@ from components.strategy_builder import render_strategy_builder, export_position
 
 from charts.simulation_paths import render_simulation_chart, render_path_controls
 from charts.pnl_analysis import render_payoff_with_distribution, render_3d_pnl_chart
+from charts.path_explorer import render_path_explorer_chart
 from charts.pricing_comparison import (
     extract_legs,
     compute_reference_prices,
@@ -44,8 +45,10 @@ from charts.pricing_comparison import (
 from services.simulation_service import (
     run_simulation,
     check_model_conditions,
+    get_initial_volatility,
     MODEL_NAMES,
 )
+from components.path_explorer_params import render_explorer_params
 from services.pricing_service import get_available_pricing_methods
 from services.simulation_runner import calculate_pnl_from_paths
 
@@ -151,7 +154,7 @@ with st.sidebar:
                 st.warning(f"⚠️ {c['name']}: {c['message']}")
 
     # Run button
-    if st.button("Run Simulation", type="primary", use_container_width=True, key="run_btn"):
+    if st.button("Run Simulation", type="primary", width="stretch", key="run_btn"):
         with st.spinner("Running simulation..."):
             t0 = time.time()
             try:
@@ -212,6 +215,7 @@ else:
     if has_strategy:
         tab_names.append("P&L Analysis")
     tab_names.append("Pricing Comparison")
+    tab_names.append("Path Explorer")
 
     tabs = st.tabs(tab_names)
 
@@ -346,6 +350,35 @@ else:
         max_n_display = conv["n_done"][-1]
         st.subheader(f"Final Comparison (N = {max_n_display:,})")
         render_final_table(conv)
+
+    # ── TAB: Path Explorer ────────────────────────────────────────────
+    explorer_tab_idx = pricing_tab_idx + 1
+    with tabs[explorer_tab_idx]:
+        explorer_params = render_explorer_params(sim_model)
+
+        try:
+            explorer_result = run_simulation(sim_model, explorer_params)
+
+            render_path_explorer_chart(
+                result=explorer_result,
+                model_key=sim_model,
+                params=explorer_params,
+            )
+
+            # Terminal metrics
+            tp = explorer_result.price_paths[0, -1]
+            s0 = explorer_params["spot"]
+            init_vol = get_initial_volatility(sim_model, explorer_params) * 100
+            m1, m2, m3 = st.columns(3)
+            with m1:
+                st.markdown(metric_card_html("Terminal Price", f"${tp:,.2f}"), unsafe_allow_html=True)
+            with m2:
+                ret = (tp / s0 - 1) * 100
+                st.markdown(metric_card_html("Return", f"{ret:+.2f}%"), unsafe_allow_html=True)
+            with m3:
+                st.markdown(metric_card_html("Initial Vol", f"{init_vol:.1f}%"), unsafe_allow_html=True)
+        except Exception as e:
+            st.error(f"Simulation error: {e}")
 
 
 # ═════════════════════════════════════════════════════════════════════════
