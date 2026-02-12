@@ -125,11 +125,17 @@ def render_path_explorer_chart(
         margin=dict(t=40, b=35, l=60, r=20),
     )
 
+    # Time axis ticks: "Time: X.XX yr"
+    t_max = float(time_grid[-1])
+    _tvals = np.linspace(0, t_max, 6).tolist()
+    _ttexts = [f"Time: {v:.2f} yr" for v in _tvals]
+    _time_kw = dict(tickmode="array", tickvals=_tvals, ticktext=_ttexts)
+
     fig.update_yaxes(title_text="Price ($)", row=1, col=1, **_ax)
-    fig.update_xaxes(showticklabels=False, row=1, col=1, **_ax)
+    fig.update_xaxes(showticklabels=False, row=1, col=1, **_ax, **_time_kw)
 
     fig.update_yaxes(title_text=vol_label, row=2, col=1, **_ax)
-    fig.update_xaxes(title_text="Time (years)", row=2, col=1, **_ax)
+    fig.update_xaxes(row=2, col=1, **_ax, **_time_kw)
 
     st.plotly_chart(fig, use_container_width=True)
 

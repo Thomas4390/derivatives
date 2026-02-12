@@ -22,10 +22,10 @@ from services.simulation_service import get_model_characteristics, get_initial_v
 _GREEN = "rgba(34, 197, 94, 0.40)"
 _RED = "rgba(239, 68, 68, 0.32)"
 _BLUE = "rgba(99, 160, 255, 0.35)"
-_BAND_FILL = "rgba(255, 255, 255, 0.07)"
-_BAND_EDGE = "rgba(255, 255, 255, 0.20)"
+_BAND_FILL = "rgba(250, 204, 21, 0.12)"
+_BAND_EDGE = "#e5b820"
 _VOL_ORANGE = "rgba(255, 160, 50, 0.35)"
-_VOL_BAND_FILL = "rgba(255, 160, 50, 0.08)"
+_VOL_BAND_FILL = "rgba(255, 160, 50, 0.13)"
 _SPOT_LINE = "rgba(255, 255, 255, 0.45)"
 _BE_LINE = "#a78bfa"
 
@@ -109,14 +109,16 @@ def render_simulation_chart(
         pct = result.percentile_paths([5, 95])
         fig.add_trace(go.Scatter(
             x=time_grid, y=pct[1], mode="lines",
-            line=dict(width=0.8, color=_BAND_EDGE, dash="dot"),
-            showlegend=False, hoverinfo="skip",
+            line=dict(width=1.2, color=_BAND_EDGE, dash="dot"),
+            name="95th pct", legendgroup="band",
+            hovertemplate="95th: $%{y:.2f}<extra></extra>",
         ), row=1, col=1)
         fig.add_trace(go.Scatter(
             x=time_grid, y=pct[0], mode="lines",
-            line=dict(width=0.8, color=_BAND_EDGE, dash="dot"),
+            line=dict(width=1.2, color=_BAND_EDGE, dash="dot"),
             fill="tonexty", fillcolor=_BAND_FILL,
-            name="5-95 %", legendgroup="band",
+            name="5th pct", legendgroup="band",
+            hovertemplate="5th: $%{y:.2f}<extra></extra>",
         ), row=1, col=1)
 
     # Spot reference
@@ -208,17 +210,24 @@ def render_simulation_chart(
         margin=dict(t=50, b=35, l=60, r=20),
     )
 
+    # Time axis ticks: "Time: X.XX yr"
+    t_max = float(time_grid[-1])
+    _tvals = np.linspace(0, t_max, 6).tolist()
+    _ttexts = [f"Time: {v:.2f} yr" for v in _tvals]
+    _time_kw = dict(tickmode="array", tickvals=_tvals, ticktext=_ttexts)
+
     # Price subplot axes
     fig.update_yaxes(title_text="Price ($)", row=1, col=1, **_axis_style)
-    fig.update_xaxes(row=1, col=1, **_axis_style)
+    fig.update_xaxes(
+        showticklabels=not has_vol,
+        row=1, col=1, **_axis_style, **_time_kw,
+    )
 
     # Vol subplot axes
     fig.update_yaxes(title_text=vol_label, row=2, col=1, **_axis_style)
-    fig.update_xaxes(title_text="Time (years)", row=2, col=1, **_axis_style)
-
-    # Hide x-axis labels on row 1 when shared
-    if has_vol:
-        fig.update_xaxes(showticklabels=False, row=1, col=1)
+    fig.update_xaxes(
+        row=2, col=1, **_axis_style, **_time_kw,
+    )
 
     st.plotly_chart(fig, width="stretch")
 
