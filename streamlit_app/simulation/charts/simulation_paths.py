@@ -120,14 +120,14 @@ def render_simulation_chart(
             x=time_grid, y=pct[1], mode="lines",
             line=dict(width=1.2, color=_BAND_EDGE, dash="dot"),
             name="95th pct", legendgroup="band",
-            hovertemplate="Time: %{x:.2f} yr | 95th Percentile: $%{y:.2f}<extra></extra>",
+            hovertemplate="Time: %{x:.2f} yr<br>95th Percentile: $%{y:.2f}<extra></extra>",
         ), row=1, col=1)
         fig.add_trace(go.Scatter(
             x=time_grid, y=pct[0], mode="lines",
             line=dict(width=1.2, color=_BAND_EDGE, dash="dot"),
             fill="tonexty", fillcolor=_BAND_FILL,
             name="5th pct", legendgroup="band",
-            hovertemplate="Time: %{x:.2f} yr | 5th Percentile: $%{y:.2f}<extra></extra>",
+            hovertemplate="Time: %{x:.2f} yr<br>5th Percentile: $%{y:.2f}<extra></extra>",
         ), row=1, col=1)
 
     # Spot reference
@@ -173,14 +173,14 @@ def render_simulation_chart(
                 x=time_grid, y=vol_pct[1], mode="lines",
                 line=dict(width=1.2, color=_VOL_BAND_EDGE, dash="dot"),
                 name="Vol 95th", legendgroup="vol_band",
-                hovertemplate="Time: %{x:.2f} yr | Volatility 95th: %{y:.2f}%<extra></extra>",
+                hovertemplate="Time: %{x:.2f} yr<br>Volatility 95th: %{y:.2f}%<extra></extra>",
             ), row=2, col=1)
             fig.add_trace(go.Scatter(
                 x=time_grid, y=vol_pct[0], mode="lines",
                 line=dict(width=1.2, color=_VOL_BAND_EDGE, dash="dot"),
                 fill="tonexty", fillcolor=_VOL_BAND_FILL,
                 name="Vol 5th", legendgroup="vol_band",
-                hovertemplate="Time: %{x:.2f} yr | Volatility 5th: %{y:.2f}%<extra></extra>",
+                hovertemplate="Time: %{x:.2f} yr<br>Volatility 5th: %{y:.2f}%<extra></extra>",
             ), row=2, col=1)
 
         # Vol reference lines (V0, theta, sigma0, long-run)
@@ -193,7 +193,7 @@ def render_simulation_chart(
             x=time_grid, y=[initial_vol] * len(time_grid),
             mode="lines", line=dict(width=1.5, color="rgba(255,160,50,0.7)"),
             name=f"\u03c3 = {initial_vol:.1f} %",
-            hovertemplate="Time: %{x:.2f} yr | Volatility: " + f"{initial_vol:.2f}%" + "<extra></extra>",
+            hovertemplate="Time: %{x:.2f} yr<br>Volatility: " + f"{initial_vol:.2f}%" + "<extra></extra>",
         ), row=2, col=1)
 
     # ── Layout ────────────────────────────────────────────────────────────
@@ -248,7 +248,7 @@ def _add_paths(
     row=1, show_legend=True, hover_fmt="Price: $%{y:.2f}",
 ):
     """Add a batch of paths to the figure."""
-    ht = f"Time: %{{x:.2f}} yr | {hover_fmt}<extra></extra>"
+    ht = f"Time: %{{x:.2f}} yr<br>{hover_fmt}<extra></extra>"
     first = True
     for idx in indices:
         fig.add_trace(go.Scatter(
