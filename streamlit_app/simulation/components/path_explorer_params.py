@@ -9,7 +9,7 @@ Parameter labels use compact centered HTML with serif italic font and proper sub
 import streamlit as st
 from typing import Dict, Any
 
-from config.model_registry import get_parameter_defaults
+from config.model_registry import get_model, get_parameter_defaults
 from utils.model_helpers import check_feller_condition, check_garch_stationarity
 
 # ── Compact centered label ─────────────────────────────────────────────────
@@ -145,6 +145,9 @@ def render_explorer_params(model_key: str) -> Dict[str, Any]:
                 step=0.01, format="%.3f", key=f"{kp}gamma",
                 label_visibility="collapsed",
             )
+
+    else:
+        _render_custom(params, defaults, kp, model_key)
 
     params["model"] = model_key
     return params
@@ -327,3 +330,26 @@ def _render_garch(params: Dict, defaults: Dict, kp: str) -> None:
     else:
         lr_vol = (params["omega"] / (1 - persistence)) ** 0.5 * 100
         st.caption(f"Persistence \u03b1+\u03b2 = {persistence:.3f} \u00b7 Long-run vol \u2248 {lr_vol:.1f}%")
+
+
+def _render_custom(params: Dict, defaults: Dict, kp: str, model_key: str) -> None:
+    """Render custom model parameters dynamically from ModelSpec."""
+    try:
+        model_spec = get_model(model_key)
+    except ValueError:
+        return
+
+    n_params = len(model_spec.parameters)
+    if n_params == 0:
+        return
+
+    cols = st.columns(min(n_params, 5))
+    for i, p in enumerate(model_spec.parameters):
+        with cols[i % len(cols)]:
+            _label(p.display_name)
+            params[p.name] = st.slider(
+                p.name, min_value=float(p.min_value), max_value=float(p.max_value),
+                value=st.session_state.get(f"{kp}{p.name}", float(defaults.get(p.name, p.default))),
+                step=float(p.step), format=p.format, key=f"{kp}{p.name}",
+                label_visibility="collapsed",
+            )

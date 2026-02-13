@@ -10,6 +10,7 @@ dependencies = [
     "streamlit>=1.40.0",
     "plotly>=5.0.0",
     "scipy-stubs~=1.17.0",
+    "streamlit-code-editor>=0.1.22",
 ]
 
 [project.optional-dependencies]

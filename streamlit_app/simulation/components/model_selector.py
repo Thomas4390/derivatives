@@ -41,19 +41,31 @@ def render_model_selector(
 
     # Create options for selectbox
     model_options = {
-        model_key: f"{get_model_icon(model_key)} {MODEL_REGISTRY[model_key].short_name}"
+        model_key: f"{get_model_icon(model_key)} {MODEL_REGISTRY[model_key].name}"
         for model_key in MODEL_DISPLAY_ORDER
     }
 
+    # Append custom model if registered
+    custom = st.session_state.get("custom_model")
+    if custom and "spec" in custom:
+        model_options["custom"] = f"🧪 {custom['spec'].name}"
+
     # Get current selection from session state
     current_model = st.session_state.get("selected_model", "gbm")
+    options_list = list(model_options.keys())
+
+    # Compute index
+    if current_model in options_list:
+        current_index = options_list.index(current_model)
+    else:
+        current_index = 0
 
     # Model selectbox
     selected = st.selectbox(
         "Select Model",
-        options=list(model_options.keys()),
+        options=options_list,
         format_func=lambda x: model_options[x],
-        index=MODEL_DISPLAY_ORDER.index(current_model) if current_model in MODEL_DISPLAY_ORDER else 0,
+        index=current_index,
         key=key,
         on_change=on_change,
         help="Choose simulation model"

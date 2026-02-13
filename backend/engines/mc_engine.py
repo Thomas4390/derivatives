@@ -123,12 +123,18 @@ class MonteCarloEngine(PricingEngine):
         if PricingCapability.MONTE_CARLO not in model.supported_engines:
             return False
 
-        # Only models with hardcoded terminal simulators are supported
+        # Hardcoded models with optimized terminal simulators
         _SUPPORTED = (GBMModel, HestonModel, BatesModel, MertonModel)
-        if not isinstance(model, _SUPPORTED):
-            return False
+        if isinstance(model, _SUPPORTED):
+            return True
 
-        return True
+        # Accept custom models that have drift/diffusion for generic Euler
+        try:
+            model.drift(100.0, 0.04, 0.0, 0.05, 0.0)
+            model.diffusion(100.0, 0.04, 0.0)
+            return True
+        except (NotImplementedError, TypeError, AttributeError):
+            return False
 
     def price(
         self,
@@ -361,7 +367,7 @@ class MonteCarloEngine(PricingEngine):
         elif isinstance(model, MertonModel):
             return self._make_merton_simulator(model, q)
         else:
-            raise ValueError(f"Unsupported model type: {type(model).__name__}")
+            return self._make_generic_simulator(model, q)
 
     def _make_gbm_simulator(
         self, model: GBMModel, q: float
@@ -429,6 +435,20 @@ class MonteCarloEngine(PricingEngine):
                 lambda_j=model.lambda_j, mu_j=model.mu_j, sigma_j=model.sigma_j
             )
             mu = r - q  # Risk-neutral drift (jump adjustment in simulator)
+            return sim.simulate_terminal(s0, mu, t, n_paths, n_steps, seed)
+
+        return simulator
+
+    def _make_generic_simulator(
+        self, model: Model, q: float
+    ) -> Callable[[float, float, float, int, int, Optional[int]], np.ndarray]:
+        """Create generic Euler-Maruyama terminal simulator for custom models."""
+        from backend.simulation.models.generic_euler import GenericEulerSimulator
+
+        sim = GenericEulerSimulator(model)
+
+        def simulator(s0, t, r, n_paths, n_steps, seed=None):
+            mu = r - q
             return sim.simulate_terminal(s0, mu, t, n_paths, n_steps, seed)
 
         return simulator

@@ -51,6 +51,8 @@ from services.simulation_service import (
 from components.path_explorer_params import render_explorer_params
 from services.pricing_service import get_available_pricing_methods
 from services.simulation_runner import calculate_pnl_from_paths
+from components.custom_model_editor import render_custom_model_editor
+from services.simulation_service import get_model_display_name
 
 
 # ── Black-Scholes helpers (for strategy builder premium calc) ────────────
@@ -97,7 +99,7 @@ for key, default in [
 
 render_compact_header(
     title="Monte Carlo Simulation Explorer",
-    subtitle="Option Strategy P&L Analysis with 7 Stochastic Models",
+    subtitle="Option Strategy P&L Analysis with 7+ Stochastic Models",
     badge="Educational Tool",
 )
 
@@ -151,7 +153,7 @@ with st.sidebar:
     if not conditions["is_valid"]:
         for c in conditions["conditions"]:
             if not c["satisfied"]:
-                st.warning(f"⚠️ {c['name']}: {c['message']}")
+                st.warning(f"⚠️ {c['name']}: {c['description']}")
 
     # Run button
     if st.button("Run Simulation", type="primary", width="stretch", key="run_btn"):
@@ -183,48 +185,49 @@ with st.sidebar:
 
 result = st.session_state.get("simulation_result")
 
-if result is None:
-    st.info("Configure parameters in the sidebar and click **Run Simulation**.")
-else:
-    sim_model = st.session_state.get("simulation_model", model_key)
-    sim_params = st.session_state.get("simulation_params", all_params)
-    exec_time = st.session_state.get("execution_time", 0)
-    pnl_result = st.session_state.get("pnl_result")
-    has_strategy = pnl_result is not None
+sim_model = st.session_state.get("simulation_model", model_key)
+sim_params = st.session_state.get("simulation_params", all_params)
+exec_time = st.session_state.get("execution_time", 0)
+pnl_result = st.session_state.get("pnl_result")
+has_strategy = result is not None and pnl_result is not None
 
-    # Precompute shared data
-    pnl_vals = pnl_result["pnl_values"] if has_strategy else None
-    breakevens = None
-    payoff_curve = None
-    spot_range = None
+# Precompute shared data
+pnl_vals = pnl_result["pnl_values"] if has_strategy else None
+breakevens = None
+payoff_curve = None
+spot_range = None
 
-    if has_strategy:
-        pa = sim_params.get("position_arrays", {})
-        if len(pa.get("strikes", [])) > 0:
-            spot = sim_params.get("spot_price", sim_params.get("spot", 100.0))
-            spot_range = np.linspace(spot * 0.5, spot * 1.5, 1000)
-            payoff_curve = compute_payoff_curve(
-                spot_range, pa["strikes"], pa["option_types"],
-                pa["position_types"], pa["quantities"], pa["premiums"],
-                pa.get("stock_quantity", 0.0), pa.get("stock_entry_price", 0.0),
-            )
-            breakevens = find_breakeven_points(payoff_curve, spot_range)
+if has_strategy:
+    pa = sim_params.get("position_arrays", {})
+    if len(pa.get("strikes", [])) > 0:
+        spot = sim_params.get("spot_price", sim_params.get("spot", 100.0))
+        spot_range = np.linspace(spot * 0.5, spot * 1.5, 1000)
+        payoff_curve = compute_payoff_curve(
+            spot_range, pa["strikes"], pa["option_types"],
+            pa["position_types"], pa["quantities"], pa["premiums"],
+            pa.get("stock_quantity", 0.0), pa.get("stock_entry_price", 0.0),
+        )
+        breakevens = find_breakeven_points(payoff_curve, spot_range)
 
-    # ── Tabs ──────────────────────────────────────────────────────────
-    tab_names = ["Simulation"]
-    if has_strategy:
-        tab_names.append("P&L Analysis")
-    tab_names.append("Pricing Comparison")
-    tab_names.append("Path Explorer")
+# ── Tabs (always show all) ────────────────────────────────────────
+tab_names = ["Simulation"]
+if has_strategy:
+    tab_names.append("P&L Analysis")
+tab_names.append("Pricing Comparison")
+tab_names.append("Path Explorer")
+tab_names.append("Custom Model")
 
-    tabs = st.tabs(tab_names)
+tabs = st.tabs(tab_names)
 
-    # ── TAB 1: Simulation ─────────────────────────────────────────────
-    with tabs[0]:
+# ── TAB 1: Simulation ─────────────────────────────────────────────
+with tabs[0]:
+    if result is None:
+        st.info("Configure parameters in the sidebar and click **Run Simulation**.")
+    else:
         # Metric cards
         c1, c2, c3, c4 = st.columns(4)
         with c1:
-            st.markdown(metric_card_html("Model", MODEL_NAMES.get(sim_model, sim_model)), unsafe_allow_html=True)
+            st.markdown(metric_card_html("Model", get_model_display_name(sim_model)), unsafe_allow_html=True)
         with c2:
             st.markdown(metric_card_html("Paths", f"{int(sim_params.get('n_paths', 10000)):,}"), unsafe_allow_html=True)
         with c3:
@@ -275,33 +278,36 @@ else:
                 p5 = np.percentile(tp, 5)
                 st.markdown(metric_card_html("5th Percentile", f"${p5:,.2f}", subtext="Worst 5% of outcomes"), unsafe_allow_html=True)
 
-    # ── TAB 2: P&L Analysis (only when strategy exists) ───────────────
-    if has_strategy:
-        with tabs[1]:
-            # Payoff diagram + MC distribution
-            st.subheader("Payoff Diagram & Simulated P&L")
-            render_payoff_with_distribution(
-                result=result,
-                pnl_values=pnl_vals,
-                payoff_curve=payoff_curve,
-                spot_range=spot_range,
-                breakeven_prices=breakevens,
-                spot=sim_params.get("spot_price", sim_params.get("spot", 100.0)),
-            )
+# ── TAB 2: P&L Analysis (only when strategy exists) ───────────────
+if has_strategy:
+    with tabs[1]:
+        # Payoff diagram + MC distribution
+        st.subheader("Payoff Diagram & Simulated P&L")
+        render_payoff_with_distribution(
+            result=result,
+            pnl_values=pnl_vals,
+            payoff_curve=payoff_curve,
+            spot_range=spot_range,
+            breakeven_prices=breakevens,
+            spot=sim_params.get("spot_price", sim_params.get("spot", 100.0)),
+        )
 
-            st.markdown("---")
+        st.markdown("---")
 
-            # 3D scatter
-            st.subheader("Realized Volatility / Terminal Price / P&L")
-            render_3d_pnl_chart(
-                result=result,
-                pnl_values=pnl_vals,
-                time_horizon=sim_params.get("time_horizon", 1.0),
-            )
+        # 3D scatter
+        st.subheader("Realized Volatility / Terminal Price / P&L")
+        render_3d_pnl_chart(
+            result=result,
+            pnl_values=pnl_vals,
+            time_horizon=sim_params.get("time_horizon", 1.0),
+        )
 
-    # ── TAB: Pricing Comparison ────────────────────────────────────────
-    pricing_tab_idx = 2 if has_strategy else 1
-    with tabs[pricing_tab_idx]:
+# ── TAB: Pricing Comparison ────────────────────────────────────────
+pricing_tab_idx = 2 if has_strategy else 1
+with tabs[pricing_tab_idx]:
+    if result is None:
+        st.info("Run a simulation first to see pricing comparison results.")
+    else:
         spot_val = sim_params.get("spot_price", sim_params.get("spot", 100.0))
         r_val = sim_params.get("risk_free_rate", 0.05)
         T_val = sim_params.get("time_horizon", 1.0)
@@ -309,7 +315,7 @@ else:
 
         methods = get_available_pricing_methods(sim_model)
         method_str = " \u00b7 ".join(m.replace("_", " ").title() for m in methods)
-        st.caption(f"Available methods for {MODEL_NAMES.get(sim_model, sim_model)}: **{method_str}**")
+        st.caption(f"Available methods for {get_model_display_name(sim_model)}: **{method_str}**")
 
         # Extract legs from strategy (read-only)
         pa = sim_params.get("position_arrays", {})
@@ -351,9 +357,12 @@ else:
         st.subheader(f"Final Comparison (N = {max_n_display:,})")
         render_final_table(conv)
 
-    # ── TAB: Path Explorer ────────────────────────────────────────────
-    explorer_tab_idx = pricing_tab_idx + 1
-    with tabs[explorer_tab_idx]:
+# ── TAB: Path Explorer ────────────────────────────────────────────
+explorer_tab_idx = pricing_tab_idx + 1
+with tabs[explorer_tab_idx]:
+    if result is None:
+        st.info("Run a simulation first to explore individual paths.")
+    else:
         explorer_params = render_explorer_params(sim_model)
 
         try:
@@ -380,21 +389,29 @@ else:
         except Exception as e:
             st.error(f"Simulation error: {e}")
 
+# ── TAB: Custom Model ─────────────────────────────────────────────
+custom_tab_idx = explorer_tab_idx + 1
+with tabs[custom_tab_idx]:
+    render_custom_model_editor()
+
 
 # ═════════════════════════════════════════════════════════════════════════
 # MODEL EQUATIONS (collapsible, bottom of page)
 # ═════════════════════════════════════════════════════════════════════════
 
 active_model = st.session_state.get("simulation_model", model_key)
-spec = get_model(active_model)
-with st.expander(f"Model Equations — {spec.name}", expanded=False):
-    st.latex(spec.equation_main)
-    if spec.equation_vol:
-        st.caption("Volatility dynamics:")
-        st.latex(spec.equation_vol)
-    if spec.equation_jump:
-        st.caption("Jump distribution:")
-        st.latex(spec.equation_jump)
+try:
+    spec = get_model(active_model)
+    with st.expander(f"Model Equations — {spec.name}", expanded=False):
+        st.latex(spec.equation_main)
+        if spec.equation_vol:
+            st.caption("Volatility dynamics:")
+            st.latex(spec.equation_vol)
+        if spec.equation_jump:
+            st.caption("Jump distribution:")
+            st.latex(spec.equation_jump)
+except ValueError:
+    pass
 
 # ═════════════════════════════════════════════════════════════════════════
 # FOOTER

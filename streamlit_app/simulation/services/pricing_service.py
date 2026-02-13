@@ -120,6 +120,14 @@ def _create_model(model_key: str, params: Dict[str, Any]):
         )
 
     else:
+        # Try custom model
+        from services.custom_model_service import is_custom_model, get_custom_model_class
+        if is_custom_model(model_key):
+            cls = get_custom_model_class()
+            if cls is not None:
+                from services.simulation_service import _extract_model_params
+                model_params = _extract_model_params(model_key, params)
+                return cls(**model_params)
         return None
 
 
@@ -239,15 +247,14 @@ def price_with_fft(
     Returns:
         Option price or None if not available
     """
-    model_lower = model_key.lower()
-
-    # FFT not available for GARCH family
-    if model_lower in ["garch", "ngarch", "gjr_garch"]:
-        return None
-
     try:
         model = _create_model(model_key, params)
         if model is None:
+            return None
+
+        # Check if model supports FFT
+        from backend.core.result_types import PricingCapability
+        if PricingCapability.FFT not in model.supported_engines:
             return None
 
         engine = FFTEngine(config=FFTConfig(alpha=1.5, n_fft=4096, eta=0.25))
@@ -440,6 +447,18 @@ def get_available_pricing_methods(model_key: str) -> List[str]:
     elif model_lower in ["garch", "ngarch", "gjr_garch"]:
         return ["monte_carlo"]
     else:
+        # Custom model: read from supported_engines
+        from services.custom_model_service import is_custom_model, get_custom_model_class
+        from backend.core.result_types import PricingCapability
+        if is_custom_model(model_key):
+            cls = get_custom_model_class()
+            if cls is not None:
+                instance = cls(**{s["name"]: s["default"] for s in cls.PARAMETER_SPECS})
+                methods = []
+                if PricingCapability.FFT in instance.supported_engines:
+                    methods.append("fft")
+                methods.append("monte_carlo")
+                return methods
         return ["monte_carlo"]
 
 

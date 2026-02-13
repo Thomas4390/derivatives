@@ -144,6 +144,9 @@ def render_model_parameters(
         params.update(_render_gjr_garch_params(defaults, key_prefix))
         _render_stationarity_warning(model_key, params)
 
+    else:
+        params.update(_render_dynamic_params(model_key, defaults, key_prefix))
+
     return params
 
 
@@ -431,14 +434,6 @@ def _render_garch_params(defaults: Dict, key_prefix: str) -> Dict[str, float]:
         )
         st.session_state[f"{key_prefix}_beta"] = params["beta"]
 
-    # Stationarity diagnostic
-    persistence = params["alpha"] + params["beta"]
-    if persistence >= 1.0:
-        st.error(f"α + β = {persistence:.3f} ≥ 1 — non-stationary (IGARCH)")
-    else:
-        lr_vol = (params["omega"] / (1 - persistence)) ** 0.5 * 100
-        st.caption(f"Persistence α+β = {persistence:.3f} · Long-run vol ≈ {lr_vol:.1f}%")
-
     return params
 
 
@@ -482,6 +477,27 @@ def _render_gjr_garch_params(defaults: Dict, key_prefix: str) -> Dict[str, float
     return params
 
 
+def _render_dynamic_params(model_key: str, defaults: Dict, key_prefix: str) -> Dict[str, float]:
+    """Render parameters dynamically from ModelSpec (used for custom models)."""
+    params = {}
+    model = get_model(model_key)
+
+    for p in model.parameters:
+        params[p.name] = st.slider(
+            p.display_name,
+            min_value=float(p.min_value),
+            max_value=float(p.max_value),
+            value=st.session_state.get(f"{key_prefix}_{p.name}", float(defaults.get(p.name, p.default))),
+            step=float(p.step),
+            format=p.format,
+            key=f"{key_prefix}_{p.name}_input",
+            help=p.description,
+        )
+        st.session_state[f"{key_prefix}_{p.name}"] = params[p.name]
+
+    return params
+
+
 def _render_feller_warning(params: Dict[str, float]):
     """Render Feller condition warning."""
     satisfied, lhs, rhs = check_feller_condition(params)
@@ -496,14 +512,30 @@ def _render_feller_warning(params: Dict[str, float]):
 
 
 def _render_stationarity_warning(model_key: str, params: Dict[str, float]):
-    """Render stationarity condition warning."""
+    """Render stationarity condition warning with long-run volatility."""
     stationary, persistence = check_garch_stationarity(model_key, params)
 
+    # Compute long-run vol (same formula as simulation_service.compute_long_run_volatility)
+    omega = params.get("omega", 0.002)
+    lr_vol_str = ""
+    if stationary and (1 - persistence) > 0:
+        lr_vol = (omega / (1 - persistence)) ** 0.5 * 100
+        lr_vol_str = f" · LR vol ≈ {lr_vol:.1f}%"
+
+    # Build persistence formula label
+    model_lower = model_key.lower()
+    if model_lower == "ngarch":
+        formula = "α(1+θ²)+β"
+    elif model_lower == "gjr_garch":
+        formula = "α+β+γ/2"
+    else:
+        formula = "α+β"
+
     if stationary:
-        st.success(f"✓ Stationary: persistence = {persistence:.4f} < 1")
+        st.success(f"✓ Stationary: {formula} = {persistence:.4f} < 1{lr_vol_str}")
     else:
         st.warning(
-            f"⚠️ Non-stationary: persistence = {persistence:.4f} ≥ 1\n\n"
+            f"⚠️ Non-stationary: {formula} = {persistence:.4f} ≥ 1\n\n"
             "Volatility may explode. Consider reducing α or β."
         )
 

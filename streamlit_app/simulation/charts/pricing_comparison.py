@@ -154,7 +154,16 @@ def precompute_convergence(
     n_paths_grid = _build_n_paths_grid(max_n)
 
     model_params = _extract_model_params(model_key, params)
-    simulator = create_simulator(model_key, **model_params)
+
+    from services.custom_model_service import is_custom_model, get_custom_model_class
+    if is_custom_model(model_key):
+        cls = get_custom_model_class()
+        instance = cls(**model_params)
+        from backend.simulation.models.generic_euler import GenericEulerSimulator
+        simulator = GenericEulerSimulator(instance)
+    else:
+        simulator = create_simulator(model_key, **model_params)
+
     has_ref = any(leg.get("ref_price") is not None for leg in legs)
 
     acc = {
@@ -251,9 +260,9 @@ def render_animated_convergence_chart(conv: dict) -> None:
             name=_leg_label(leg),
             legendgroup=f"leg{i}",
             hovertemplate=(
-                f"{_leg_label(leg)}<br>"
-                "N=%{x:,.0f}<br>"
-                "MC=$%{y:.2f}<extra></extra>"
+                f"<b>{_leg_label(leg)}</b><br>"
+                "<b>N Paths:</b> %{x:,.0f}<br>"
+                "<b>MC Price:</b> $%{y:.2f}<extra></extra>"
             ),
         ), row=1, col=1)
 
@@ -287,9 +296,9 @@ def render_animated_convergence_chart(conv: dict) -> None:
             legendgroup=f"leg{i}",
             showlegend=False,
             hovertemplate=(
-                f"{_leg_label(leg)}<br>"
-                "N=%{x:,.0f}<br>"
-                f"{'|Error|' if has_ref else 'SE'}=$%{{y:.4f}}"
+                f"<b>{_leg_label(leg)}</b><br>"
+                "<b>N Paths:</b> %{x:,.0f}<br>"
+                f"<b>{'|Error|' if has_ref else 'Std Error'}:</b> $%{{y:.4f}}"
                 "<extra></extra>"
             ),
         ), row=2, col=1)
@@ -468,7 +477,7 @@ def render_animated_convergence_chart(conv: dict) -> None:
         height=750,
         paper_bgcolor=_PAPER_BG,
         plot_bgcolor=_PLOT_BG,
-        hovermode="x unified",
+        hovermode="closest",
         legend=dict(
             orientation="h",
             yanchor="bottom",

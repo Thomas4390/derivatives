@@ -42,7 +42,10 @@ def get_model_category(model_key: str) -> str:
 
 def get_volatility_type(model_key: str) -> str:
     """Get volatility type description."""
-    model = get_model(model_key)
+    try:
+        model = get_model(model_key)
+    except ValueError:
+        return "Custom"
 
     if not model.has_stochastic_vol:
         return "Constant"
@@ -72,7 +75,10 @@ def get_feature_badges(model_key: str) -> List[Tuple[str, str]]:
     Returns:
         List of (label, color) tuples for Streamlit badges
     """
-    model = get_model(model_key)
+    try:
+        model = get_model(model_key)
+    except ValueError:
+        return [("Custom", "violet"), ("MC", "green")]
     badges = []
 
     # Volatility type
@@ -236,7 +242,7 @@ def check_garch_stationarity(
     Returns:
         (is_stationary, persistence)
     """
-    alpha = params.get("alpha", 0.05)
+    alpha = params.get("alpha", 0.06)
     beta = params.get("beta", 0.90)
 
     model_lower = model_key.lower()
@@ -247,7 +253,7 @@ def check_garch_stationarity(
         theta = params.get("theta_ngarch", params.get("theta", 0.5))
         persistence = alpha * (1 + theta ** 2) + beta
     elif model_lower == "gjr_garch":
-        gamma = params.get("gamma", 0.05)
+        gamma = params.get("gamma", 0.03)
         persistence = alpha + beta + gamma / 2
     else:
         return (True, 0.0)
@@ -304,7 +310,7 @@ def get_model_icon(model_key: str) -> str:
         "ngarch": "📉",
         "gjr_garch": "⚖️",
     }
-    return icons.get(model_key.lower(), "📐")
+    return icons.get(model_key.lower(), "🧪")
 
 
 def get_short_description(model_key: str) -> str:
@@ -318,7 +324,17 @@ def get_short_description(model_key: str) -> str:
         "ngarch": "GARCH with leverage effect",
         "gjr_garch": "Asymmetric response to negative shocks",
     }
-    return descriptions.get(model_key.lower(), "")
+    if model_key.lower() in descriptions:
+        return descriptions[model_key.lower()]
+    # Fallback for custom model
+    try:
+        import streamlit as st
+        custom = st.session_state.get("custom_model")
+        if custom and "spec" in custom:
+            return custom["spec"].description
+    except Exception:
+        pass
+    return "Custom user-defined model"
 
 
 def format_volatility_display(vol: float) -> str:

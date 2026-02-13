@@ -478,9 +478,18 @@ MODEL_REGISTRY: Dict[str, ModelSpec] = {
 
 def get_model(key: str) -> ModelSpec:
     """Get model specification by key."""
-    if key not in MODEL_REGISTRY:
-        raise ValueError(f"Unknown model: {key}. Available: {list(MODEL_REGISTRY.keys())}")
-    return MODEL_REGISTRY[key]
+    if key in MODEL_REGISTRY:
+        return MODEL_REGISTRY[key]
+    # Check for custom model in session state
+    if key == "custom":
+        try:
+            import streamlit as st
+            custom = st.session_state.get("custom_model")
+            if custom and "spec" in custom:
+                return custom["spec"]
+        except Exception:
+            pass
+    raise ValueError(f"Unknown model: {key}. Available: {list(MODEL_REGISTRY.keys())}")
 
 
 def get_all_models() -> Dict[str, ModelSpec]:

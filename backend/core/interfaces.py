@@ -184,7 +184,8 @@ class Model(ABC):
         Vectorized characteristic function for FFT pricing.
 
         Override in models that support efficient FFT pricing.
-        Default implementation falls back to scalar version.
+        Default implementation delegates to characteristic_function(),
+        which typically works because numpy operations vectorize naturally.
 
         Parameters
         ----------
@@ -204,7 +205,7 @@ class Model(ABC):
         np.ndarray
             Array of characteristic function values
         """
-        raise NotImplementedError(f"{self.name} has no vectorized characteristic function")
+        return np.asarray(self.characteristic_function(u, s0, t, r, q))
 
     def drift(self, s: float, v: float, t: float, r: float, q: float) -> float:
         """

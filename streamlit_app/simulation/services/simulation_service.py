@@ -131,6 +131,12 @@ def _extract_model_params(model: str, params: Dict[str, Any]) -> Dict[str, Any]:
         }
 
     else:
+        # Custom model: extract params from PARAMETER_SPECS
+        from services.custom_model_service import is_custom_model, get_custom_model_class
+        if is_custom_model(model):
+            cls = get_custom_model_class()
+            if cls is not None:
+                return {s["name"]: params.get(s["name"], s["default"]) for s in cls.PARAMETER_SPECS}
         raise ValueError(f"Unknown model: {model}")
 
 
@@ -167,7 +173,14 @@ def run_simulation(
     model_params = _extract_model_params(model, params)
 
     # Create simulator
-    simulator = create_simulator(model, **model_params)
+    from services.custom_model_service import is_custom_model, get_custom_model_class
+    if is_custom_model(model):
+        cls = get_custom_model_class()
+        instance = cls(**model_params)
+        from backend.simulation.models.generic_euler import GenericEulerSimulator
+        simulator = GenericEulerSimulator(instance)
+    else:
+        simulator = create_simulator(model, **model_params)
 
     # Run simulation
     result = simulator.simulate_paths(
@@ -210,7 +223,15 @@ def run_terminal_simulation(
         seed = None
 
     model_params = _extract_model_params(model, params)
-    simulator = create_simulator(model, **model_params)
+
+    from services.custom_model_service import is_custom_model, get_custom_model_class
+    if is_custom_model(model):
+        cls = get_custom_model_class()
+        instance = cls(**model_params)
+        from backend.simulation.models.generic_euler import GenericEulerSimulator
+        simulator = GenericEulerSimulator(instance)
+    else:
+        simulator = create_simulator(model, **model_params)
 
     return simulator.simulate_terminal(
         s0=spot,
@@ -273,7 +294,11 @@ def get_model_characteristics(model: str) -> Dict[str, Any]:
     }
 
     if model_lower not in characteristics:
-        raise ValueError(f"Unknown model: {model}")
+        return {
+            "has_stochastic_vol": False,
+            "has_jumps": False,
+            "volatility_type": "custom",
+        }
 
     return characteristics[model_lower]
 
@@ -310,7 +335,7 @@ def check_model_conditions(model: str, params: Dict[str, Any]) -> Dict[str, Any]
 
     elif model_lower == "garch":
         # Stationarity: alpha + beta < 1
-        alpha = params.get("alpha", 0.05)
+        alpha = params.get("alpha", 0.06)
         beta = params.get("beta", 0.90)
         persistence = alpha + beta
         stationary = persistence < 1
@@ -326,7 +351,7 @@ def check_model_conditions(model: str, params: Dict[str, Any]) -> Dict[str, Any]
 
     elif model_lower == "ngarch":
         # Stationarity: alpha*(1 + theta^2) + beta < 1
-        alpha = params.get("alpha", 0.05)
+        alpha = params.get("alpha", 0.06)
         beta = params.get("beta", 0.90)
         theta = params.get("theta_ngarch", params.get("theta", 0.5))
         persistence = alpha * (1 + theta ** 2) + beta
@@ -343,9 +368,9 @@ def check_model_conditions(model: str, params: Dict[str, Any]) -> Dict[str, Any]
 
     elif model_lower == "gjr_garch":
         # Stationarity: alpha + beta + gamma/2 < 1
-        alpha = params.get("alpha", 0.05)
+        alpha = params.get("alpha", 0.06)
         beta = params.get("beta", 0.90)
-        gamma = params.get("gamma", 0.05)
+        gamma = params.get("gamma", 0.03)
         persistence = alpha + beta + gamma / 2
         stationary = persistence < 1
         conditions.append({
@@ -386,9 +411,10 @@ def compute_long_run_volatility(model: str, params: Dict[str, Any]) -> Optional[
         persistence = alpha + beta
         if persistence >= 1:
             return None
-        long_run_var = omega / (1 - persistence)
-        n_steps = params.get("n_steps", 252)
-        return np.sqrt(long_run_var * n_steps)
+        # sigma^2_inf = omega / (1 - alpha - beta), already annualized
+        # (the GARCH simulator uses sigma_t * sqrt(dt) * z for returns,
+        #  so sigma^2_t is annualized variance; no n_steps scaling needed)
+        return np.sqrt(omega / (1 - persistence))
 
     elif model_lower == "ngarch":
         omega = params.get("omega", 0.002)
@@ -398,9 +424,7 @@ def compute_long_run_volatility(model: str, params: Dict[str, Any]) -> Optional[
         persistence = alpha * (1 + theta ** 2) + beta
         if persistence >= 1:
             return None
-        long_run_var = omega / (1 - persistence)
-        n_steps = params.get("n_steps", 252)
-        return np.sqrt(long_run_var * n_steps)
+        return np.sqrt(omega / (1 - persistence))
 
     elif model_lower == "gjr_garch":
         omega = params.get("omega", 0.002)
@@ -410,9 +434,7 @@ def compute_long_run_volatility(model: str, params: Dict[str, Any]) -> Optional[
         persistence = alpha + beta + gamma / 2
         if persistence >= 1:
             return None
-        long_run_var = omega / (1 - persistence)
-        n_steps = params.get("n_steps", 252)
-        return np.sqrt(long_run_var * n_steps)
+        return np.sqrt(omega / (1 - persistence))
 
     elif model_lower in ["gbm", "merton"]:
         return params.get("sigma", 0.20)
@@ -434,6 +456,16 @@ def get_initial_volatility(model: str, params: Dict[str, Any]) -> float:
     elif model_lower in ["garch", "ngarch", "gjr_garch"]:
         return params.get("sigma0", 0.20)
 
+    # Custom model: try to read first vol-like param
+    from services.custom_model_service import is_custom_model, get_custom_model_class
+    if is_custom_model(model):
+        cls = get_custom_model_class()
+        if cls is not None:
+            for s in cls.PARAMETER_SPECS:
+                name = s["name"].lower()
+                if "sigma" in name or "vol" in name or "v0" in name:
+                    val = params.get(s["name"], s["default"])
+                    return val if val < 1.0 else np.sqrt(val)
     return 0.20
 
 
@@ -447,3 +479,17 @@ MODEL_NAMES = {
     "ngarch": "NGARCH (Nonlinear)",
     "gjr_garch": "GJR-GARCH (Threshold)",
 }
+
+
+def get_model_display_name(key: str) -> str:
+    """Get display name for a model, including custom models."""
+    if key in MODEL_NAMES:
+        return MODEL_NAMES[key]
+    try:
+        import streamlit as st
+        custom = st.session_state.get("custom_model")
+        if custom and "spec" in custom:
+            return custom["spec"].name
+    except Exception:
+        pass
+    return key
