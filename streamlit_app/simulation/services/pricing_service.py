@@ -269,7 +269,8 @@ def price_with_fft(
         return result.price
 
     except Exception as e:
-        print(f"FFT pricing failed: {e}")
+        import logging
+        logging.warning(f"FFT pricing failed for model={model_key}: {e}", exc_info=True)
         return None
 
 

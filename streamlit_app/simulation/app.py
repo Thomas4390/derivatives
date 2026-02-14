@@ -322,6 +322,16 @@ with tabs[pricing_tab_idx]:
         legs = extract_legs(pa, spot_val)
         compute_reference_prices(sim_model, sim_params, legs, T_val, spot_val, r_val)
 
+        # Surface diagnostic when expected FFT/analytical pricing failed
+        has_ref_method = "fft" in methods or "analytical" in methods
+        all_mc_only = all(leg.get("ref_price") is None for leg in legs)
+        if has_ref_method and all_mc_only:
+            st.warning(
+                "Reference pricing (FFT/Analytical) returned no result. "
+                "If you just updated the code, try restarting the Streamlit server. "
+                "Check terminal logs for details."
+            )
+
         if not has_strategy:
             st.info("No strategy defined \u2014 pricing a single ATM Call option.")
 

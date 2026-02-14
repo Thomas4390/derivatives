@@ -294,6 +294,19 @@ def get_model_characteristics(model: str) -> Dict[str, Any]:
     }
 
     if model_lower not in characteristics:
+        # Detect features from custom model
+        from services.custom_model_service import is_custom_model, get_custom_model_class
+        if is_custom_model(model):
+            cls = get_custom_model_class()
+            if cls is not None:
+                instance = cls(**{s["name"]: s["default"] for s in cls.PARAMETER_SPECS})
+                has_sv = hasattr(instance, 'variance_drift') and callable(getattr(instance, 'variance_drift', None))
+                has_j = hasattr(instance, 'jump') and callable(getattr(instance, 'jump', None))
+                return {
+                    "has_stochastic_vol": has_sv,
+                    "has_jumps": has_j,
+                    "volatility_type": "stochastic" if has_sv else "custom",
+                }
         return {
             "has_stochastic_vol": False,
             "has_jumps": False,

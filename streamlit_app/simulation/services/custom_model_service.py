@@ -199,6 +199,31 @@ def compile_and_validate(source_code: str) -> ValidationResult:
             tests.append(TestResult("Jump Test", False, f"Jump test failed: {e}"))
             return ValidationResult(tests=tests)
 
+    # 6c. Stochastic volatility test (if model has variance_drift/variance_diffusion)
+    has_stoch_vol = (
+        hasattr(instance, 'variance_drift') and callable(getattr(instance, 'variance_drift', None))
+        and hasattr(instance, 'variance_diffusion') and callable(getattr(instance, 'variance_diffusion', None))
+    )
+    if has_stoch_vol:
+        try:
+            v_arr = np.full(5, 0.04)
+            s_arr = np.full(5, 100.0)
+            vd = instance.variance_drift(v_arr, s_arr, 0.0)
+            vdiff = instance.variance_diffusion(v_arr, s_arr, 0.0)
+            assert len(vd) == 5, f"variance_drift must return array of length 5, got {len(vd)}"
+            assert len(vdiff) == 5, f"variance_diffusion must return array of length 5, got {len(vdiff)}"
+            assert np.all(np.isfinite(vd)), "variance_drift returned non-finite values"
+            assert np.all(np.isfinite(vdiff)), "variance_diffusion returned non-finite values"
+
+            rho = instance.get_correlation() if hasattr(instance, 'get_correlation') else 0.0
+            assert -1.0 <= rho <= 1.0, f"get_correlation() must be in [-1, 1], got {rho}"
+
+            tests.append(TestResult("Stoch Vol Test", True,
+                                    f"variance SDE OK, rho={rho:.2f}"))
+        except Exception as e:
+            tests.append(TestResult("Stoch Vol Test", False, f"Stoch vol test failed: {e}"))
+            return ValidationResult(tests=tests)
+
     # 7. CF test (if FFT supported)
     if PricingCapability.FFT in instance.supported_engines:
         try:
@@ -273,13 +298,21 @@ def register_custom_model(model_class: Type[Model], source_code: str) -> None:
     eq_vol = eq_latex.get("vol")
     eq_jump = eq_latex.get("jump")
 
+    # Detect features from model methods
+    _has_stoch_vol = (
+        hasattr(instance, 'variance_drift') and callable(getattr(instance, 'variance_drift', None))
+    )
+    _has_jumps = (
+        hasattr(instance, 'jump') and callable(getattr(instance, 'jump', None))
+    )
+
     model_spec = ModelSpec(
         key="custom",
         name=instance.name,
         short_name=instance.name,
         category=ModelCategory.CONTINUOUS,
-        has_stochastic_vol=False,
-        has_jumps=False,
+        has_stochastic_vol=_has_stoch_vol,
+        has_jumps=_has_jumps,
         pricing_methods=pricing_methods,
         parameters=param_specs,
         equation_main=eq_main,

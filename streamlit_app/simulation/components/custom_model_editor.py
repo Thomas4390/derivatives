@@ -376,6 +376,102 @@ class ExpOUModel(Model):
         return self._sigma * s
 ''',
 
+    "Heston-Like (Stochastic Volatility)": '''\
+import numpy as np
+from backend.core.interfaces import Model
+from backend.core.result_types import PricingCapability
+
+class HestonLike(Model):
+    """Heston-style stochastic volatility model.
+    dS = (r - q)*S*dt + sqrt(V)*S*dW_1
+    dV = kappa*(theta - V)*dt + xi*sqrt(V)*dW_2
+    corr(dW_1, dW_2) = rho
+
+    Variance V follows a CIR process, correlated with price.
+    Feller condition 2*kappa*theta > xi^2 ensures V > 0.
+
+    The simulator detects variance_drift/variance_diffusion/get_correlation
+    and automatically generates correlated Brownian motions."""
+
+    EQUATION_LATEX = {
+        "main": r"dS = (r - q) \\, S \\, dt + \\sqrt{V} \\, S \\, dW_1",
+        "vol": r"dV = \\kappa(\\theta - V) \\, dt + \\xi \\sqrt{V} \\, dW_2, \\quad \\mathrm{corr}(dW_1, dW_2) = \\rho",
+    }
+
+    PARAMETER_SPECS = [
+        {"name": "v0", "display_name": "Initial Variance (V0)",
+         "default": 0.04, "min_value": 0.001, "max_value": 0.50,
+         "step": 0.005, "description": "Initial variance (0.04 = 20% vol)"},
+        {"name": "kappa", "display_name": "Mean Reversion (kappa)",
+         "default": 2.0, "min_value": 0.1, "max_value": 10.0,
+         "step": 0.1, "description": "Speed of variance mean reversion"},
+        {"name": "theta", "display_name": "Long-Run Variance (theta)",
+         "default": 0.04, "min_value": 0.001, "max_value": 0.50,
+         "step": 0.005, "description": "Long-run variance level (0.04 = 20% vol)"},
+        {"name": "xi", "display_name": "Vol of Vol (xi)",
+         "default": 0.3, "min_value": 0.01, "max_value": 1.5,
+         "step": 0.01, "description": "Volatility of variance (vol-of-vol)"},
+        {"name": "rho", "display_name": "Correlation (rho)",
+         "default": -0.7, "min_value": -0.99, "max_value": 0.99,
+         "step": 0.01, "description": "Price-variance correlation (negative = leverage)"},
+    ]
+
+    def __init__(self, v0=0.04, kappa=2.0, theta=0.04, xi=0.3, rho=-0.7):
+        self._v0 = v0
+        self._kappa = kappa
+        self._theta = theta
+        self._xi = xi
+        self._rho = rho
+
+    @property
+    def name(self):
+        return "Heston-Like Stoch Vol"
+
+    @property
+    def supported_engines(self):
+        return [PricingCapability.MONTE_CARLO, PricingCapability.FFT]
+
+    def get_parameters(self):
+        return {"v0": self._v0, "kappa": self._kappa,
+                "theta": self._theta, "xi": self._xi, "rho": self._rho}
+
+    # ── Price SDE coefficients ──
+    def drift(self, s, v, t, r, q):
+        return (r - q) * s
+
+    def diffusion(self, s, v, t):
+        return np.sqrt(np.maximum(v, 1e-10)) * s
+
+    # ── Variance SDE coefficients (detected by simulator) ──
+    def variance_drift(self, v, s, t):
+        return self._kappa * (self._theta - v)
+
+    def variance_diffusion(self, v, s, t):
+        return self._xi * np.sqrt(np.maximum(v, 1e-10))
+
+    def get_correlation(self):
+        return self._rho
+
+    # ── Characteristic function for FFT pricing ──
+    def characteristic_function(self, u, s0, t, r, q=0.0):
+        """Heston semi-analytical CF."""
+        kappa, theta, xi, rho, v0 = (
+            self._kappa, self._theta, self._xi, self._rho, self._v0
+        )
+        x = np.log(s0)
+        d = np.sqrt((rho * xi * 1j * u - kappa) ** 2
+                     + xi ** 2 * (1j * u + u ** 2))
+        g = (kappa - rho * xi * 1j * u - d) / (kappa - rho * xi * 1j * u + d)
+        C = (r - q) * 1j * u * t + (kappa * theta / xi ** 2) * (
+            (kappa - rho * xi * 1j * u - d) * t
+            - 2.0 * np.log((1.0 - g * np.exp(-d * t)) / (1.0 - g))
+        )
+        D = ((kappa - rho * xi * 1j * u - d) / xi ** 2) * (
+            (1.0 - np.exp(-d * t)) / (1.0 - g * np.exp(-d * t))
+        )
+        return np.exp(C + D * v0 + 1j * u * x)
+''',
+
     "GBM with FFT (Characteristic Function)": '''\
 import numpy as np
 from backend.core.interfaces import Model
