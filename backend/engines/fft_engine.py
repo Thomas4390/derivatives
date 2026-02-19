@@ -96,8 +96,8 @@ class FFTEngine(PricingEngine):
         if instrument.exercise_style != ExerciseStyle.EUROPEAN:
             return False
 
-        # FFT requires a fixed strike
-        if not hasattr(instrument, 'strike'):
+        # Only vanilla options — reject exotics (barrier, Asian, etc.)
+        if not isinstance(instrument, VanillaOption):
             return False
 
         if PricingCapability.FFT not in model.supported_engines:
@@ -149,9 +149,13 @@ class FFTEngine(PricingEngine):
 
         # Price using FFT
         if option.is_call:
-            price = self._fft_engine.price_call(cf, s0, k, t, r, q)
+            price = self._fft_engine.price_call(
+                characteristic_fn=cf, s0=s0, k=k, t=t, r=r, q=q
+            )
         else:
-            price = self._fft_engine.price_put(cf, s0, k, t, r, q)
+            price = self._fft_engine.price_put(
+                characteristic_fn=cf, s0=s0, k=k, t=t, r=r, q=q
+            )
 
         return PricingResult(
             price=price,
@@ -202,7 +206,10 @@ class FFTEngine(PricingEngine):
             return model.characteristic_function_vectorized(u, s0, t, r, q)
 
         # Price all strikes with single FFT
-        return self._fft_engine.price_strikes(cf, s0, strikes, t, r, option.is_call, q)
+        return self._fft_engine.price_strikes(
+            characteristic_fn=cf, s0=s0, strikes=strikes, t=t, r=r,
+            is_call=option.is_call, q=q
+        )
 
     def greeks(
         self,
@@ -285,7 +292,8 @@ class FFTEngine(PricingEngine):
             return cf
 
         return self._fft_engine.price_surface(
-            cf_factory, s0, strikes, maturities, r, is_call, q
+            characteristic_fn_factory=cf_factory, s0=s0, strikes=strikes,
+            maturities=maturities, r=r, is_call=is_call, q=q
         )
 
 

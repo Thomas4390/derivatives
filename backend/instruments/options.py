@@ -270,7 +270,10 @@ class DigitalOption(Instrument):
 
 class AsianOption(Instrument):
     """
-    Asian option based on arithmetic average price.
+    Asian option based on average price.
+
+    Supports arithmetic average (MC pricing) and geometric average
+    (closed-form analytical pricing via Kemna-Vorst 1990).
 
     The payoff depends on the average price over the option's life,
     not just the terminal price.
@@ -285,39 +288,50 @@ class AsianOption(Instrument):
         Time to expiration in years (must be positive)
     is_call : bool
         True for call, False for put
+    average_type : str
+        "arithmetic" or "geometric" (default "arithmetic")
     exercise : ExerciseStyle
         Exercise style (default EUROPEAN)
 
     Examples
     --------
     asian_call = AsianOption(strike=100, maturity=0.5, is_call=True)
+    geo_call = AsianOption(strike=100, maturity=0.5, is_call=True, average_type="geometric")
     """
 
-    __slots__ = ('_strike', '_maturity', '_is_call', '_exercise', '_payoff')
+    __slots__ = ('_strike', '_maturity', '_is_call', '_average_type', '_exercise', '_payoff')
 
     def __init__(
         self,
         strike: float,
         maturity: float,
         is_call: bool = True,
+        average_type: str = "arithmetic",
         exercise: ExerciseStyle = ExerciseStyle.EUROPEAN,
     ):
         if strike <= 0:
             raise ValueError(f"Strike must be positive, got {strike}")
         if maturity <= 0:
             raise ValueError(f"Maturity must be positive, got {maturity}")
+        if average_type not in ("arithmetic", "geometric"):
+            raise ValueError(f"average_type must be 'arithmetic' or 'geometric', got '{average_type}'")
 
         object.__setattr__(self, '_strike', strike)
         object.__setattr__(self, '_maturity', maturity)
         object.__setattr__(self, '_is_call', is_call)
+        object.__setattr__(self, '_average_type', average_type)
         object.__setattr__(self, '_exercise', exercise)
 
-        # Cache the payoff object for immutability
-        if is_call:
-            cached_payoff = AsianCallPayoff(strike)
+        # Cache the payoff object for MC-supported types
+        if average_type == "arithmetic":
+            if is_call:
+                cached_payoff = AsianCallPayoff(strike)
+            else:
+                cached_payoff = AsianPutPayoff(strike)
+            object.__setattr__(self, '_payoff', cached_payoff)
         else:
-            cached_payoff = AsianPutPayoff(strike)
-        object.__setattr__(self, '_payoff', cached_payoff)
+            # Geometric average: analytical only, no MC payoff class
+            object.__setattr__(self, '_payoff', None)
 
     def __setattr__(self, name, value):
         raise AttributeError("AsianOption is immutable")
@@ -341,8 +355,13 @@ class AsianOption(Instrument):
         return self._is_call
 
     @property
-    def payoff(self) -> Payoff:
-        """The payoff function (cached for immutability)."""
+    def average_type(self) -> str:
+        """Average type: 'arithmetic' or 'geometric'."""
+        return self._average_type
+
+    @property
+    def payoff(self):
+        """The payoff function (None for geometric analytical-only types)."""
         return self._payoff
 
     @property
@@ -353,11 +372,14 @@ class AsianOption(Instrument):
     @property
     def option_type(self) -> str:
         """String representation of option type."""
-        return "asian_call" if self._is_call else "asian_put"
+        avg = "geometric_" if self._average_type == "geometric" else ""
+        opt = "call" if self._is_call else "put"
+        return f"asian_{avg}{opt}"
 
     def __repr__(self) -> str:
         opt_type = "Call" if self._is_call else "Put"
-        return f"AsianOption({opt_type}, K={self._strike}, T={self._maturity})"
+        avg_str = "Geometric" if self._average_type == "geometric" else "Arithmetic"
+        return f"AsianOption({avg_str}{opt_type}, K={self._strike}, T={self._maturity})"
 
     def __eq__(self, other) -> bool:
         if not isinstance(other, AsianOption):
@@ -366,19 +388,24 @@ class AsianOption(Instrument):
             self._strike == other._strike and
             self._maturity == other._maturity and
             self._is_call == other._is_call and
+            self._average_type == other._average_type and
             self._exercise == other._exercise
         )
 
     def __hash__(self) -> int:
-        return hash((self._strike, self._maturity, self._is_call, self._exercise))
+        return hash((self._strike, self._maturity, self._is_call, self._average_type, self._exercise))
 
 
 class BarrierOption(Instrument):
     """
-    Barrier option (knock-out).
+    Barrier option (knock-in or knock-out).
 
-    The option is knocked out (becomes worthless) if the price
-    touches the barrier level during the option's life.
+    Knock-out: becomes worthless if the price touches the barrier.
+    Knock-in: only activates if the price touches the barrier.
+
+    Supports all 8 barrier types:
+    - Up-and-Out Call/Put, Down-and-Out Call/Put
+    - Up-and-In Call/Put, Down-and-In Call/Put
 
     Immutable after construction.
 
@@ -393,7 +420,11 @@ class BarrierOption(Instrument):
     is_call : bool
         True for call, False for put
     is_up : bool
-        True for up-and-out, False for down-and-out
+        True for up barrier, False for down barrier
+    is_knock_in : bool
+        True for knock-in, False for knock-out (default False)
+    rebate : float
+        Rebate paid at knockout (default 0.0, must be >= 0)
     exercise : ExerciseStyle
         Exercise style (default EUROPEAN)
 
@@ -401,9 +432,12 @@ class BarrierOption(Instrument):
     --------
     barrier_call = BarrierOption(strike=100, barrier=120, maturity=0.5,
                                   is_call=True, is_up=True)
+    knock_in = BarrierOption(strike=100, barrier=90, maturity=0.5,
+                              is_call=True, is_up=False, is_knock_in=True)
     """
 
-    __slots__ = ('_strike', '_barrier', '_maturity', '_is_call', '_is_up', '_exercise', '_payoff')
+    __slots__ = ('_strike', '_barrier', '_maturity', '_is_call', '_is_up',
+                 '_is_knock_in', '_rebate', '_exercise', '_payoff')
 
     def __init__(
         self,
@@ -412,6 +446,8 @@ class BarrierOption(Instrument):
         maturity: float,
         is_call: bool = True,
         is_up: bool = True,
+        is_knock_in: bool = False,
+        rebate: float = 0.0,
         exercise: ExerciseStyle = ExerciseStyle.EUROPEAN,
     ):
         if strike <= 0:
@@ -420,28 +456,30 @@ class BarrierOption(Instrument):
             raise ValueError(f"Barrier must be positive, got {barrier}")
         if maturity <= 0:
             raise ValueError(f"Maturity must be positive, got {maturity}")
+        if rebate < 0:
+            raise ValueError(f"Rebate must be non-negative, got {rebate}")
 
         object.__setattr__(self, '_strike', strike)
         object.__setattr__(self, '_barrier', barrier)
         object.__setattr__(self, '_maturity', maturity)
         object.__setattr__(self, '_is_call', is_call)
         object.__setattr__(self, '_is_up', is_up)
+        object.__setattr__(self, '_is_knock_in', is_knock_in)
+        object.__setattr__(self, '_rebate', rebate)
         object.__setattr__(self, '_exercise', exercise)
 
-        # Cache the payoff object for immutability
-        # Fail fast for unsupported combinations
-        if is_up and is_call:
-            cached_payoff = BarrierUpOutCallPayoff(strike, barrier)
+        # Cache the payoff object for MC-supported combinations;
+        # set None for types only supported by the analytical engine.
+        if is_knock_in:
+            # Knock-in types have no MC payoff class - analytical only
+            object.__setattr__(self, '_payoff', None)
+        elif is_up and is_call:
+            object.__setattr__(self, '_payoff', BarrierUpOutCallPayoff(strike, barrier))
         elif not is_up and not is_call:
-            cached_payoff = BarrierDownOutPutPayoff(strike, barrier)
+            object.__setattr__(self, '_payoff', BarrierDownOutPutPayoff(strike, barrier))
         else:
-            direction = "up" if is_up else "down"
-            opt_type = "call" if is_call else "put"
-            raise ValueError(
-                f"Unsupported barrier option combination: {direction}-out {opt_type}. "
-                f"Only up-out call and down-out put are currently supported."
-            )
-        object.__setattr__(self, '_payoff', cached_payoff)
+            # Knock-out types without MC payoff (up-out put, down-out call)
+            object.__setattr__(self, '_payoff', None)
 
     def __setattr__(self, name, value):
         raise AttributeError("BarrierOption is immutable")
@@ -475,8 +513,18 @@ class BarrierOption(Instrument):
         return self._is_up
 
     @property
-    def payoff(self) -> Payoff:
-        """The payoff function (cached for immutability)."""
+    def is_knock_in(self) -> bool:
+        """True for knock-in, False for knock-out."""
+        return self._is_knock_in
+
+    @property
+    def rebate(self) -> float:
+        """Rebate paid at knockout."""
+        return self._rebate
+
+    @property
+    def payoff(self):
+        """The payoff function (None for analytical-only types)."""
         return self._payoff
 
     @property
@@ -488,13 +536,16 @@ class BarrierOption(Instrument):
     def option_type(self) -> str:
         """String representation of option type."""
         direction = "up" if self._is_up else "down"
+        knock = "in" if self._is_knock_in else "out"
         opt = "call" if self._is_call else "put"
-        return f"barrier_{direction}_out_{opt}"
+        return f"barrier_{direction}_{knock}_{opt}"
 
     def __repr__(self) -> str:
         opt_type = "Call" if self._is_call else "Put"
         direction = "Up" if self._is_up else "Down"
-        return f"BarrierOption({direction}Out{opt_type}, K={self._strike}, B={self._barrier}, T={self._maturity})"
+        knock = "In" if self._is_knock_in else "Out"
+        rebate_str = f", R={self._rebate}" if self._rebate > 0 else ""
+        return f"BarrierOption({direction}{knock}{opt_type}, K={self._strike}, B={self._barrier}, T={self._maturity}{rebate_str})"
 
     def __eq__(self, other) -> bool:
         if not isinstance(other, BarrierOption):
@@ -505,19 +556,27 @@ class BarrierOption(Instrument):
             self._maturity == other._maturity and
             self._is_call == other._is_call and
             self._is_up == other._is_up and
+            self._is_knock_in == other._is_knock_in and
+            self._rebate == other._rebate and
             self._exercise == other._exercise
         )
 
     def __hash__(self) -> int:
-        return hash((self._strike, self._barrier, self._maturity, self._is_call, self._is_up, self._exercise))
+        return hash((self._strike, self._barrier, self._maturity, self._is_call,
+                     self._is_up, self._is_knock_in, self._rebate, self._exercise))
 
 
 class LookbackOption(Instrument):
     """
-    Lookback option (floating strike).
+    Lookback option (floating or fixed strike).
 
-    Call: S_T - min(S_t) (buy at the lowest price)
-    Put: max(S_t) - S_T (sell at the highest price)
+    Floating strike:
+        Call: S_T - min(S_t) (buy at the lowest price)
+        Put: max(S_t) - S_T (sell at the highest price)
+
+    Fixed strike:
+        Call: max(max(S_t) - K, 0)
+        Put: max(K - min(S_t), 0)
 
     Immutable after construction.
 
@@ -527,35 +586,52 @@ class LookbackOption(Instrument):
         Time to expiration in years (must be positive)
     is_call : bool
         True for call, False for put
+    strike : float, optional
+        Strike price for fixed-strike lookbacks (must be positive if provided)
+    lookback_type : str
+        "floating" or "fixed" (default "floating")
     exercise : ExerciseStyle
         Exercise style (default EUROPEAN)
 
     Examples
     --------
-    lookback_call = LookbackOption(maturity=0.5, is_call=True)
+    floating_call = LookbackOption(maturity=0.5, is_call=True)
+    fixed_call = LookbackOption(maturity=0.5, is_call=True, strike=100, lookback_type="fixed")
     """
 
-    __slots__ = ('_maturity', '_is_call', '_exercise', '_payoff')
+    __slots__ = ('_maturity', '_is_call', '_strike', '_lookback_type', '_exercise', '_payoff')
 
     def __init__(
         self,
         maturity: float,
         is_call: bool = True,
+        strike: float = None,
+        lookback_type: str = "floating",
         exercise: ExerciseStyle = ExerciseStyle.EUROPEAN,
     ):
         if maturity <= 0:
             raise ValueError(f"Maturity must be positive, got {maturity}")
+        if lookback_type not in ("floating", "fixed"):
+            raise ValueError(f"lookback_type must be 'floating' or 'fixed', got '{lookback_type}'")
+        if lookback_type == "fixed" and (strike is None or strike <= 0):
+            raise ValueError(f"Fixed-strike lookback requires positive strike, got {strike}")
 
         object.__setattr__(self, '_maturity', maturity)
         object.__setattr__(self, '_is_call', is_call)
+        object.__setattr__(self, '_strike', strike)
+        object.__setattr__(self, '_lookback_type', lookback_type)
         object.__setattr__(self, '_exercise', exercise)
 
-        # Cache the payoff object for immutability
-        if is_call:
-            cached_payoff = LookbackFloatingCallPayoff()
+        # Cache the payoff object for MC-supported types
+        if lookback_type == "floating":
+            if is_call:
+                cached_payoff = LookbackFloatingCallPayoff()
+            else:
+                cached_payoff = LookbackFloatingPutPayoff()
+            object.__setattr__(self, '_payoff', cached_payoff)
         else:
-            cached_payoff = LookbackFloatingPutPayoff()
-        object.__setattr__(self, '_payoff', cached_payoff)
+            # Fixed-strike lookback: analytical only, no MC payoff class
+            object.__setattr__(self, '_payoff', None)
 
     def __setattr__(self, name, value):
         raise AttributeError("LookbackOption is immutable")
@@ -574,8 +650,18 @@ class LookbackOption(Instrument):
         return self._is_call
 
     @property
-    def payoff(self) -> Payoff:
-        """The payoff function (cached for immutability)."""
+    def strike(self):
+        """Strike price (None for floating-strike lookbacks)."""
+        return self._strike
+
+    @property
+    def lookback_type(self) -> str:
+        """Lookback type: 'floating' or 'fixed'."""
+        return self._lookback_type
+
+    @property
+    def payoff(self):
+        """The payoff function (None for fixed-strike analytical-only types)."""
         return self._payoff
 
     @property
@@ -586,11 +672,14 @@ class LookbackOption(Instrument):
     @property
     def option_type(self) -> str:
         """String representation of option type."""
-        return "lookback_call" if self._is_call else "lookback_put"
+        opt = "call" if self._is_call else "put"
+        return f"lookback_{self._lookback_type}_{opt}"
 
     def __repr__(self) -> str:
         opt_type = "Call" if self._is_call else "Put"
-        return f"LookbackOption({opt_type}, T={self._maturity})"
+        lb_type = self._lookback_type.capitalize()
+        strike_str = f", K={self._strike}" if self._strike is not None else ""
+        return f"LookbackOption({lb_type}{opt_type}{strike_str}, T={self._maturity})"
 
     def __eq__(self, other) -> bool:
         if not isinstance(other, LookbackOption):
@@ -598,11 +687,13 @@ class LookbackOption(Instrument):
         return (
             self._maturity == other._maturity and
             self._is_call == other._is_call and
+            self._strike == other._strike and
+            self._lookback_type == other._lookback_type and
             self._exercise == other._exercise
         )
 
     def __hash__(self) -> int:
-        return hash((self._maturity, self._is_call, self._exercise))
+        return hash((self._maturity, self._is_call, self._strike, self._lookback_type, self._exercise))
 
 
 # =============================================================================
@@ -639,8 +730,8 @@ def create_vanilla_option(
 
     Examples
     --------
-    >>> call = create_vanilla_option(100, 0.5, is_call=True)
-    >>> american_put = create_vanilla_option(100, 0.5, False, ExerciseStyle.AMERICAN)
+    call = create_vanilla_option(100, 0.5, is_call=True)
+    american_put = create_vanilla_option(100, 0.5, False, ExerciseStyle.AMERICAN)
     """
     return VanillaOption(
         strike=strike,
@@ -699,16 +790,62 @@ def AsianPut(strike: float, maturity: float) -> AsianOption:
     return AsianOption(strike=strike, maturity=maturity, is_call=False)
 
 
-def BarrierUpOutCall(strike: float, barrier: float, maturity: float) -> BarrierOption:
+def BarrierUpOutCall(strike: float, barrier: float, maturity: float, rebate: float = 0.0) -> BarrierOption:
     """Create an up-and-out call option."""
     return BarrierOption(strike=strike, barrier=barrier, maturity=maturity,
-                         is_call=True, is_up=True)
+                         is_call=True, is_up=True, is_knock_in=False, rebate=rebate)
 
 
-def BarrierDownOutPut(strike: float, barrier: float, maturity: float) -> BarrierOption:
+def BarrierUpInCall(strike: float, barrier: float, maturity: float) -> BarrierOption:
+    """Create an up-and-in call option."""
+    return BarrierOption(strike=strike, barrier=barrier, maturity=maturity,
+                         is_call=True, is_up=True, is_knock_in=True)
+
+
+def BarrierDownOutCall(strike: float, barrier: float, maturity: float, rebate: float = 0.0) -> BarrierOption:
+    """Create a down-and-out call option."""
+    return BarrierOption(strike=strike, barrier=barrier, maturity=maturity,
+                         is_call=True, is_up=False, is_knock_in=False, rebate=rebate)
+
+
+def BarrierDownInCall(strike: float, barrier: float, maturity: float) -> BarrierOption:
+    """Create a down-and-in call option."""
+    return BarrierOption(strike=strike, barrier=barrier, maturity=maturity,
+                         is_call=True, is_up=False, is_knock_in=True)
+
+
+def BarrierUpOutPut(strike: float, barrier: float, maturity: float, rebate: float = 0.0) -> BarrierOption:
+    """Create an up-and-out put option."""
+    return BarrierOption(strike=strike, barrier=barrier, maturity=maturity,
+                         is_call=False, is_up=True, is_knock_in=False, rebate=rebate)
+
+
+def BarrierUpInPut(strike: float, barrier: float, maturity: float) -> BarrierOption:
+    """Create an up-and-in put option."""
+    return BarrierOption(strike=strike, barrier=barrier, maturity=maturity,
+                         is_call=False, is_up=True, is_knock_in=True)
+
+
+def BarrierDownOutPut(strike: float, barrier: float, maturity: float, rebate: float = 0.0) -> BarrierOption:
     """Create a down-and-out put option."""
     return BarrierOption(strike=strike, barrier=barrier, maturity=maturity,
-                         is_call=False, is_up=False)
+                         is_call=False, is_up=False, is_knock_in=False, rebate=rebate)
+
+
+def BarrierDownInPut(strike: float, barrier: float, maturity: float) -> BarrierOption:
+    """Create a down-and-in put option."""
+    return BarrierOption(strike=strike, barrier=barrier, maturity=maturity,
+                         is_call=False, is_up=False, is_knock_in=True)
+
+
+def AsianGeometricCall(strike: float, maturity: float) -> AsianOption:
+    """Create a geometric Asian call option."""
+    return AsianOption(strike=strike, maturity=maturity, is_call=True, average_type="geometric")
+
+
+def AsianGeometricPut(strike: float, maturity: float) -> AsianOption:
+    """Create a geometric Asian put option."""
+    return AsianOption(strike=strike, maturity=maturity, is_call=False, average_type="geometric")
 
 
 def LookbackCall(maturity: float) -> LookbackOption:
@@ -719,6 +856,16 @@ def LookbackCall(maturity: float) -> LookbackOption:
 def LookbackPut(maturity: float) -> LookbackOption:
     """Create a lookback put option (floating strike)."""
     return LookbackOption(maturity=maturity, is_call=False)
+
+
+def LookbackFixedCall(strike: float, maturity: float) -> LookbackOption:
+    """Create a fixed-strike lookback call option."""
+    return LookbackOption(maturity=maturity, is_call=True, strike=strike, lookback_type="fixed")
+
+
+def LookbackFixedPut(strike: float, maturity: float) -> LookbackOption:
+    """Create a fixed-strike lookback put option."""
+    return LookbackOption(maturity=maturity, is_call=False, strike=strike, lookback_type="fixed")
 
 
 if __name__ == "__main__":

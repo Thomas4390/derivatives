@@ -81,8 +81,8 @@ class BSAnalyticEngine(PricingEngine):
         if instrument.exercise_style != ExerciseStyle.EUROPEAN:
             return False
 
-        # Check instrument has a fixed strike
-        if not hasattr(instrument, 'strike'):
+        # Only vanilla options — reject exotics (barrier, Asian, etc.)
+        if not isinstance(instrument, VanillaOption):
             return False
 
         # Check model supports analytical pricing
@@ -132,7 +132,7 @@ class BSAnalyticEngine(PricingEngine):
         sigma = gbm.sigma
 
         # Black-Scholes formula
-        price = self._bs_price(s0, k, t, r, q, sigma, option.is_call)
+        price = self._bs_price(s0=s0, k=k, t=t, r=r, q=q, sigma=sigma, is_call=option.is_call)
 
         return PricingResult(
             price=price,
@@ -183,7 +183,7 @@ class BSAnalyticEngine(PricingEngine):
 
         from backend.greeks.analytic import bs_all_greeks
 
-        g = bs_all_greeks(s0, k, t, r, q, sigma, is_call)
+        g = bs_all_greeks(s=s0, k=k, t=t, r=r, q=q, sigma=sigma, is_call=is_call)
         return GreeksResult(
             delta=g[1], gamma=g[2], vega=g[3], theta=g[4], rho=g[5],
             vanna=g[6], volga=g[7], charm=g[8], veta=g[9],
@@ -242,8 +242,8 @@ class BSAnalyticEngine(PricingEngine):
         diff = float('nan')
 
         for i in range(max_iter):
-            bs_price = self._bs_price(s0, k, t, r, q, sigma, is_call)
-            vega = self._bs_vega(s0, k, t, r, q, sigma)
+            bs_price = self._bs_price(s0=s0, k=k, t=t, r=r, q=q, sigma=sigma, is_call=is_call)
+            vega = self._bs_vega(s0=s0, k=k, t=t, r=r, q=q, sigma=sigma)
 
             if vega < 1e-12:
                 break
@@ -289,7 +289,7 @@ class BSAnalyticEngine(PricingEngine):
             else:
                 return max(k - s0, 0.0)
 
-        d1, d2 = self._d1_d2(s0, k, t, r, q, sigma)
+        d1, d2 = self._d1_d2(s0=s0, k=k, t=t, r=r, q=q, sigma=sigma)
         discount = np.exp(-r * t)
         forward_discount = np.exp(-q * t)
 
@@ -313,7 +313,7 @@ class BSAnalyticEngine(PricingEngine):
         if t <= 0:
             return 0.0
 
-        d1, _ = self._d1_d2(s0, k, t, r, q, sigma)
+        d1, _ = self._d1_d2(s0=s0, k=k, t=t, r=r, q=q, sigma=sigma)
         forward_discount = np.exp(-q * t)
         return s0 * forward_discount * norm.pdf(d1) * np.sqrt(t)
 

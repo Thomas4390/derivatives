@@ -109,14 +109,20 @@ class MonteCarloEngine(PricingEngine):
 
         MonteCarloEngine requires:
         - European exercise style (for now)
-        - Instrument with fixed strike (for now - path-dependent options need special handling)
+        - Vanilla options only (path-dependent exotics need full path simulation)
         - Model supports Monte Carlo
         """
         if instrument.exercise_style != ExerciseStyle.EUROPEAN:
             return False
 
-        # For now, MC requires a fixed strike
-        # TODO: Support path-dependent options (lookback, asian) with full path simulation
+        # Reject path-dependent exotic options — terminal simulation only
+        from backend.instruments.options import (
+            BarrierOption, AsianOption, DigitalOption, LookbackOption
+        )
+        if isinstance(instrument, (BarrierOption, AsianOption, DigitalOption, LookbackOption)):
+            return False
+
+        # Requires a fixed strike
         if not hasattr(instrument, 'strike'):
             return False
 
@@ -178,7 +184,9 @@ class MonteCarloEngine(PricingEngine):
         # Create generic MC engine and price
         mc_engine = GenericMCEngine(self._config)
         result = mc_engine.price(
-            terminal_simulator, s0, k, t, r, option.is_call,
+            terminal_simulator=terminal_simulator,
+            s0=s0, k=k, t=t, r=r,
+            is_call=option.is_call,
             n_paths=self.n_paths, n_steps=self.n_steps, seed=self.seed
         )
 
@@ -263,7 +271,9 @@ class MonteCarloEngine(PricingEngine):
         terminal_simulator = self._get_terminal_simulator(model, q)
 
         # Simulate terminal prices
-        terminals = terminal_simulator(s0, t, r, self.n_paths, self.n_steps, self.seed)
+        terminals = terminal_simulator(
+            s0=s0, t=t, r=r, n_paths=self.n_paths, n_steps=self.n_steps, seed=self.seed
+        )
 
         # Compute payoffs
         if option.is_call:
@@ -331,7 +341,9 @@ class MonteCarloEngine(PricingEngine):
 
         # Price all strikes
         prices, std_errors = mc_engine.price_strikes(
-            terminal_simulator, s0, strikes, t, r, option.is_call,
+            terminal_simulator=terminal_simulator,
+            s0=s0, strikes=strikes, t=t, r=r,
+            is_call=option.is_call,
             n_paths=self.n_paths, n_steps=self.n_steps, seed=self.seed
         )
 
@@ -381,7 +393,7 @@ class MonteCarloEngine(PricingEngine):
         def simulator(s0, t, r, n_paths, n_steps, seed=None):
             sim = GBMSimulator(sigma=sigma, antithetic=antithetic)
             mu = r - q  # Risk-neutral drift
-            return sim.simulate_terminal(s0, mu, t, n_paths, n_steps, seed)
+            return sim.simulate_terminal(s0=s0, mu=mu, t=t, n_paths=n_paths, n_steps=n_steps, seed=seed)
 
         return simulator
 
@@ -402,7 +414,7 @@ class MonteCarloEngine(PricingEngine):
                 v0=v0, kappa=kappa, theta=theta, xi=xi, rho=rho
             )
             mu = r - q  # Risk-neutral drift
-            return sim.simulate_terminal(s0, mu, t, n_paths, n_steps, seed)
+            return sim.simulate_terminal(s0=s0, mu=mu, t=t, n_paths=n_paths, n_steps=n_steps, seed=seed)
 
         return simulator
 
@@ -419,7 +431,7 @@ class MonteCarloEngine(PricingEngine):
                 lambda_j=model.lambda_j, mu_j=model.mu_j, sigma_j=model.sigma_j
             )
             mu = r - q  # Risk-neutral drift (jump adjustment in simulator)
-            return sim.simulate_terminal(s0, mu, t, n_paths, n_steps, seed)
+            return sim.simulate_terminal(s0=s0, mu=mu, t=t, n_paths=n_paths, n_steps=n_steps, seed=seed)
 
         return simulator
 
@@ -435,7 +447,7 @@ class MonteCarloEngine(PricingEngine):
                 lambda_j=model.lambda_j, mu_j=model.mu_j, sigma_j=model.sigma_j
             )
             mu = r - q  # Risk-neutral drift (jump adjustment in simulator)
-            return sim.simulate_terminal(s0, mu, t, n_paths, n_steps, seed)
+            return sim.simulate_terminal(s0=s0, mu=mu, t=t, n_paths=n_paths, n_steps=n_steps, seed=seed)
 
         return simulator
 
@@ -449,7 +461,7 @@ class MonteCarloEngine(PricingEngine):
 
         def simulator(s0, t, r, n_paths, n_steps, seed=None):
             mu = r - q
-            return sim.simulate_terminal(s0, mu, t, n_paths, n_steps, seed)
+            return sim.simulate_terminal(s0=s0, mu=mu, t=t, n_paths=n_paths, n_steps=n_steps, seed=seed)
 
         return simulator
 

@@ -11,12 +11,14 @@ Author: Thomas
 Created: 2025
 """
 
-from typing import Optional, NamedTuple, Union
+from typing import NamedTuple, Union
 import numpy as np
 
 from backend.core.interfaces import Model, PricingEngine, Instrument
 from backend.core.market import MarketEnvironment
 from backend.core.result_types import GreeksResult
+from backend.utils.math import DAYS_PER_YEAR
+from backend.greeks._instrument_utils import create_decayed_instrument
 
 
 # Valid Greek names for validation
@@ -125,8 +127,13 @@ class GreeksCalculator:
         GreeksResult or AllGreeksResult
             Greeks result
         """
-        # Check if we can use analytic Greeks
-        if self.prefer_analytic and self._can_use_analytic(engine, model):
+        # Check if engine provides its own Greeks (e.g. ExoticAnalyticEngine)
+        if self.prefer_analytic and self._can_use_engine_greeks(engine, instrument, model):
+            return self._engine_greeks(
+                engine, instrument, model, market, include_higher_order
+            )
+        # Check if we can use analytic BS Greeks
+        elif self.prefer_analytic and self._can_use_analytic(engine, instrument, model):
             return self._analytic_greeks(
                 instrument, model, market, include_higher_order
             )
@@ -135,15 +142,66 @@ class GreeksCalculator:
                 engine, instrument, model, market, include_higher_order
             )
 
-    def _can_use_analytic(self, engine: PricingEngine, model: Model) -> bool:
-        """Check if analytic Greeks are available."""
+    def _can_use_engine_greeks(self, engine: PricingEngine, instrument: Instrument, model: Model) -> bool:
+        """Check if the engine provides its own Greeks method for this instrument."""
+        from backend.engines.exotic_engine import ExoticAnalyticEngine
+
+        return (
+            isinstance(engine, ExoticAnalyticEngine) and
+            engine.can_price(instrument, model)
+        )
+
+    def _can_use_analytic(self, engine: PricingEngine, instrument: Instrument, model: Model) -> bool:
+        """Check if analytic BS Greeks are available."""
         from backend.engines import BSAnalyticEngine
         from backend.models.gbm import GBMModel
+        from backend.instruments.options import VanillaOption
 
         return (
             isinstance(engine, BSAnalyticEngine) and
-            isinstance(model, GBMModel)
+            isinstance(model, GBMModel) and
+            isinstance(instrument, VanillaOption)
         )
+
+    def _engine_greeks(
+        self,
+        engine: PricingEngine,
+        instrument: Instrument,
+        model: Model,
+        market: MarketEnvironment,
+        include_higher_order: bool
+    ) -> Union[GreeksResult, AllGreeksResult]:
+        """
+        Calculate Greeks using the engine's own greeks() method.
+
+        Used for engines like ExoticAnalyticEngine that provide their own
+        first-order Greeks via internal finite differences.
+        """
+        first_order = engine.greeks(instrument, model, market)
+        price = engine.price(instrument, model, market).price
+
+        if include_higher_order:
+            higher_order = self._numerical_higher_order_greeks(
+                engine, instrument, model, market
+            )
+            return AllGreeksResult(
+                price=price,
+                delta=first_order.delta,
+                gamma=first_order.gamma,
+                vega=first_order.vega,
+                theta=first_order.theta,
+                rho=first_order.rho,
+                vanna=higher_order['vanna'],
+                volga=higher_order['volga'],
+                charm=higher_order['charm'],
+                veta=higher_order['veta'],
+                speed=higher_order['speed'],
+                zomma=higher_order['zomma'],
+                color=higher_order['color'],
+                ultima=higher_order['ultima'],
+            )
+        else:
+            return first_order
 
     def _analytic_greeks(
         self,
@@ -278,12 +336,11 @@ class GreeksCalculator:
         dict
             Dictionary with vanna, volga, charm, veta, speed, zomma, color, ultima
         """
-        from backend.instruments.options import VanillaOption
         from backend.models.vol_bump import create_vol_bumped_model
 
         # Bump sizes
         h_s = market.spot * self.spot_bump
-        h_t = self.time_bump_days / 365.0
+        h_t = self.time_bump_days / DAYS_PER_YEAR
         h_v = self.vol_bump
 
         # Create bumped models once for efficiency
@@ -319,15 +376,10 @@ class GreeksCalculator:
             v_down = engine.price(instrument, mod_down, m).price
             return (v_up - v_down) / (2 * h_v)
 
-        # Create decayed instrument for time derivatives
+        # Create decayed instrument for time derivatives (works for all types)
         def get_decayed_instrument():
-            if not hasattr(instrument, 'strike'):
-                return None
-            return VanillaOption(
-                strike=instrument.strike,
-                maturity=max(instrument.maturity - h_t, 0.001),
-                is_call=instrument.is_call
-            )
+            new_T = max(instrument.maturity - h_t, 0.001)
+            return create_decayed_instrument(instrument, new_T)
 
         # Initialize results
         result = {

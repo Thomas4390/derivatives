@@ -411,10 +411,10 @@ def unscale_greeks(greeks: AllGreeks) -> AllGreeks:
 
     Examples
     --------
-    >>> scaled = bs_all_greeks(100, 100, 0.25, 0.05, 0.0, 0.20, True)
-    >>> raw = unscale_greeks(scaled)
-    >>> # raw.vega is now the sensitivity to a 1.0 (100%) vol change
-    >>> # raw.theta is now the sensitivity per year (not per day)
+    scaled = bs_all_greeks(100, 100, 0.25, 0.05, 0.0, 0.20, True)
+    raw = unscale_greeks(scaled)
+    # raw.vega is now the sensitivity to a 1.0 (100%) vol change
+    # raw.theta is now the sensitivity per year (not per day)
 
     Notes
     -----

@@ -13,9 +13,17 @@ Author: Thomas
 Created: 2025
 """
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 import numpy as np
 from dataclasses import dataclass
 from typing import Callable, NamedTuple, Optional
+
+if TYPE_CHECKING:
+    from backend.core.interfaces import PricingEngine, Instrument, Model
+    from backend.core.market import MarketEnvironment
 
 
 # =============================================================================
@@ -50,13 +58,11 @@ class GreeksBumpConfig:
 
     Examples
     --------
-    >>> config = GreeksBumpConfig()  # Use defaults
-    >>> config.spot_bump
-    0.01
+    config = GreeksBumpConfig()  # Use defaults
+    # config.spot_bump == 0.01
 
-    >>> custom = GreeksBumpConfig(spot_bump=0.005, vol_bump=0.001)
-    >>> custom.spot_bump
-    0.005
+    custom = GreeksBumpConfig(spot_bump=0.005, vol_bump=0.001)
+    # custom.spot_bump == 0.005
 
     Notes
     -----
@@ -791,10 +797,10 @@ class ModelNumericalGreeks:
 
     def calculate(
         self,
-        engine,
-        instrument,
-        model,
-        market,
+        engine: "PricingEngine",
+        instrument: "Instrument",
+        model: "Model",
+        market: "MarketEnvironment",
     ) -> NumericalGreeks:
         """
         Calculate numerical Greeks for an instrument.
@@ -834,18 +840,13 @@ class ModelNumericalGreeks:
 
         # Time bump (requires instrument modification)
         h_t = self.time_bump_days / 365.0
-        # Create decayed instrument only if strike and is_call exist
-        # (exotic instruments like LookbackOption may not have these)
-        if hasattr(instrument, 'strike') and hasattr(instrument, 'is_call'):
-            from backend.instruments.options import VanillaOption
-            decayed = VanillaOption(
-                strike=instrument.strike,
-                maturity=max(instrument.maturity - h_t, 0.001),
-                is_call=instrument.is_call
-            )
+        from backend.greeks._instrument_utils import create_decayed_instrument
+        new_T = max(instrument.maturity - h_t, 0.001)
+        decayed = create_decayed_instrument(instrument, new_T)
+        if decayed is not None:
             v_t_bump = engine.price(decayed, model, market).price
         else:
-            # Skip theta for exotic instruments without strike/is_call
+            # Unsupported instrument type - skip theta
             v_t_bump = v_mid  # This will result in theta = 0
 
         # Vol bump (requires model modification)
