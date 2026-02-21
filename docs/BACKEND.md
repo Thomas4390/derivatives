@@ -1,6 +1,6 @@
 # Backend Module Documentation
 
-**Version**: 5.2.0
+**Version**: 5.3.0
 **Author**: Thomas
 **Created**: 2025
 
@@ -103,7 +103,7 @@ print(backend.__version__)  # Should print "5.0.0"
 from backend import GBMModel, VanillaOption, BSAnalyticEngine, MarketEnvironment
 
 market = MarketEnvironment(spot=100, rate=0.05)
-option = VanillaOption(strike=100, expiry=0.5, is_call=True)
+option = VanillaOption(strike=100, maturity=0.5, is_call=True)
 model = GBMModel(sigma=0.2)
 engine = BSAnalyticEngine()
 
@@ -153,7 +153,7 @@ from backend import (
 # 1. Define the instrument (WHAT we're pricing)
 option = VanillaOption(
     strike=100.0,
-    expiry=0.5,
+    maturity=0.5,
     is_call=True
 )
 
@@ -210,7 +210,11 @@ backend/
 |       +-- bates_cf.py
 +-- engines/                 # Pricing engines
 |   +-- __init__.py
-|   +-- unified.py           # BSAnalyticEngine, FFTEngine, MonteCarloEngine
+|   +-- analytic_engine.py   # BSAnalyticEngine (Black-Scholes)
+|   +-- fft_engine.py        # FFTEngine (Carr-Madan)
+|   +-- mc_engine.py         # MonteCarloEngine (Monte Carlo)
+|   +-- exotic_engine.py     # ExoticAnalyticEngine (analytic exotic pricing)
+|   +-- _registration.py     # Engine registry setup
 |   +-- vectorized_bs.py     # Numba-vectorized BS Greeks
 |   +-- fourier/
 |   |   +-- carr_madan.py    # Carr-Madan FFT algorithm
@@ -239,7 +243,8 @@ backend/
 |   +-- __init__.py
 |   +-- calculator.py        # GreeksCalculator, calculate_greeks
 |   +-- analytic.py          # bs_greeks_*, analytical formulas
-|   +-- numerical.py         # finite_difference_greeks
+|   +-- numerical.py         # finite_difference_greeks, ModelNumericalGreeks
+|   +-- _instrument_utils.py # create_decayed_instrument (time-bump helper)
 +-- portfolio/               # Portfolio management
 |   +-- __init__.py
 |   +-- portfolio.py         # OptionsPortfolio
@@ -692,6 +697,7 @@ Engines implement the pricing algorithms.
 | `BSAnalyticEngine` | Black-Scholes formula | GBM, fast pricing |
 | `FFTEngine` | Carr-Madan FFT | Stochastic vol models |
 | `MonteCarloEngine` | Monte Carlo simulation | All models, path-dependent |
+| `ExoticAnalyticEngine` | Closed-form exotic formulas | Barrier, Asian geometric, Digital, Lookback under GBM |
 
 ### Low-Level Engines
 
@@ -732,9 +738,10 @@ class FFTConfig:
 ```python
 class CarrMadanFFTEngine:
     def __init__(self, config: FFTConfig = FFTConfig()): ...
-    def price_call(self, s0, k, t, r, q, cf_func) -> float: ...
-    def price_put(self, s0, k, t, r, q, cf_func) -> float: ...
-    def price_strikes(self, s0, strikes, t, r, q, cf_func) -> np.ndarray: ...
+    def price_call(self, characteristic_fn, s0, k, t, r, q=0.0) -> float: ...
+    def price_put(self, characteristic_fn, s0, k, t, r, q=0.0) -> float: ...
+    def price_strikes(self, characteristic_fn, s0, strikes, t, r, is_call=True, q=0.0) -> np.ndarray: ...
+    def price_surface(self, characteristic_fn_factory, s0, strikes, maturities, r, is_call=True, q=0.0) -> np.ndarray: ...
 ```
 
 ### MCConfig
@@ -833,7 +840,7 @@ GREEK_ULTIMA = 13  # d3V/dsigma3
 ```python
 from backend import VanillaOption, GBMModel, BSAnalyticEngine, MarketEnvironment
 
-option = VanillaOption(strike=100, expiry=0.5, is_call=True)
+option = VanillaOption(strike=100, maturity=0.5, is_call=True)
 model = GBMModel(sigma=0.2)
 market = MarketEnvironment(spot=100, rate=0.05)
 
@@ -849,7 +856,7 @@ print(f"Greeks: delta={result.greeks.delta:.4f}, gamma={result.greeks.gamma:.6f}
 ```python
 from backend import VanillaOption, HestonModel, FFTEngine, MarketEnvironment, FFTConfig
 
-option = VanillaOption(strike=100, expiry=0.5, is_call=True)
+option = VanillaOption(strike=100, maturity=0.5, is_call=True)
 model = HestonModel(v0=0.04, kappa=2.0, theta=0.04, xi=0.3, rho=-0.7)
 market = MarketEnvironment(spot=100, rate=0.05)
 
@@ -866,7 +873,7 @@ print(f"Heston Call Price: ${result.price:.4f}")
 ```python
 from backend import VanillaOption, BatesModel, MonteCarloEngine, MarketEnvironment, MCConfig
 
-option = VanillaOption(strike=100, expiry=0.5, is_call=True)
+option = VanillaOption(strike=100, maturity=0.5, is_call=True)
 model = BatesModel(
     v0=0.04, kappa=2.0, theta=0.04, xi=0.3, rho=-0.7,
     lambda_j=0.5, mu_j=-0.1, sigma_j=0.2
@@ -879,6 +886,71 @@ engine = MonteCarloEngine(config=config)
 
 result = engine.price(option, model, market)
 print(f"Bates Call Price: ${result.price:.4f} +/- ${result.std_error:.4f}")
+```
+
+### ExoticAnalyticEngine
+
+Closed-form pricing engine for exotic options under GBM. All kernels are Numba-compiled.
+
+```python
+@dataclass(frozen=True)
+class ExoticAnalyticEngine(PricingEngine):
+    def can_price(self, instrument, model) -> bool: ...
+    def price(self, instrument, model, market) -> PricingResult: ...
+    def greeks(self, instrument, model, market) -> GreeksResult: ...
+```
+
+**Supported instrument types** (requires `GBMModel` + `ExerciseStyle.EUROPEAN`):
+
+| Instrument | Formula | Reference |
+|------------|---------|-----------|
+| `BarrierOption` | All 8 types (up/down × in/out × call/put) | Reiner-Rubinstein 1991 |
+| `AsianOption` (geometric only) | Kemna-Vorst 1990 reduced volatility | Kemna-Vorst 1990 |
+| `DigitalOption` | Cash-or-nothing closed form | Black-Scholes |
+| `LookbackOption` | Floating & fixed strike | Conze-Viswanathan 1991 |
+
+> **Note**: `ExoticAnalyticEngine` is not registered in `EngineRegistry`. Instantiate it directly.
+
+**`greeks()` method** returns first-order Greeks (delta, gamma, vega, theta, rho) computed via central finite differences on the analytic prices (aligned with `GreeksBumpConfig` defaults).
+
+**Key parity relationships** (useful for validation):
+- Knock-in + knock-out = vanilla: `barrier_in + barrier_out == vanilla_price`
+- Digital parity: `digital_call + digital_put = exp(-r*T)`
+
+### Example: Exotic Engine
+
+```python
+from backend.engines.exotic_engine import ExoticAnalyticEngine
+from backend.instruments.options import (
+    BarrierUpOutCall, AsianGeometricCall, DigitalOption, LookbackCall
+)
+from backend.models.gbm import GBMModel
+from backend.core.market import MarketEnvironment
+
+engine = ExoticAnalyticEngine()
+model = GBMModel(sigma=0.25)
+market = MarketEnvironment(spot=100, rate=0.05)
+
+# Barrier option
+barrier = BarrierUpOutCall(strike=100, barrier=120, maturity=0.5)
+result = engine.price(barrier, model, market)
+greeks = engine.greeks(barrier, model, market)
+print(f"Up-Out Call: ${result.price:.4f}  delta={greeks.delta:.4f}")
+
+# Asian geometric
+asian = AsianGeometricCall(strike=100, maturity=0.5)
+result = engine.price(asian, model, market)
+print(f"Asian Geometric Call: ${result.price:.4f}")
+
+# Digital
+digital = DigitalOption(strike=100, maturity=0.5, is_call=True, payout=1.0)
+result = engine.price(digital, model, market)
+print(f"Digital Call: ${result.price:.4f}")
+
+# Floating lookback
+lookback = LookbackCall(maturity=0.5)
+result = engine.price(lookback, model, market)
+print(f"Floating Lookback Call: ${result.price:.4f}")
 ```
 
 ---
@@ -1108,10 +1180,20 @@ The instruments module defines tradeable contracts.
 |----------|-------------|
 | `AsianCall(strike, maturity)` | Asian arithmetic call |
 | `AsianPut(strike, maturity)` | Asian arithmetic put |
-| `BarrierUpOutCall(strike, maturity, barrier)` | Up-and-out call |
-| `BarrierDownOutPut(strike, maturity, barrier)` | Down-and-out put |
-| `LookbackCall(strike, maturity)` | Floating lookback call |
-| `LookbackPut(strike, maturity)` | Floating lookback put |
+| `AsianGeometricCall(strike, maturity)` | Asian geometric call (analytically priceable by `ExoticAnalyticEngine`) |
+| `AsianGeometricPut(strike, maturity)` | Asian geometric put (analytically priceable) |
+| `BarrierUpOutCall(strike, barrier, maturity, rebate=0)` | Up-and-out call |
+| `BarrierUpInCall(strike, barrier, maturity)` | Up-and-in call |
+| `BarrierDownOutCall(strike, barrier, maturity, rebate=0)` | Down-and-out call |
+| `BarrierDownInCall(strike, barrier, maturity)` | Down-and-in call |
+| `BarrierUpOutPut(strike, barrier, maturity, rebate=0)` | Up-and-out put |
+| `BarrierUpInPut(strike, barrier, maturity)` | Up-and-in put |
+| `BarrierDownOutPut(strike, barrier, maturity, rebate=0)` | Down-and-out put |
+| `BarrierDownInPut(strike, barrier, maturity)` | Down-and-in put |
+| `LookbackCall(maturity)` | Floating lookback call (payoff: `S_T - S_min`) |
+| `LookbackPut(maturity)` | Floating lookback put (payoff: `S_max - S_T`) |
+| `LookbackFixedCall(strike, maturity)` | Fixed strike lookback call (payoff: `max(S_max - K, 0)`) |
+| `LookbackFixedPut(strike, maturity)` | Fixed strike lookback put (payoff: `max(K - S_min, 0)`) |
 
 ### Payoffs
 
@@ -1262,9 +1344,46 @@ Individual BS Greeks (from `backend/greeks/analytic.py`, delegate to `backend/ut
 
 ```python
 class GreeksCalculator:
-    def __init__(self, method: str = "analytic"): ...
-    def calculate(self, option, model, market) -> GreeksResult: ...
-    def calculate_surface(self, option, model, market, spot_range, vol_range=None) -> np.ndarray: ...
+    def __init__(
+        self,
+        prefer_analytic: bool = True,
+        spot_bump: float = 0.01,       # 1% relative
+        vol_bump: float = 0.01,        # 1% absolute
+        time_bump_days: float = 1.0,   # 1 calendar day
+        rate_bump: float = 0.0001      # 1 basis point
+    ): ...
+
+    def calculate(
+        self,
+        engine: PricingEngine,
+        instrument: Instrument,
+        model: Model,
+        market: MarketEnvironment,
+        include_higher_order: bool = True
+    ) -> Union[GreeksResult, AllGreeksResult]: ...
+
+    def calculate_surface(
+        self,
+        engine: PricingEngine,
+        instrument: Instrument,
+        model: Model,
+        market: MarketEnvironment,
+        spot_range: np.ndarray,
+        greek: str = 'delta'
+    ) -> np.ndarray: ...
+```
+
+**Dispatch priority** in `calculate()`:
+1. `ExoticAnalyticEngine.greeks()` — when engine provides its own first-order Greeks
+2. Analytic BS Greeks — when `BSAnalyticEngine` + `GBMModel` + `VanillaOption`
+3. Numerical finite differences — all other combinations
+
+**Convenience function**:
+
+```python
+from backend.greeks.calculator import calculate_greeks
+
+greeks = calculate_greeks(engine, instrument, model, market, include_higher_order=False)
 ```
 
 ### Numerical Greeks
@@ -1301,8 +1420,36 @@ class GreeksBumpConfig:
 
 ```python
 class ModelNumericalGreeks:
-    def __init__(self, engine, model, market, config=GreeksBumpConfig()): ...
-    def calculate(self, instrument) -> GreeksResult: ...
+    def __init__(self, config: GreeksBumpConfig = GreeksBumpConfig()): ...
+
+    def calculate(
+        self,
+        engine: PricingEngine,
+        instrument: Instrument,
+        model: Model,
+        market: MarketEnvironment
+    ) -> NumericalGreeks: ...
+```
+
+`NumericalGreeks` is a `NamedTuple` with `(delta, gamma, vega, theta, rho)` fields.
+
+### _instrument_utils
+
+**Location**: `backend/greeks/_instrument_utils.py`
+
+Utility for creating maturity-bumped copies of immutable instruments. Used internally by `GreeksCalculator` for theta, charm, color, and veta calculations.
+
+```python
+def create_decayed_instrument(
+    instrument: Instrument,
+    new_maturity: float
+) -> Optional[Instrument]:
+    """
+    Create a copy of the instrument with a different maturity.
+
+    Supports VanillaOption, BarrierOption, AsianOption, DigitalOption,
+    and LookbackOption. Returns None for unrecognized types.
+    """
 ```
 
 ---
@@ -1750,7 +1897,7 @@ from backend import (
 )
 
 # Common parameters
-option = VanillaOption(strike=100, expiry=0.5, is_call=True)
+option = VanillaOption(strike=100, maturity=0.5, is_call=True)
 market = MarketEnvironment(spot=100, rate=0.05)
 
 # Define models
@@ -1784,7 +1931,7 @@ for name, model in models.items():
 ```python
 from backend import MarketEnvironment, VanillaOption, GBMModel, BSAnalyticEngine
 
-option = VanillaOption(strike=100, expiry=0.5, is_call=True)
+option = VanillaOption(strike=100, maturity=0.5, is_call=True)
 model = GBMModel(sigma=0.2)
 market = MarketEnvironment(spot=100, rate=0.05)
 engine = BSAnalyticEngine()
@@ -1847,7 +1994,7 @@ from backend import (
 )
 
 # Setup
-option = VanillaOption(strike=100, expiry=0.5, is_call=True)
+option = VanillaOption(strike=100, maturity=0.5, is_call=True)
 model = GBMModel(sigma=0.2)
 market = MarketEnvironment(spot=100, rate=0.05)
 
@@ -1876,10 +2023,10 @@ import numpy as np
 
 # Build iron condor
 portfolio = OptionsPortfolio()
-portfolio.add_position(long_put(strike=90, expiry=0.25, premium=1.00))
-portfolio.add_position(short_put(strike=95, expiry=0.25, premium=2.50))
-portfolio.add_position(short_call(strike=105, expiry=0.25, premium=2.50))
-portfolio.add_position(long_call(strike=110, expiry=0.25, premium=1.00))
+portfolio.add_position(long_put(strike=90, maturity=0.25, premium=1.00))
+portfolio.add_position(short_put(strike=95, maturity=0.25, premium=2.50))
+portfolio.add_position(short_call(strike=105, maturity=0.25, premium=2.50))
+portfolio.add_position(long_call(strike=110, maturity=0.25, premium=1.00))
 
 # Analysis
 net_credit = portfolio.total_premium()
@@ -1930,7 +2077,9 @@ Each module includes a smoke test that can be run standalone:
 python -m backend.utils.math
 python -m backend.simulation.base
 python -m backend.engines.fourier.carr_madan
+python -m backend.engines.exotic_engine
 python -m backend.greeks.analytic
+python -m backend.greeks.calculator
 
 # Run all tests with pytest
 pytest tests/ -v
@@ -1942,6 +2091,7 @@ pytest tests/ -v
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 5.3.0 | 2025 | ExoticAnalyticEngine, type annotations, named params, _instrument_utils |
 | 5.2.0 | 2025 | Comprehensive API documentation enrichment |
 | 5.1.0 | 2025 | Added risk_analysis module with RiskProfile, check_unlimited_risk |
 | 5.0.0 | 2025 | Three Pillars Architecture, unified API |

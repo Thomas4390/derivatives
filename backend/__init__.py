@@ -162,6 +162,28 @@ from backend.instruments import (
     EuropeanPut,
     AmericanCall,
     AmericanPut,
+    # Exotic options
+    BarrierOption,
+    AsianOption,
+    DigitalOption,
+    LookbackOption,
+    # Exotic factories
+    AsianCall,
+    AsianPut,
+    AsianGeometricCall,
+    AsianGeometricPut,
+    BarrierUpOutCall,
+    BarrierUpInCall,
+    BarrierDownOutCall,
+    BarrierDownInCall,
+    BarrierUpOutPut,
+    BarrierUpInPut,
+    BarrierDownOutPut,
+    BarrierDownInPut,
+    LookbackCall,
+    LookbackPut,
+    LookbackFixedCall,
+    LookbackFixedPut,
     # Payoffs
     VanillaCallPayoff,
     VanillaPutPayoff,
@@ -180,6 +202,7 @@ from backend.instruments import (
 
 from backend.engines import (
     BSAnalyticEngine,
+    ExoticAnalyticEngine,
     FFTEngine,
     MonteCarloEngine,
 )
@@ -299,6 +322,29 @@ __all__ = [
     "EuropeanPut",
     "AmericanCall",
     "AmericanPut",
+    # Exotic options
+    "BarrierOption",
+    "AsianOption",
+    "DigitalOption",
+    "LookbackOption",
+    # Exotic factories
+    "AsianCall",
+    "AsianPut",
+    "AsianGeometricCall",
+    "AsianGeometricPut",
+    "BarrierUpOutCall",
+    "BarrierUpInCall",
+    "BarrierDownOutCall",
+    "BarrierDownInCall",
+    "BarrierUpOutPut",
+    "BarrierUpInPut",
+    "BarrierDownOutPut",
+    "BarrierDownInPut",
+    "LookbackCall",
+    "LookbackPut",
+    "LookbackFixedCall",
+    "LookbackFixedPut",
+    # Payoffs
     "VanillaCallPayoff",
     "VanillaPutPayoff",
     "CompositePayoff",
@@ -311,6 +357,7 @@ __all__ = [
     # Engines
     # =========================================================================
     "BSAnalyticEngine",
+    "ExoticAnalyticEngine",
     "FFTEngine",
     "MonteCarloEngine",
     # =========================================================================

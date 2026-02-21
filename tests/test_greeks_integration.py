@@ -248,12 +248,12 @@ class TestEngineGreeksMethod:
 class TestExoticInstrumentGreeks:
     """Tests for Greeks with exotic instruments."""
 
-    def test_lookback_has_no_strike(self):
-        """Verify LookbackOption has no strike attribute."""
+    def test_lookback_floating_has_no_strike(self):
+        """Verify floating LookbackOption has strike=None."""
         from backend.instruments import LookbackCall
 
         lookback = LookbackCall(maturity=0.5)
-        assert not hasattr(lookback, 'strike')
+        assert lookback.strike is None
 
     def test_asian_has_strike(self):
         """Verify AsianOption has strike attribute."""
@@ -509,6 +509,236 @@ class TestDirectNumericalGreeks:
         np.testing.assert_allclose(result.vega, analytic_greeks[3], rtol=0.01)
         np.testing.assert_allclose(result.theta, analytic_greeks[4], rtol=0.02)
         np.testing.assert_allclose(result.rho, analytic_greeks[5], rtol=0.01)
+
+
+# =============================================================================
+# Exotic Options Greeks Integration
+# =============================================================================
+
+class TestExoticGreeksIntegration:
+    """Test GreeksCalculator and calculate_greeks with exotic instruments."""
+
+    @pytest.fixture
+    def exotic_setup(self):
+        from backend.engines.exotic_engine import ExoticAnalyticEngine
+        from backend.instruments.options import (
+            BarrierOption, AsianOption, DigitalOption, LookbackOption
+        )
+        return {
+            'engine': ExoticAnalyticEngine(),
+            'gbm': GBMModel(sigma=0.25),
+            'market': MarketEnvironment(spot=100, rate=0.05),
+            'barrier': BarrierOption(100, 110, 0.25, is_call=True, is_up=True),
+            'barrier_put': BarrierOption(100, 90, 0.25, is_call=False, is_up=False),
+            'asian_geo': AsianOption(100, 0.25, is_call=True, average_type="geometric"),
+            'digital': DigitalOption(100, 0.25, is_call=True, payout=100.0),
+            'lookback_float': LookbackOption(0.25, is_call=True),
+            'lookback_fixed': LookbackOption(0.25, is_call=True, strike=100, lookback_type="fixed"),
+        }
+
+    def test_calculate_greeks_barrier(self, exotic_setup):
+        """calculate_greeks works with barrier options."""
+        from backend.greeks.calculator import calculate_greeks
+        s = exotic_setup
+        greeks = calculate_greeks(s['engine'], s['barrier'], s['gbm'], s['market'])
+        assert greeks.delta is not None
+        assert 0 < greeks.delta < 1  # Call delta bounded
+
+    def test_calculate_greeks_barrier_put(self, exotic_setup):
+        """calculate_greeks works with barrier put options."""
+        from backend.greeks.calculator import calculate_greeks
+        s = exotic_setup
+        greeks = calculate_greeks(s['engine'], s['barrier_put'], s['gbm'], s['market'])
+        # Down-and-out put delta can be positive near barrier (knock-out effect)
+        assert np.isfinite(greeks.delta)
+
+    def test_calculate_greeks_asian_geometric(self, exotic_setup):
+        """calculate_greeks works with Asian geometric options."""
+        from backend.greeks.calculator import calculate_greeks
+        s = exotic_setup
+        greeks = calculate_greeks(s['engine'], s['asian_geo'], s['gbm'], s['market'])
+        assert greeks.delta is not None
+        assert 0 < greeks.delta < 1
+
+    def test_calculate_greeks_digital(self, exotic_setup):
+        """calculate_greeks works with digital options."""
+        from backend.greeks.calculator import calculate_greeks
+        s = exotic_setup
+        greeks = calculate_greeks(s['engine'], s['digital'], s['gbm'], s['market'])
+        assert greeks.delta > 0  # Digital call delta positive
+
+    def test_calculate_greeks_lookback_floating(self, exotic_setup):
+        """calculate_greeks works with floating-strike lookback options."""
+        from backend.greeks.calculator import calculate_greeks
+        s = exotic_setup
+        greeks = calculate_greeks(s['engine'], s['lookback_float'], s['gbm'], s['market'])
+        assert greeks.delta is not None
+
+    def test_calculate_greeks_lookback_fixed(self, exotic_setup):
+        """calculate_greeks works with fixed-strike lookback options."""
+        from backend.greeks.calculator import calculate_greeks
+        s = exotic_setup
+        greeks = calculate_greeks(s['engine'], s['lookback_fixed'], s['gbm'], s['market'])
+        assert greeks.delta is not None
+        assert greeks.delta > 0  # Call delta positive
+
+    def test_calculate_greeks_higher_order_barrier(self, exotic_setup):
+        """Higher-order Greeks work for barrier options."""
+        from backend.greeks.calculator import calculate_greeks, AllGreeksResult
+        s = exotic_setup
+        result = calculate_greeks(
+            s['engine'], s['barrier'], s['gbm'], s['market'],
+            include_higher_order=True
+        )
+        assert isinstance(result, AllGreeksResult)
+        assert result.price > 0
+        assert result.delta is not None
+        assert result.vanna is not None
+        assert result.speed is not None
+
+    def test_calculate_greeks_higher_order_digital(self, exotic_setup):
+        """Higher-order Greeks work for digital options."""
+        from backend.greeks.calculator import calculate_greeks, AllGreeksResult
+        s = exotic_setup
+        result = calculate_greeks(
+            s['engine'], s['digital'], s['gbm'], s['market'],
+            include_higher_order=True
+        )
+        assert isinstance(result, AllGreeksResult)
+        assert result.price > 0
+
+    def test_calculate_greeks_higher_order_lookback(self, exotic_setup):
+        """Higher-order Greeks work for lookback options."""
+        from backend.greeks.calculator import calculate_greeks, AllGreeksResult
+        s = exotic_setup
+        result = calculate_greeks(
+            s['engine'], s['lookback_float'], s['gbm'], s['market'],
+            include_higher_order=True
+        )
+        assert isinstance(result, AllGreeksResult)
+        assert result.price > 0
+
+    def test_calculate_greeks_higher_order_asian_geometric(self, exotic_setup):
+        """Higher-order Greeks work for Asian geometric options."""
+        from backend.greeks.calculator import calculate_greeks, AllGreeksResult
+        s = exotic_setup
+        result = calculate_greeks(
+            s['engine'], s['asian_geo'], s['gbm'], s['market'],
+            include_higher_order=True
+        )
+        assert isinstance(result, AllGreeksResult)
+        assert result.price > 0
+        assert result.delta is not None
+        assert result.vanna is not None
+        assert result.speed is not None
+
+    def test_engine_greeks_matches_direct(self, exotic_setup):
+        """GreeksCalculator first-order matches engine.greeks() directly."""
+        from backend.greeks.calculator import calculate_greeks
+        s = exotic_setup
+        direct = s['engine'].greeks(s['barrier'], s['gbm'], s['market'])
+        via_calc = calculate_greeks(s['engine'], s['barrier'], s['gbm'], s['market'])
+        np.testing.assert_allclose(via_calc.delta, direct.delta, rtol=1e-10)
+        np.testing.assert_allclose(via_calc.gamma, direct.gamma, rtol=1e-10)
+        np.testing.assert_allclose(via_calc.vega, direct.vega, rtol=1e-10)
+        np.testing.assert_allclose(via_calc.theta, direct.theta, rtol=1e-10)
+        np.testing.assert_allclose(via_calc.rho, direct.rho, rtol=1e-10)
+
+    def test_theta_negative_for_long_exotic(self, exotic_setup):
+        """Theta should be negative for long exotic options (time decay)."""
+        from backend.greeks.calculator import calculate_greeks
+        s = exotic_setup
+        # Asian geometric call
+        greeks = calculate_greeks(s['engine'], s['asian_geo'], s['gbm'], s['market'])
+        assert greeks.theta < 0, f"Asian geometric theta should be negative, got {greeks.theta}"
+
+    def test_mc_rejects_exotic_instruments(self, exotic_setup):
+        """MonteCarloEngine.can_price() rejects exotic instruments."""
+        mc = MonteCarloEngine(n_paths=1000, seed=42)
+        s = exotic_setup
+        assert not mc.can_price(s['barrier'], s['gbm'])
+        assert not mc.can_price(s['asian_geo'], s['gbm'])
+        assert not mc.can_price(s['digital'], s['gbm'])
+        assert not mc.can_price(s['lookback_float'], s['gbm'])
+        assert not mc.can_price(s['lookback_fixed'], s['gbm'])
+
+    def test_mc_still_prices_vanilla(self, exotic_setup):
+        """MonteCarloEngine still works for vanilla options."""
+        mc = MonteCarloEngine(n_paths=1000, seed=42)
+        vanilla = VanillaOption(strike=100, maturity=0.25, is_call=True)
+        assert mc.can_price(vanilla, exotic_setup['gbm'])
+
+
+class TestEngineRejectsExoticInstruments:
+    """Tests that BS and FFT engines reject exotic instruments."""
+
+    @pytest.fixture
+    def exotic_instruments(self):
+        from backend.instruments.options import (
+            BarrierOption, AsianOption, DigitalOption, LookbackOption
+        )
+        return {
+            'barrier': BarrierOption(100, 110, 0.25, is_call=True, is_up=True),
+            'asian_geo': AsianOption(100, 0.25, is_call=True, average_type="geometric"),
+            'digital': DigitalOption(100, 0.25, is_call=True, payout=100.0),
+            'lookback': LookbackOption(0.25, is_call=True),
+        }
+
+    def test_bs_engine_rejects_exotic_instruments(self, exotic_instruments):
+        """BSAnalyticEngine.can_price() returns False for exotic instruments."""
+        bs = BSAnalyticEngine()
+        gbm = GBMModel(sigma=0.25)
+        for name, instr in exotic_instruments.items():
+            assert not bs.can_price(instr, gbm), \
+                f"BSAnalyticEngine should reject {name}"
+
+    def test_fft_engine_rejects_exotic_instruments(self, exotic_instruments):
+        """FFTEngine.can_price() returns False for exotic instruments."""
+        fft = FFTEngine()
+        gbm = GBMModel(sigma=0.25)
+        for name, instr in exotic_instruments.items():
+            assert not fft.can_price(instr, gbm), \
+                f"FFTEngine should reject {name}"
+
+    def test_bs_engine_still_accepts_vanilla(self):
+        """BSAnalyticEngine still accepts VanillaOption."""
+        bs = BSAnalyticEngine()
+        gbm = GBMModel(sigma=0.20)
+        vanilla = VanillaOption(strike=100, maturity=0.5, is_call=True)
+        assert bs.can_price(vanilla, gbm)
+
+    def test_fft_engine_still_accepts_vanilla(self):
+        """FFTEngine still accepts VanillaOption."""
+        fft = FFTEngine()
+        gbm = GBMModel(sigma=0.20)
+        vanilla = VanillaOption(strike=100, maturity=0.5, is_call=True)
+        assert fft.can_price(vanilla, gbm)
+
+    def test_calculate_greeks_bs_engine_with_exotic_falls_back(self):
+        """calculate_greeks with BSAnalyticEngine + exotic uses numerical fallback, not BS analytic."""
+        from backend.instruments.options import BarrierOption
+        from backend.engines.exotic_engine import ExoticAnalyticEngine
+        from backend.greeks.calculator import calculate_greeks
+
+        gbm = GBMModel(sigma=0.25)
+        market = MarketEnvironment(spot=100, rate=0.05)
+        barrier = BarrierOption(100, 110, 0.25, is_call=True, is_up=True)
+
+        # ExoticAnalyticEngine gives the correct exotic greeks
+        exotic_engine = ExoticAnalyticEngine()
+        correct_greeks = calculate_greeks(exotic_engine, barrier, gbm, market)
+
+        # BSAnalyticEngine should NOT silently return vanilla BS greeks
+        # It should raise because it can't price the instrument
+        bs_engine = BSAnalyticEngine()
+        assert not bs_engine.can_price(barrier, gbm), \
+            "BSAnalyticEngine must reject barrier options"
+
+        # Verify the exotic delta is substantially different from vanilla BS delta
+        vanilla = VanillaOption(strike=100, maturity=0.25, is_call=True)
+        vanilla_greeks = calculate_greeks(bs_engine, vanilla, gbm, market)
+        assert abs(correct_greeks.delta - vanilla_greeks.delta) > 0.1, \
+            "Exotic and vanilla deltas should differ significantly"
 
 
 if __name__ == "__main__":

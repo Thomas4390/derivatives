@@ -49,26 +49,30 @@ LOOKBACK_FLOATING: int = 4
 # =============================================================================
 
 @njit(fastmath=True, cache=True)
-def _bs_vanilla_price(S: float, K: float, T: float, r: float, sigma: float, is_call: bool) -> float:
-    """Black-Scholes vanilla price (for knock-in breach fallback)."""
+def _bs_vanilla_price(S: float, K: float, T: float, r: float, q: float,
+                      sigma: float, is_call: bool) -> float:
+    """Black-Scholes vanilla price with dividend yield (for knock-in breach fallback)."""
     if T <= 0:
         return max(S - K, 0.0) if is_call else max(K - S, 0.0)
     if sigma <= 0:
+        qd = math.exp(-q * T)
         df = math.exp(-r * T)
-        return max(S - K * df, 0.0) if is_call else max(K * df - S, 0.0)
+        return max(S * qd - K * df, 0.0) if is_call else max(K * df - S * qd, 0.0)
     sqrt_T = math.sqrt(T)
-    d1 = (math.log(S / K) + (r + 0.5 * sigma * sigma) * T) / (sigma * sqrt_T)
+    d1 = (math.log(S / K) + (r - q + 0.5 * sigma * sigma) * T) / (sigma * sqrt_T)
     d2 = d1 - sigma * sqrt_T
+    qd = math.exp(-q * T)
     df = math.exp(-r * T)
     if is_call:
-        return S * norm_cdf(d1) - K * df * norm_cdf(d2)
+        return S * qd * norm_cdf(d1) - K * df * norm_cdf(d2)
     else:
-        return K * df * norm_cdf(-d2) - S * norm_cdf(-d1)
+        return K * df * norm_cdf(-d2) - S * qd * norm_cdf(-d1)
 
 
 @njit(fastmath=True, cache=True)
-def barrier_option_price(S: float, K: float, H: float, T: float, r: float, sigma: float,
-                         is_call: bool, is_knock_in: bool, is_up: bool, rebate: float = 0.0) -> float:
+def barrier_option_price(S: float, K: float, H: float, T: float, r: float, q: float,
+                         sigma: float, is_call: bool, is_knock_in: bool, is_up: bool,
+                         rebate: float = 0.0) -> float:
     """
     Barrier option pricing using Reiner-Rubinstein (1991) formulas.
 
@@ -86,6 +90,8 @@ def barrier_option_price(S: float, K: float, H: float, T: float, r: float, sigma
         Time to expiry
     r : float
         Risk-free rate
+    q : float
+        Continuous dividend yield
     sigma : float
         Volatility
     is_call : bool
@@ -95,7 +101,9 @@ def barrier_option_price(S: float, K: float, H: float, T: float, r: float, sigma
     is_up : bool
         True for up-barrier, False for down-barrier
     rebate : float
-        Rebate paid at knockout (default 0)
+        Rebate paid at knockout (default 0).
+        Note: rebate only applies to knock-out options. For knock-in options,
+        the rebate parameter is ignored (per Reiner-Rubinstein convention).
 
     Returns
     -------
@@ -114,18 +122,40 @@ def barrier_option_price(S: float, K: float, H: float, T: float, r: float, sigma
             return payoff if not breached else rebate
 
     if sigma <= 0:
-        return 0.0
+        # Deterministic forward: S * exp((r-q)*T)
+        b = r - q
+        F = S * math.exp(b * T)
+        df = math.exp(-r * T)
+        intrinsic = max(F - K, 0.0) if is_call else max(K - F, 0.0)
 
-    # Check barrier breach
+        # Determine if deterministic path breaches barrier
+        if is_up:
+            # Path max: S*exp(b*T) if b>0, else S
+            breached = (F >= H) if b > 0 else False
+        else:
+            # Path min: S*exp(b*T) if b<0, else S
+            breached = (F <= H) if b < 0 else False
+
+        if is_knock_in:
+            return (intrinsic * df) if breached else 0.0
+        else:
+            return (rebate * df) if breached else (intrinsic * df)
+
+    # Check barrier breach (spot already past barrier)
     if is_up and S >= H:
-        return rebate if not is_knock_in else _bs_vanilla_price(S, K, T, r, sigma, is_call)
+        return rebate if not is_knock_in else _bs_vanilla_price(S, K, T, r, q, sigma, is_call)
     if not is_up and S <= H:
-        return rebate if not is_knock_in else _bs_vanilla_price(S, K, T, r, sigma, is_call)
+        return rebate if not is_knock_in else _bs_vanilla_price(S, K, T, r, q, sigma, is_call)
 
     sqrt_T = math.sqrt(T)
 
-    # Helper parameters
-    mu = (r - 0.5 * sigma * sigma) / (sigma * sigma)
+    # Cost of carry
+    b = r - q
+    qd = math.exp(-q * T)
+    df = math.exp(-r * T)
+
+    # Helper parameters (mu uses cost-of-carry b, lambda uses discount rate r)
+    mu = (b - 0.5 * sigma * sigma) / (sigma * sigma)
     lambda_val = math.sqrt(mu * mu + 2.0 * r / (sigma * sigma))
 
     # d-parameters
@@ -135,38 +165,34 @@ def barrier_option_price(S: float, K: float, H: float, T: float, r: float, sigma
     y2 = math.log(H / S) / (sigma * sqrt_T) + (1.0 + mu) * sigma * sqrt_T
     z = math.log(H / S) / (sigma * sqrt_T) + lambda_val * sigma * sqrt_T
 
-    df = math.exp(-r * T)
-
-    # A, B, C, D terms from Reiner-Rubinstein
+    # A, B, C, D terms from Reiner-Rubinstein (with dividend discount on S terms)
     if is_call:
-        A = S * norm_cdf(x1) - K * df * norm_cdf(x1 - sigma * sqrt_T)
-        B = S * norm_cdf(x2) - K * df * norm_cdf(x2 - sigma * sqrt_T)
+        A = S * qd * norm_cdf(x1) - K * df * norm_cdf(x1 - sigma * sqrt_T)
+        B = S * qd * norm_cdf(x2) - K * df * norm_cdf(x2 - sigma * sqrt_T)
 
         if is_up:
             eta = 1.0
         else:
             eta = -1.0
 
-        C = S * math.pow(H / S, 2.0 * (mu + 1.0)) * norm_cdf(eta * y1) - \
+        C = S * qd * math.pow(H / S, 2.0 * (mu + 1.0)) * norm_cdf(eta * y1) - \
             K * df * math.pow(H / S, 2.0 * mu) * norm_cdf(eta * (y1 - sigma * sqrt_T))
-        D = S * math.pow(H / S, 2.0 * (mu + 1.0)) * norm_cdf(eta * y2) - \
+        D = S * qd * math.pow(H / S, 2.0 * (mu + 1.0)) * norm_cdf(eta * y2) - \
             K * df * math.pow(H / S, 2.0 * mu) * norm_cdf(eta * (y2 - sigma * sqrt_T))
     else:
         # Put formulas: phi = -1 applied to outer S/K terms
-        A = K * df * norm_cdf(-x1 + sigma * sqrt_T) - S * norm_cdf(-x1)
-        B = K * df * norm_cdf(-x2 + sigma * sqrt_T) - S * norm_cdf(-x2)
+        A = K * df * norm_cdf(-x1 + sigma * sqrt_T) - S * qd * norm_cdf(-x1)
+        B = K * df * norm_cdf(-x2 + sigma * sqrt_T) - S * qd * norm_cdf(-x2)
 
         if is_up:
             eta = -1.0
         else:
             eta = 1.0
 
-        # General C/D: phi*S*(H/S)^(2(mu+1))*N(eta*y) - phi*K*df*(H/S)^(2mu)*N(eta*(y-sigma*sqrt_T))
-        # For puts (phi=-1): K*df*(...)* N(eta*(y-sigma*sqrt_T)) - S*(...)* N(eta*y)
         C = K * df * math.pow(H / S, 2.0 * mu) * norm_cdf(eta * (y1 - sigma * sqrt_T)) - \
-            S * math.pow(H / S, 2.0 * (mu + 1.0)) * norm_cdf(eta * y1)
+            S * qd * math.pow(H / S, 2.0 * (mu + 1.0)) * norm_cdf(eta * y1)
         D = K * df * math.pow(H / S, 2.0 * mu) * norm_cdf(eta * (y2 - sigma * sqrt_T)) - \
-            S * math.pow(H / S, 2.0 * (mu + 1.0)) * norm_cdf(eta * y2)
+            S * qd * math.pow(H / S, 2.0 * (mu + 1.0)) * norm_cdf(eta * y2)
 
     # Rebate terms
     E = rebate * df * (norm_cdf(eta * (x2 - sigma * sqrt_T)) -
@@ -178,15 +204,13 @@ def barrier_option_price(S: float, K: float, H: float, T: float, r: float, sigma
     vanilla = A
 
     # Determine knock-out price based on Reiner-Rubinstein table
-    # Call dispatch uses our eta convention (eta=1 for up, -1 for down)
-    # Put dispatch uses standard R-R convention (eta=1 for down, -1 for up)
     if is_up:
         if is_call:
             if K >= H:
                 price_out = F  # Worthless (barrier below strike)
             else:
                 price_out = A - B + C - D + F
-        else:  # put (R-R dispatch: eta=-1 for up)
+        else:  # put
             if K >= H:
                 price_out = B - D + F
             else:
@@ -197,7 +221,7 @@ def barrier_option_price(S: float, K: float, H: float, T: float, r: float, sigma
                 price_out = A - B + C - D + F
             else:
                 price_out = B - D + F
-        else:  # put (R-R dispatch: eta=1 for down)
+        else:  # put
             if K <= H:
                 price_out = F  # Worthless (barrier above strike)
             else:
@@ -213,7 +237,8 @@ def barrier_option_price(S: float, K: float, H: float, T: float, r: float, sigma
 
 
 @njit(fastmath=True, cache=True)
-def asian_geometric_price(S: float, K: float, T: float, r: float, sigma: float, is_call: bool) -> float:
+def asian_geometric_price(S: float, K: float, T: float, r: float, q: float,
+                          sigma: float, is_call: bool) -> float:
     """
     Geometric Asian option price (Kemna-Vorst 1990).
 
@@ -227,6 +252,8 @@ def asian_geometric_price(S: float, K: float, T: float, r: float, sigma: float, 
         Time to expiry
     r : float
         Risk-free rate
+    q : float
+        Continuous dividend yield
     sigma : float
         Volatility
     is_call : bool
@@ -242,7 +269,7 @@ def asian_geometric_price(S: float, K: float, T: float, r: float, sigma: float, 
 
     # Adjusted parameters for geometric average
     sigma_adj = sigma / math.sqrt(3.0)
-    b = 0.5 * (r - 0.5 * sigma * sigma)
+    b = 0.5 * (r - q - 0.5 * sigma * sigma)
 
     sqrt_T = math.sqrt(T)
     d1 = (math.log(S / K) + (b + 0.5 * sigma_adj * sigma_adj) * T) / (sigma_adj * sqrt_T)
@@ -259,7 +286,8 @@ def asian_geometric_price(S: float, K: float, T: float, r: float, sigma: float, 
 
 
 @njit(fastmath=True, cache=True)
-def digital_price(S: float, K: float, T: float, r: float, sigma: float, is_call: bool, payout: float = 1.0) -> float:
+def digital_price(S: float, K: float, T: float, r: float, q: float, sigma: float,
+                  is_call: bool, payout: float = 1.0) -> float:
     """
     Digital (cash-or-nothing) option price.
 
@@ -273,6 +301,8 @@ def digital_price(S: float, K: float, T: float, r: float, sigma: float, is_call:
         Time to expiry
     r : float
         Risk-free rate
+    q : float
+        Continuous dividend yield
     sigma : float
         Volatility
     is_call : bool
@@ -292,10 +322,16 @@ def digital_price(S: float, K: float, T: float, r: float, sigma: float, is_call:
             return payout if S < K else 0.0
 
     if sigma <= 0:
-        return 0.0
+        # Deterministic forward
+        F = S * math.exp((r - q) * T)
+        df = math.exp(-r * T)
+        if is_call:
+            return (payout * df) if F > K else 0.0
+        else:
+            return (payout * df) if F < K else 0.0
 
     sqrt_T = math.sqrt(T)
-    d2 = (math.log(S / K) + (r - 0.5 * sigma * sigma) * T) / (sigma * sqrt_T)
+    d2 = (math.log(S / K) + (r - q - 0.5 * sigma * sigma) * T) / (sigma * sqrt_T)
     df = math.exp(-r * T)
 
     if is_call:
@@ -306,7 +342,7 @@ def digital_price(S: float, K: float, T: float, r: float, sigma: float, is_call:
 
 @njit(fastmath=True, cache=True)
 def lookback_fixed_price(S: float, K: float, M_min: float, M_max: float, T: float,
-                         r: float, sigma: float, is_call: bool) -> float:
+                         r: float, q: float, sigma: float, is_call: bool) -> float:
     """
     Fixed strike lookback option price via decomposition into floating lookbacks.
 
@@ -332,6 +368,8 @@ def lookback_fixed_price(S: float, K: float, M_min: float, M_max: float, T: floa
         Time to expiry
     r : float
         Risk-free rate
+    q : float
+        Continuous dividend yield
     sigma : float
         Volatility
     is_call : bool
@@ -348,7 +386,7 @@ def lookback_fixed_price(S: float, K: float, M_min: float, M_max: float, T: floa
         else:
             return max(K - M_min, 0.0)
 
-    if sigma <= 0 or r <= 0:
+    if sigma <= 0:
         return 0.0
 
     df = math.exp(-r * T)
@@ -358,18 +396,14 @@ def lookback_fixed_price(S: float, K: float, M_min: float, M_max: float, T: floa
         M = M_max
         if S > M:
             M = S
-        # Decomposition: max(M_max - K, 0) = (M_max - S_T) + (S_T - K)
-        # => fixed_call = floating_put(M_max) + S - K*df
-        float_put = lookback_floating_price(S, M_min, M, T, r, sigma, False)
+        float_put = lookback_floating_price(S, M_min, M, T, r, q, sigma, False)
         price = float_put + S - K * df
     else:
         # Ensure M_min is valid
         M = M_min
         if S < M:
             M = S
-        # Decomposition: max(K - M_min, 0) = (K - S_T) + (S_T - M_min)
-        # => fixed_put = K*df - S + floating_call(M_min)
-        float_call = lookback_floating_price(S, M, M_max, T, r, sigma, True)
+        float_call = lookback_floating_price(S, M, M_max, T, r, q, sigma, True)
         price = K * df - S + float_call
 
     return max(price, 0.0)
@@ -377,9 +411,9 @@ def lookback_fixed_price(S: float, K: float, M_min: float, M_max: float, T: floa
 
 @njit(fastmath=True, cache=True)
 def lookback_floating_price(S: float, M_min: float, M_max: float, T: float,
-                            r: float, sigma: float, is_call: bool) -> float:
+                            r: float, q: float, sigma: float, is_call: bool) -> float:
     """
-    Floating strike lookback option price (Conze-Viswanathan 1991).
+    Floating strike lookback option price (Goldman-Sosin-Gatto 1979).
 
     Payoff:
     - Call: S_T - M_min (buy at the low)
@@ -397,6 +431,8 @@ def lookback_floating_price(S: float, M_min: float, M_max: float, T: float,
         Time to expiry
     r : float
         Risk-free rate
+    q : float
+        Continuous dividend yield
     sigma : float
         Volatility
     is_call : bool
@@ -413,30 +449,36 @@ def lookback_floating_price(S: float, M_min: float, M_max: float, T: float,
         else:
             return max(M_max - S, 0.0)
 
-    if sigma <= 0 or r <= 0:
+    if sigma <= 0:
         return 0.0
+
+    b = r - q
+    # Guard against b ≈ 0 (division by zero in σ²/(2b) terms)
+    b_eff = b if abs(b) > 1e-10 else 1e-10
 
     sqrt_T = math.sqrt(T)
     M = M_min if is_call else M_max
 
-    b1 = (math.log(S / M) + (r + 0.5 * sigma * sigma) * T) / (sigma * sqrt_T)
+    qd = math.exp(-q * T)
+    df = math.exp(-r * T)
+
+    b1 = (math.log(S / M) + (b + 0.5 * sigma * sigma) * T) / (sigma * sqrt_T)
     b2 = b1 - sigma * sqrt_T
 
-    df = math.exp(-r * T)
-    two_r_over_sigma_sq = 2.0 * r / (sigma * sigma)
+    two_b_over_sigma_sq = 2.0 * b_eff / (sigma * sigma)
 
     if is_call:
-        term1 = S * norm_cdf(b1) - M * df * norm_cdf(b2)
-        term2 = S * (sigma * sigma) / (2.0 * r) * (
+        term1 = S * qd * norm_cdf(b1) - M * df * norm_cdf(b2)
+        term2 = S * qd * (sigma * sigma) / (2.0 * b_eff) * (
             -df * norm_cdf(-b2) +
-            (S / M) ** (-two_r_over_sigma_sq) * norm_cdf(b1 - 2.0 * r * sqrt_T / sigma)
+            (S / M) ** (-two_b_over_sigma_sq) * norm_cdf(b1 - 2.0 * b_eff * sqrt_T / sigma)
         )
         price = term1 + term2
     else:
-        term1 = M * df * norm_cdf(-b2) - S * norm_cdf(-b1)
-        term2 = S * (sigma * sigma) / (2.0 * r) * (
+        term1 = M * df * norm_cdf(-b2) - S * qd * norm_cdf(-b1)
+        term2 = S * qd * (sigma * sigma) / (2.0 * b_eff) * (
             df * norm_cdf(b2) -
-            (S / M) ** (-two_r_over_sigma_sq) * norm_cdf(-b1 + 2.0 * r * sqrt_T / sigma)
+            (S / M) ** (-two_b_over_sigma_sq) * norm_cdf(-b1 + 2.0 * b_eff * sqrt_T / sigma)
         )
         price = term1 + term2
 
@@ -444,26 +486,27 @@ def lookback_floating_price(S: float, M_min: float, M_max: float, T: float,
 
 
 @njit(fastmath=True, cache=True)
-def _exotic_price(option_type: int, S: float, K: float, T: float, r: float, sigma: float,
-                  is_call: bool, H: float, M_min: float, M_max: float,
+def _exotic_price(option_type: int, S: float, K: float, T: float, r: float, q: float,
+                  sigma: float, is_call: bool, H: float, M_min: float, M_max: float,
                   is_knock_in: bool, is_up: bool, rebate: float, payout: float) -> float:
     """Dispatch to the correct exotic pricing kernel by option type."""
     if option_type == BARRIER:
-        return barrier_option_price(S, K, H, T, r, sigma, is_call, is_knock_in, is_up, rebate)
+        return barrier_option_price(S, K, H, T, r, q, sigma, is_call, is_knock_in, is_up, rebate)
     elif option_type == ASIAN_GEO:
-        return asian_geometric_price(S, K, T, r, sigma, is_call)
+        return asian_geometric_price(S, K, T, r, q, sigma, is_call)
     elif option_type == DIGITAL:
-        return digital_price(S, K, T, r, sigma, is_call, payout)
+        return digital_price(S, K, T, r, q, sigma, is_call, payout)
     elif option_type == LOOKBACK_FIXED:
-        return lookback_fixed_price(S, K, M_min, M_max, T, r, sigma, is_call)
+        return lookback_fixed_price(S, K, M_min, M_max, T, r, q, sigma, is_call)
     else:
-        return lookback_floating_price(S, M_min, M_max, T, r, sigma, is_call)
+        return lookback_floating_price(S, M_min, M_max, T, r, q, sigma, is_call)
 
 
 @njit(fastmath=True, cache=True)
 def exotic_calculate_greeks(option_type: int, S: float, K: float, T: float, r: float,
-                            sigma: float, is_call: bool, H: float, M_min: float, M_max: float,
-                            is_knock_in: bool, is_up: bool, rebate: float, payout: float) -> tuple:
+                            q: float, sigma: float, is_call: bool, H: float,
+                            M_min: float, M_max: float, is_knock_in: bool, is_up: bool,
+                            rebate: float, payout: float) -> tuple:
     """
     Calculate option Greeks using finite differences for all exotic types.
 
@@ -471,8 +514,8 @@ def exotic_calculate_greeks(option_type: int, S: float, K: float, T: float, r: f
     ----------
     option_type : int
         BARRIER, ASIAN_GEO, DIGITAL, LOOKBACK_FIXED, or LOOKBACK_FLOATING
-    S, K, T, r, sigma : float
-        Standard option parameters
+    S, K, T, r, q, sigma : float
+        Standard option parameters (q = continuous dividend yield)
     is_call : bool
         True for call
     H : float
@@ -495,39 +538,37 @@ def exotic_calculate_greeks(option_type: int, S: float, K: float, T: float, r: f
     dT = 1.0 / DAYS_PER_YEAR  # 1 day
     dR = 0.0001            # 1 bp rate bump
 
-    args = (option_type, S, K, T, r, sigma, is_call,
-            H, M_min, M_max, is_knock_in, is_up, rebate, payout)
-
     # Central price
-    price = _exotic_price(*args)
+    price = _exotic_price(option_type, S, K, T, r, q, sigma, is_call,
+                          H, M_min, M_max, is_knock_in, is_up, rebate, payout)
 
     # Delta & Gamma (central differences on S)
-    p_up = _exotic_price(option_type, S + dS, K, T, r, sigma, is_call,
+    p_up = _exotic_price(option_type, S + dS, K, T, r, q, sigma, is_call,
                          H, M_min, M_max, is_knock_in, is_up, rebate, payout)
-    p_dn = _exotic_price(option_type, S - dS, K, T, r, sigma, is_call,
+    p_dn = _exotic_price(option_type, S - dS, K, T, r, q, sigma, is_call,
                          H, M_min, M_max, is_knock_in, is_up, rebate, payout)
     delta = (p_up - p_dn) / (2.0 * dS)
     gamma = (p_up - 2.0 * price + p_dn) / (dS * dS)
 
     # Vega (central difference on sigma)
-    p_vol_up = _exotic_price(option_type, S, K, T, r, sigma + dV, is_call,
+    p_vol_up = _exotic_price(option_type, S, K, T, r, q, sigma + dV, is_call,
                              H, M_min, M_max, is_knock_in, is_up, rebate, payout)
-    p_vol_dn = _exotic_price(option_type, S, K, T, r, sigma - dV, is_call,
+    p_vol_dn = _exotic_price(option_type, S, K, T, r, q, sigma - dV, is_call,
                              H, M_min, M_max, is_knock_in, is_up, rebate, payout)
     vega = (p_vol_up - p_vol_dn) / (2.0 * dV) / 100.0
 
     # Theta (forward difference on T)
     if T > dT:
-        p_t_dn = _exotic_price(option_type, S, K, T - dT, r, sigma, is_call,
+        p_t_dn = _exotic_price(option_type, S, K, T - dT, r, q, sigma, is_call,
                                H, M_min, M_max, is_knock_in, is_up, rebate, payout)
         theta = (p_t_dn - price) / dT
     else:
         theta = 0.0
 
     # Rho (central difference on r)
-    p_r_up = _exotic_price(option_type, S, K, T, r + dR, sigma, is_call,
+    p_r_up = _exotic_price(option_type, S, K, T, r + dR, q, sigma, is_call,
                            H, M_min, M_max, is_knock_in, is_up, rebate, payout)
-    p_r_dn = _exotic_price(option_type, S, K, T, r - dR, sigma, is_call,
+    p_r_dn = _exotic_price(option_type, S, K, T, r - dR, q, sigma, is_call,
                            H, M_min, M_max, is_knock_in, is_up, rebate, payout)
     rho = (p_r_up - p_r_dn) / (2.0 * dR) / 100.0
 
@@ -625,12 +666,14 @@ class ExoticAnalyticEngine(PricingEngine):
 
         S: float = market.spot
         r: float = market.rate
+        q: float = market.dividend_yield
         sigma: float = model.sigma
         T: float = instrument.maturity
 
         if isinstance(instrument, BarrierOption):
             p = barrier_option_price(
-                S=S, K=instrument.strike, H=instrument.barrier, T=T, r=r, sigma=sigma,
+                S=S, K=instrument.strike, H=instrument.barrier, T=T, r=r, q=q,
+                sigma=sigma,
                 is_call=instrument.is_call,
                 is_knock_in=instrument.is_knock_in,
                 is_up=instrument.is_up,
@@ -638,24 +681,25 @@ class ExoticAnalyticEngine(PricingEngine):
             )
         elif isinstance(instrument, AsianOption):
             p = asian_geometric_price(
-                S=S, K=instrument.strike, T=T, r=r, sigma=sigma,
+                S=S, K=instrument.strike, T=T, r=r, q=q, sigma=sigma,
                 is_call=instrument.is_call,
             )
         elif isinstance(instrument, DigitalOption):
             p = digital_price(
-                S=S, K=instrument.strike, T=T, r=r, sigma=sigma,
+                S=S, K=instrument.strike, T=T, r=r, q=q, sigma=sigma,
                 is_call=instrument.is_call,
                 payout=instrument.payout,
             )
         elif isinstance(instrument, LookbackOption):
             if instrument.lookback_type == "fixed":
                 p = lookback_fixed_price(
-                    S=S, K=instrument.strike, M_min=S, M_max=S, T=T, r=r, sigma=sigma,
+                    S=S, K=instrument.strike, M_min=S, M_max=S, T=T, r=r, q=q,
+                    sigma=sigma,
                     is_call=instrument.is_call,
                 )
             else:
                 p = lookback_floating_price(
-                    S=S, M_min=S, M_max=S, T=T, r=r, sigma=sigma,
+                    S=S, M_min=S, M_max=S, T=T, r=r, q=q, sigma=sigma,
                     is_call=instrument.is_call,
                 )
         else:
@@ -698,6 +742,7 @@ class ExoticAnalyticEngine(PricingEngine):
 
         S: float = market.spot
         r: float = market.rate
+        q: float = market.dividend_yield
         sigma: float = model.sigma
         T: float = instrument.maturity
 
@@ -759,11 +804,9 @@ class ExoticAnalyticEngine(PricingEngine):
         else:
             raise ValueError(f"Unsupported instrument: {type(instrument).__name__}")
 
-        # Numba @njit: keyword arguments are only supported from Python context,
-        # but exotic_calculate_greeks has 14 positional params — name them here
         price, delta, gamma, vega, theta, rho = exotic_calculate_greeks(
             option_type=opt_type,
-            S=S, K=K, T=T, r=r, sigma=sigma,
+            S=S, K=K, T=T, r=r, q=q, sigma=sigma,
             is_call=instrument.is_call,
             H=H, M_min=M_min, M_max=M_max,
             is_knock_in=is_knock_in, is_up=is_up,
@@ -893,7 +936,7 @@ if __name__ == "__main__":
     digital_10 = DigitalOption(strike=100.0, maturity=0.5, is_call=True, payout=10.0)
     dc10_price = engine.price(instrument=digital_10, model=gbm, market=market)
     print(f"Digital Call (payout=10): price={dc10_price.price:.4f}"
-          f"  (= 10× parity {'OK' if abs(dc10_price.price - 10 * dc_price.price) < 1e-6 else 'FAIL'})")
+          f"  (= 10x parity {'OK' if abs(dc10_price.price - 10 * dc_price.price) < 1e-6 else 'FAIL'})")
 
     # -------------------------------------------------------------------------
     # LOOKBACK OPTIONS

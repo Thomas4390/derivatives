@@ -21,6 +21,8 @@ import numpy as np
 from dataclasses import dataclass
 from typing import Callable, NamedTuple, Optional
 
+from backend.utils.math import DAYS_PER_YEAR
+
 if TYPE_CHECKING:
     from backend.core.interfaces import PricingEngine, Instrument, Model
     from backend.core.market import MarketEnvironment
@@ -232,7 +234,7 @@ def finite_difference_theta(
     float
         Theta estimate (per day)
     """
-    h = bump_days / 365.0
+    h = bump_days / DAYS_PER_YEAR
     v_now = price_func(spot, time=time, **kwargs)
     v_later = price_func(spot, time=max(time - h, 0.001), **kwargs)
     return (v_later - v_now) / bump_days
@@ -396,7 +398,7 @@ def finite_difference_charm(
         Charm estimate (per day)
     """
     hs = spot * spot_bump
-    ht = time_bump_days / 365.0
+    ht = time_bump_days / DAYS_PER_YEAR
     time_down = max(time - ht, 0.001)
 
     v_up_now = price_func(spot + hs, time=time, **kwargs)
@@ -448,7 +450,7 @@ def finite_difference_veta(
         Veta estimate (per day per 1% vol)
     """
     hv = vol_bump
-    ht = time_bump_days / 365.0
+    ht = time_bump_days / DAYS_PER_YEAR
     time_down = max(time - ht, 0.001)
 
     v_up_now = price_func(spot, vol=vol + hv, time=time, **kwargs)
@@ -589,7 +591,7 @@ def finite_difference_color(
         Color estimate (per day)
     """
     hs = spot * spot_bump
-    ht = time_bump_days / 365.0
+    ht = time_bump_days / DAYS_PER_YEAR
     time_down = max(time - ht, 0.001)
 
     # Gamma now
@@ -711,7 +713,7 @@ def finite_difference_greeks(
     # Cache commonly reused values
     h_s = spot * _spot_bump
     h_v = _vol_bump
-    h_t = _time_bump_days / 365.0
+    h_t = _time_bump_days / DAYS_PER_YEAR
     h_r = _rate_bump
 
     # Base price
@@ -839,7 +841,7 @@ class ModelNumericalGreeks:
         v_r_down = engine.price(instrument, model, market_r_down).price
 
         # Time bump (requires instrument modification)
-        h_t = self.time_bump_days / 365.0
+        h_t = self.time_bump_days / DAYS_PER_YEAR
         from backend.greeks._instrument_utils import create_decayed_instrument
         new_T = max(instrument.maturity - h_t, 0.001)
         decayed = create_decayed_instrument(instrument, new_T)

@@ -80,6 +80,11 @@ def register_all_engines():
         MonteCarloEngine
     )
 
+    # ExoticAnalyticEngine is NOT registered here. It shares the ANALYTICAL
+    # capability key with BSAnalyticEngine for GBM but handles a disjoint set
+    # of instruments (barrier, Asian geometric, digital, lookback).  It is used
+    # via direct instantiation rather than registry lookup.
+
     # GARCH Family Models: not registered with MonteCarloEngine because
     # _get_terminal_simulator() only supports GBM/Heston/Bates/Merton.
     # GARCH models have their own create_pricer() for risk-neutral MC pricing.

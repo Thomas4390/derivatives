@@ -14,6 +14,7 @@ Engines are the "How" - numerical methods that bridge:
 Available Engines
 -----------------
 - BSAnalyticEngine: Black-Scholes analytical pricing (GBM only)
+- ExoticAnalyticEngine: Closed-form exotic pricing (barrier, Asian geometric, digital, lookback) under GBM
 - FFTEngine: Carr-Madan FFT pricing (any model with characteristic function)
 - MonteCarloEngine: Monte Carlo simulation (any model with SDE)
 
@@ -44,12 +45,12 @@ Usage
 
 Compatibility Matrix
 --------------------
-                        | Analytical | FFT | Monte Carlo |
-    --------------------|------------|-----|-------------|
-    GBMModel            |     ✓      |  ✓  |      ✓      |
-    HestonModel         |     ✗      |  ✓  |      ✓      |
-    BatesModel          |     ✗      |  ✓  |      ✓      |
-    MertonModel         |     ✗      |  ✓  |      ✓      |
+                        | Analytical | Exotic Analytical | FFT | Monte Carlo |
+    --------------------|------------|-------------------|-----|-------------|
+    GBMModel            |     ✓      |        ✓          |  ✓  |      ✓      |
+    HestonModel         |     ✗      |        ✗          |  ✓  |      ✓      |
+    BatesModel          |     ✗      |        ✗          |  ✓  |      ✓      |
+    MertonModel         |     ✗      |        ✗          |  ✓  |      ✓      |
 
 Author: Thomas
 Created: 2025
@@ -58,6 +59,7 @@ Version: 2.0.0
 
 # Engine classes - import from renamed module files
 from backend.engines.analytic_engine import BSAnalyticEngine
+from backend.engines.exotic_engine import ExoticAnalyticEngine
 from backend.engines.fft_engine import FFTEngine
 from backend.engines.mc_engine import MonteCarloEngine
 
@@ -94,6 +96,7 @@ from backend.engines.vectorized_bs import (
 __all__ = [
     # Analytic engines
     "BSAnalyticEngine",
+    "ExoticAnalyticEngine",
     # Fourier engines
     "FFTEngine",
     # Monte Carlo engines

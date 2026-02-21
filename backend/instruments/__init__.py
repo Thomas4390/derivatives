@@ -79,10 +79,20 @@ from backend.instruments.options import (
     # Exotic factories
     AsianCall,
     AsianPut,
+    AsianGeometricCall,
+    AsianGeometricPut,
     BarrierUpOutCall,
+    BarrierUpInCall,
+    BarrierDownOutCall,
+    BarrierDownInCall,
+    BarrierUpOutPut,
+    BarrierUpInPut,
     BarrierDownOutPut,
+    BarrierDownInPut,
     LookbackCall,
     LookbackPut,
+    LookbackFixedCall,
+    LookbackFixedPut,
 )
 
 # Strategies
@@ -142,10 +152,20 @@ __all__ = [
     # Exotic factories
     "AsianCall",
     "AsianPut",
+    "AsianGeometricCall",
+    "AsianGeometricPut",
     "BarrierUpOutCall",
+    "BarrierUpInCall",
+    "BarrierDownOutCall",
+    "BarrierDownInCall",
+    "BarrierUpOutPut",
+    "BarrierUpInPut",
     "BarrierDownOutPut",
+    "BarrierDownInPut",
     "LookbackCall",
     "LookbackPut",
+    "LookbackFixedCall",
+    "LookbackFixedPut",
     # Strategies
     "StrategyLeg",
     "OptionStrategy",

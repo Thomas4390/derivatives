@@ -42,6 +42,7 @@ def create_decayed_instrument(instrument: Instrument, new_maturity: float) -> Op
             is_up=instrument.is_up,
             is_knock_in=instrument.is_knock_in,
             rebate=instrument.rebate,
+            exercise=instrument.exercise_style,
         )
     elif isinstance(instrument, AsianOption):
         return AsianOption(
@@ -49,6 +50,7 @@ def create_decayed_instrument(instrument: Instrument, new_maturity: float) -> Op
             maturity=new_maturity,
             is_call=instrument.is_call,
             average_type=instrument.average_type,
+            exercise=instrument.exercise_style,
         )
     elif isinstance(instrument, DigitalOption):
         return DigitalOption(
@@ -56,6 +58,7 @@ def create_decayed_instrument(instrument: Instrument, new_maturity: float) -> Op
             maturity=new_maturity,
             is_call=instrument.is_call,
             payout=instrument.payout,
+            exercise=instrument.exercise_style,
         )
     elif isinstance(instrument, LookbackOption):
         return LookbackOption(
@@ -63,12 +66,14 @@ def create_decayed_instrument(instrument: Instrument, new_maturity: float) -> Op
             is_call=instrument.is_call,
             strike=instrument.strike,
             lookback_type=instrument.lookback_type,
+            exercise=instrument.exercise_style,
         )
     elif isinstance(instrument, VanillaOption):
         return VanillaOption(
             strike=instrument.strike,
             maturity=new_maturity,
             is_call=instrument.is_call,
+            exercise=instrument.exercise_style,
         )
     else:
         return None
