@@ -13,7 +13,7 @@ Created: 2025
 from typing import Callable, Dict, List, Optional, Type, Tuple, Union
 
 from backend.core.interfaces import Instrument, Model, PricingEngine
-from backend.core.result_types import PricingResult, PricingCapability, ExerciseStyle
+from backend.core.result_types import PricingResult, PricingCapability
 from backend.core.market import MarketEnvironment
 
 # Type alias for engine providers

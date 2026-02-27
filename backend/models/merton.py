@@ -19,10 +19,14 @@ Author: Thomas
 Created: 2025
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass
-from typing import List, Dict, Any
+from typing import List, Dict, Any, TYPE_CHECKING
 import numpy as np
-from numba import njit
+
+if TYPE_CHECKING:
+    from backend.models.gbm import GBMModel
 
 from backend.core.interfaces import Model
 from backend.core.result_types import PricingCapability
@@ -306,18 +310,18 @@ if __name__ == "__main__":
     print(f"Supported engines: {model.supported_engines}")
 
     # Parameters
-    print(f"\n--- Parameters ---")
+    print("\n--- Parameters ---")
     for k, v in model.get_parameters().items():
         print(f"  {k}: {v}")
 
     # Jump characteristics
-    print(f"\n--- Jump Characteristics ---")
+    print("\n--- Jump Characteristics ---")
     print(f"Expected jumps/year: {model.expected_jumps_per_year()}")
     print(f"Expected jump size: {model.expected_jump_size:.2%}")
     print(f"Jump variance contribution: {model.jump_contribution_to_variance():.4f}")
 
     # Variance decomposition
-    print(f"\n--- Variance Decomposition ---")
+    print("\n--- Variance Decomposition ---")
     print(f"Diffusion variance: {model.variance:.4f}")
     print(f"Jump variance: {model.jump_contribution_to_variance():.4f}")
     print(f"Total variance: {model.total_variance():.4f}")

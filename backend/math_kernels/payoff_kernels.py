@@ -12,7 +12,6 @@ Created: 2025
 
 import numpy as np
 from numba import njit, prange
-import math
 
 
 # =============================================================================
@@ -470,13 +469,13 @@ if __name__ == "__main__":
 
     # Test butterfly
     spots_wide = np.linspace(85, 115, 7)
-    print(f"\nButterfly payoff (K_low=95, K_mid=100, K_high=105):")
+    print("\nButterfly payoff (K_low=95, K_mid=100, K_high=105):")
     print(f"  Spots: {spots_wide}")
     print(f"  Payoff: {butterfly_payoff(spots_wide, 95, 100, 105)}")
 
     # Test Asian payoff
     path = np.array([100.0, 102.0, 98.0, 105.0, 110.0])
-    print(f"\nAsian arithmetic call (K=100):")
+    print("\nAsian arithmetic call (K=100):")
     print(f"  Path average: {np.mean(path):.2f}")
     print(f"  Payoff: {asian_arithmetic_payoff(path, 100.0, True):.2f}")
 

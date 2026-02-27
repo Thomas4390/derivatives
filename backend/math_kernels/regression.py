@@ -11,7 +11,6 @@ Created: 2025
 
 import numpy as np
 from numba import njit, prange
-import math
 
 
 # =============================================================================
@@ -380,16 +379,16 @@ if __name__ == "__main__":
 
     # Test polynomial basis
     poly = polynomial_basis(2.0, 3)
-    print(f"\nPolynomial basis at x=2:")
+    print("\nPolynomial basis at x=2:")
     print(f"  [1, x, x², x³] = {poly}")
 
     # Test least squares regression
     X = np.array([[1.0, 1.0], [1.0, 2.0], [1.0, 3.0], [1.0, 4.0]])
     y = np.array([2.0, 4.0, 5.0, 4.0])
     beta = lstsq_regression(X, y)
-    print(f"\nLeast squares regression:")
-    print(f"  X = [[1,1],[1,2],[1,3],[1,4]]")
-    print(f"  y = [2, 4, 5, 4]")
+    print("\nLeast squares regression:")
+    print("  X = [[1,1],[1,2],[1,3],[1,4]]")
+    print("  y = [2, 4, 5, 4]")
     print(f"  beta = {beta}")
 
     # Test continuation value
@@ -407,7 +406,7 @@ if __name__ == "__main__":
         spots, future_payoffs * discount, itm_mask, order=2, use_laguerre=True
     )
 
-    print(f"\nContinuation value estimation:")
+    print("\nContinuation value estimation:")
     print(f"  N paths: {n_paths}")
     print(f"  N ITM: {itm_mask.sum()}")
     print(f"  Mean continuation value (ITM): {cont_vals[itm_mask].mean():.4f}")

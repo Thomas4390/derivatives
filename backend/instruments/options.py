@@ -903,7 +903,7 @@ if __name__ == "__main__":
     print(f"  Euro Put payoffs: {euro_put.payoff(spots)}")
 
     # Test exercise style checks
-    print(f"\nExercise style checks:")
+    print("\nExercise style checks:")
     print(f"  Euro Call is_european: {euro_call.is_european}")
     print(f"  Amer Put is_american: {amer_put.is_american}")
     print(f"  Berm Call is_bermudan: {berm_call.is_bermudan}")

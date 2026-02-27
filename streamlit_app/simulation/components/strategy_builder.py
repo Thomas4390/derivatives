@@ -8,10 +8,9 @@ with editable legs and full customization support.
 import streamlit as st
 import numpy as np
 from dataclasses import dataclass
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Optional, Tuple
 
 # Import strategy definitions from option_pricer using importlib
-import sys
 from pathlib import Path
 import importlib.util
 
@@ -160,8 +159,8 @@ def render_strategy_builder(
         strategy_legs = list(base_strategy_legs) + additional
         has_stock = has_stock or st.session_state.pnl_additional_stock.get(additional_legs_key, False)
 
-    # Initialize state and check if auto-apply needed
-    should_auto_apply = _initialize_strategy_state(
+    # Initialize state
+    _initialize_strategy_state(
         selected_strategy, strategy_legs, has_stock, spot_price
     )
 

@@ -15,8 +15,6 @@ from backend.simulation.base import SimulationResult
 from utils.model_helpers import (
     get_model_icon,
     get_volatility_type,
-    format_volatility_display,
-    compute_summary_statistics,
 )
 from services.simulation_service import (
     get_model_characteristics,
@@ -144,7 +142,6 @@ def _render_distribution_stats(result: SimulationResult):
         cvar_95 = np.mean(terminal_prices[terminal_prices <= var_95])
 
         # Skewness and kurtosis
-        n = len(returns)
         mean_r = np.mean(returns)
         std_r = np.std(returns, ddof=1)
         skewness = np.mean(((returns - mean_r) / std_r) ** 3)

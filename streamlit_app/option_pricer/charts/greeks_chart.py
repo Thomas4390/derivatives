@@ -19,8 +19,6 @@ from config.constants import (
 )
 from config.chart_theme import (
     GREEK_COLORS,
-    LAYOUT_DEFAULTS,
-    AXIS_DEFAULTS,
     SLIDER_DEFAULTS,
     CHART_COLORS,
     get_layout_config
@@ -188,7 +186,7 @@ def _add_greek_traces(
                     line=dict(width=2.5, color=greek_color),
                     showlegend=False,
                     hovertemplate=(
-                        f'<b>Underlying:</b> $%{{x:,.2f}}<br>' +
+                        '<b>Underlying:</b> $%{x:,.2f}<br>' +
                         f'<b>DTE:</b> {dte} days<br>' +
                         f'<b>{greek_title}:</b> %{{y:.4f}}<br>' +
                         '<extra></extra>'
@@ -222,7 +220,7 @@ def _add_greek_traces(
                     line=dict(width=2.5, color=greek_color),
                     showlegend=False,
                     hovertemplate=(
-                        f'<b>Underlying:</b> $%{{x:,.2f}}<br>' +
+                        '<b>Underlying:</b> $%{x:,.2f}<br>' +
                         f'<b>IV:</b> {iv}%<br>' +
                         f'<b>{greek_title}:</b> %{{y:.4f}}<br>' +
                         '<extra></extra>'
@@ -292,7 +290,7 @@ def _add_individual_leg_traces(
                 legendgroup=leg_key,
                 hovertemplate=(
                     f'<b>{leg_label}</b><br>' +
-                    f'<b>Underlying:</b> $%{{x:,.2f}}<br>' +
+                    '<b>Underlying:</b> $%{x:,.2f}<br>' +
                     f'<b>{greek_title}:</b> %{{y:.4f}}<br>' +
                     '<extra></extra>'
                 )
@@ -361,7 +359,7 @@ def create_greeks_subplot_strike(
                     line=dict(width=2.5, color=greek_color),
                     showlegend=False,
                     hovertemplate=(
-                        f'<b>Underlying:</b> $%{{x:,.2f}}<br>' +
+                        '<b>Underlying:</b> $%{x:,.2f}<br>' +
                         f'<b>Strike:</b> ${strike_price:.0f}<br>' +
                         f'<b>{greek_title}:</b> %{{y:.4f}}<br>' +
                         '<extra></extra>'

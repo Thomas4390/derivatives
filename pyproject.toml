@@ -42,3 +42,15 @@ filterwarnings = [
     "ignore::DeprecationWarning",
     "ignore::PendingDeprecationWarning",
 ]
+
+[tool.ruff]
+exclude = [".venv"]
+
+[tool.ruff.lint]
+# E402: Module import not at top — Streamlit apps use sys.path before imports
+# F403: Import star — used in config __init__.py for convenience re-exports
+ignore = ["E402", "F403"]
+
+[tool.ruff.lint.per-file-ignores]
+# F401: Unused imports in __init__.py are intentional re-exports
+"__init__.py" = ["F401"]

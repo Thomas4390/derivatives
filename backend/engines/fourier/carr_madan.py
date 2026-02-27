@@ -505,7 +505,7 @@ if __name__ == "__main__":
     # Test put-call parity: C - P = S - K*exp(-rT)
     parity_check = call_price - put_price
     parity_expected = s0 - k * np.exp(-r * t)
-    print(f"\nPut-Call Parity:")
+    print("\nPut-Call Parity:")
     print(f"  C - P = ${parity_check:.4f}")
     print(f"  S - K*e^(-rT) = ${parity_expected:.4f}")
     print(f"  Difference: ${abs(parity_check - parity_expected):.6f}")

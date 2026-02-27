@@ -504,7 +504,7 @@ if __name__ == "__main__":
     delta, gamma, vega, theta, rho = bs_greeks_first_order(
         s, k, t, r, q, sigma, is_call=True
     )
-    print(f"\nFirst-Order Greeks (ATM Call):")
+    print("\nFirst-Order Greeks (ATM Call):")
     print(f"  Delta: {delta:.6f}")
     print(f"  Gamma: {gamma:.6f}")
     print(f"  Vega:  {vega:.6f} (per 1% vol)")
@@ -513,7 +513,7 @@ if __name__ == "__main__":
 
     # Second order Greeks
     vanna, volga, charm, veta = bs_greeks_second_order(s, k, t, r, q, sigma)
-    print(f"\nSecond-Order Greeks:")
+    print("\nSecond-Order Greeks:")
     print(f"  Vanna: {vanna:.6f}")
     print(f"  Volga: {volga:.6f}")
     print(f"  Charm: {charm:.6f}")
@@ -521,7 +521,7 @@ if __name__ == "__main__":
 
     # Third order Greeks
     speed, zomma, color, ultima = bs_greeks_third_order(s, k, t, r, q, sigma)
-    print(f"\nThird-Order Greeks:")
+    print("\nThird-Order Greeks:")
     print(f"  Speed:  {speed:.8f}")
     print(f"  Zomma:  {zomma:.8f}")
     print(f"  Color:  {color:.8f}")
@@ -529,7 +529,7 @@ if __name__ == "__main__":
 
     # All Greeks
     all_greeks = bs_all_greeks(s, k, t, r, q, sigma, is_call=True)
-    print(f"\nAll Greeks (price included):")
+    print("\nAll Greeks (price included):")
     print(f"  Price: ${all_greeks[0]:.4f}")
 
     print("\n" + "=" * 50)

@@ -6,7 +6,6 @@ Provides P&L calculation from simulation results.
 
 import time as time_module
 from typing import Dict, Any, Optional
-import numpy as np
 
 from backend.simulation.base import SimulationResult
 from backend.portfolio.pnl import (

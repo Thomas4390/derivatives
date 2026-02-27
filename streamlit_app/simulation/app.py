@@ -15,7 +15,7 @@ sys.path.insert(0, str(app_dir))
 
 import streamlit as st
 import numpy as np
-from scipy.stats import norm
+from backend.utils.math import bs_price as _backend_bs_price
 from backend.portfolio.pnl import compute_payoff_curve, find_breakeven_points
 
 from config.styles import inject_styles, render_compact_header, footer_html, metric_card_html
@@ -45,31 +45,12 @@ from services.simulation_service import (
     run_simulation,
     check_model_conditions,
     get_initial_volatility,
-    MODEL_NAMES,
 )
 from components.path_explorer_params import render_explorer_params
 from services.pricing_service import get_available_pricing_methods
 from services.simulation_runner import calculate_pnl_from_paths
 from components.custom_model_editor import render_custom_model_editor
 from services.simulation_service import get_model_display_name
-
-
-# ── Black-Scholes helpers (for strategy builder premium calc) ────────────
-
-def _bs_call(S, K, T, r, sigma):
-    if T <= 0:
-        return max(S - K, 0)
-    d1 = (np.log(S / K) + (r + 0.5 * sigma**2) * T) / (sigma * np.sqrt(T))
-    d2 = d1 - sigma * np.sqrt(T)
-    return S * norm.cdf(d1) - K * np.exp(-r * T) * norm.cdf(d2)
-
-
-def _bs_put(S, K, T, r, sigma):
-    if T <= 0:
-        return max(K - S, 0)
-    d1 = (np.log(S / K) + (r + 0.5 * sigma**2) * T) / (sigma * np.sqrt(T))
-    d2 = d1 - sigma * np.sqrt(T)
-    return K * np.exp(-r * T) * norm.cdf(-d2) - S * norm.cdf(-d1)
 
 
 # ═════════════════════════════════════════════════════════════════════════
@@ -123,7 +104,7 @@ with st.sidebar:
     st.markdown("### Option Strategy")
 
     def _bs_price(s, k, r, t, sigma, opt_type):
-        return _bs_call(s, k, t, r, sigma) if opt_type == "call" else _bs_put(s, k, t, r, sigma)
+        return _backend_bs_price(s, k, t, r, sigma, is_call=(opt_type == "call"))
 
     positions, stock_position = render_strategy_builder(
         spot_price=market_params.get("spot", 100.0),

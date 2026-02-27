@@ -276,13 +276,13 @@ if __name__ == "__main__":
         # Third order
         speed=0.001, zomma=0.0005, color=-0.0001, ultima=0.0003,
     )
-    print(f"\nGreeks (all orders):")
+    print("\nGreeks (all orders):")
     print(f"  1st order: {greeks.first_order()}")
     print(f"  2nd order: {greeks.second_order()}")
     print(f"  3rd order: {greeks.third_order()}")
 
     # Test aliases
-    print(f"\nAliases:")
+    print("\nAliases:")
     print(f"  volga == vomma: {greeks.volga == greeks.vomma}")
     print(f"  charm == delta_decay: {greeks.charm == greeks.delta_decay}")
 

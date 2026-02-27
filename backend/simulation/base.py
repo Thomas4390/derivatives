@@ -20,7 +20,7 @@ Created: 2025
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Optional, Tuple, Dict, Any
+from typing import Optional, Dict, Any
 import numpy as np
 
 

@@ -25,7 +25,7 @@ Position dict formats:
 """
 
 import streamlit as st
-from typing import Any, Optional
+from typing import Optional
 
 
 def init_session_state() -> None:

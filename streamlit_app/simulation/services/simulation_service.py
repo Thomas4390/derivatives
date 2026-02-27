@@ -12,7 +12,7 @@ from typing import Dict, Any, Optional, Union
 import numpy as np
 
 # Backend imports
-from backend.simulation.factory import create_simulator, ModelType
+from backend.simulation.factory import create_simulator
 from backend.simulation.base import SimulationResult
 
 

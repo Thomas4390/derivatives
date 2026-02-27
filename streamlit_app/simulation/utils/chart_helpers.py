@@ -7,7 +7,7 @@ used across the application.
 
 import numpy as np
 import plotly.graph_objects as go
-from typing import Dict, Any, Optional, List, Tuple, Union
+from typing import Optional, List
 
 # Import constants from config
 import sys
@@ -16,7 +16,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from config.constants import (
     CHART_HEIGHT_STANDARD,
-    CHART_HEIGHT_LARGE,
 )
 
 

@@ -10,12 +10,9 @@ Created: 2025
 
 import pytest
 import numpy as np
-from typing import List, Tuple
 
 from backend.portfolio import (
     OptionsPortfolio,
-    PortfolioPosition,
-    StockPosition,
     long_call,
     short_call,
     long_put,
@@ -24,7 +21,6 @@ from backend.portfolio import (
     short_stock,
 )
 from backend.portfolio.breakeven import (
-    BreakevenCalculator,
     BreakevenResult,
     find_breakevens,
     find_breakevens_from_portfolio,
@@ -1126,7 +1122,7 @@ class TestPortfolioGreeks:
             s=market.spot, k=100.0, t=0.25, r=market.rate,
             q=market.dividend_yield, sigma=0.20, is_call=True
         )
-        bs_delta, bs_gamma, bs_vega, bs_theta = bs[1], bs[2], bs[3], bs[4]
+        bs_delta, bs_gamma, _, _ = bs[1], bs[2], bs[3], bs[4]
 
         np.testing.assert_allclose(port_greeks.delta, bs_delta, rtol=0.02)
         np.testing.assert_allclose(port_greeks.gamma, bs_gamma, rtol=0.02)

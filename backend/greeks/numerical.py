@@ -17,7 +17,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import numpy as np
 from dataclasses import dataclass
 from typing import Callable, NamedTuple, Optional
 
@@ -906,7 +905,7 @@ if __name__ == "__main__":
         spot, 100.0, time, rate, 0.0, vol, True
     )
 
-    print(f"\nComparison (Numerical vs Analytic):")
+    print("\nComparison (Numerical vs Analytic):")
     print(f"  Delta: {num_greeks.delta:.6f} vs {a_delta:.6f}")
     print(f"  Gamma: {num_greeks.gamma:.6f} vs {a_gamma:.6f}")
     print(f"  Vega:  {num_greeks.vega:.6f} vs {a_vega:.6f}")

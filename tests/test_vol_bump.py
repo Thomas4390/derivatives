@@ -15,8 +15,6 @@ from backend.models.vol_bump import create_vol_bumped_model, create_vol_bumped_p
 from backend.models.gbm import GBMModel
 from backend.models.heston import HestonModel
 from backend.models.bates import BatesModel
-from backend.models.merton import MertonModel
-from backend.models.garch import GARCHModel, NGARCHModel, GJRGARCHModel
 
 
 class TestVolBump:

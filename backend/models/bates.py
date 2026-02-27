@@ -21,9 +21,14 @@ Author: Thomas
 Created: 2025
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass
-from typing import List, Dict, Any
+from typing import List, Dict, Any, TYPE_CHECKING
 import numpy as np
+
+if TYPE_CHECKING:
+    from backend.models.heston import HestonModel
 
 from backend.core.interfaces import Model
 from backend.core.result_types import PricingCapability
@@ -450,17 +455,17 @@ if __name__ == "__main__":
     print(f"Supported engines: {model.supported_engines}")
 
     # Parameters
-    print(f"\n--- Parameters ---")
+    print("\n--- Parameters ---")
     for k, v in model.get_parameters().items():
         print(f"  {k}: {v}")
 
     # Feller condition
-    print(f"\n--- Feller Condition ---")
+    print("\n--- Feller Condition ---")
     print(f"Feller satisfied: {model.feller_satisfied}")
     print(f"Feller ratio: {model.feller_ratio:.2f}")
 
     # Jump characteristics
-    print(f"\n--- Jump Characteristics ---")
+    print("\n--- Jump Characteristics ---")
     print(f"Expected jumps/year: {model.expected_jumps_per_year()}")
     print(f"Expected jump size: {model.expected_jump_size:.2%}")
     print(f"Jump variance contribution: {model.jump_contribution_to_variance():.4f}")

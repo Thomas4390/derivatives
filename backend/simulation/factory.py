@@ -11,7 +11,7 @@ Author: Thomas
 Created: 2025
 """
 
-from typing import Dict, Any, Optional, Type, Union
+from typing import Dict, Any, Type, Union
 
 from backend.simulation.base import BaseSimulator
 from backend.simulation.enums import ModelType, DiscretizationScheme
@@ -340,14 +340,14 @@ if __name__ == "__main__":
     try:
         create_simulator("unknown_model")
         print("  ERROR: Should have raised ValueError")
-    except ValueError as e:
-        print(f"  Unknown model rejected: ✓")
+    except ValueError:
+        print("  Unknown model rejected: ✓")
 
     try:
         create_simulator(123)  # Invalid type
         print("  ERROR: Should have raised TypeError")
-    except TypeError as e:
-        print(f"  Invalid type rejected: ✓")
+    except TypeError:
+        print("  Invalid type rejected: ✓")
 
     # Test simulation
     print("\n--- Simulation Test ---")

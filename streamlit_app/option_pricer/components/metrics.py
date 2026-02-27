@@ -211,15 +211,12 @@ def render_chart_controls(
             if option == "DTE":
                 icon = "📅"
                 label = "DTE"
-                description = "Days to Expiry"
             elif option == "IV":
                 icon = "📊"
                 label = "IV"
-                description = "Volatility"
             else:
                 icon = "🎯"
                 label = "Strike"
-                description = "Strike Price"
 
             is_selected = (selected == option)
 

@@ -38,7 +38,6 @@ from backend.instruments import (
     LookbackCall,
     LookbackPut,
     LookbackFixedCall,
-    LookbackFixedPut,
     LookbackFloatingCallPayoff,
     LookbackFloatingPutPayoff,
     # Digital
@@ -49,7 +48,7 @@ from backend.engines.analytic_engine import BSAnalyticEngine
 from backend.instruments.options import VanillaOption
 from backend.models.gbm import GBMModel
 from backend.core.market import MarketEnvironment
-from backend.core.result_types import PricingResult, GreeksResult
+from backend.core.result_types import GreeksResult
 
 
 class TestAsianOption:
@@ -1045,7 +1044,7 @@ class TestExoticEdgeCases:
         assert p_ko >= 0.0
         assert p_ki >= 0.0
         np.testing.assert_allclose(p_ko + p_ki, p_van, rtol=1e-5,
-            err_msg=f"KO+KI parity must hold with negative rate")
+            err_msg="KO+KI parity must hold with negative rate")
 
     # =========================================================================
     # Deep ITM/OTM
@@ -1117,7 +1116,7 @@ class TestExoticEdgeCases:
             f"Call with q=0.03 ({p_div:.4f}) should be < with q=0 ({p_no:.4f})"
 
 
-class TestExoticEdgeCases:
+class TestExoticEdgeCasesZero:
     """Edge-case tests for exotic pricing kernels at T=0 and sigma=0."""
 
     def test_asian_geometric_intrinsic_at_expiry_call(self):

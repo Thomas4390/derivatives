@@ -618,11 +618,11 @@ if __name__ == "__main__":
     call = VanillaCallPayoff(strike=100.0)
     put = VanillaPutPayoff(strike=100.0)
 
-    print(f"\nVanilla Call (K=100):")
+    print("\nVanilla Call (K=100):")
     print(f"  Spots: {spots}")
     print(f"  Payoffs: {call(spots)}")
 
-    print(f"\nVanilla Put (K=100):")
+    print("\nVanilla Put (K=100):")
     print(f"  Spots: {spots}")
     print(f"  Payoffs: {put(spots)}")
 
@@ -630,19 +630,19 @@ if __name__ == "__main__":
     digital_call = DigitalCallPayoff(strike=100.0, payout=10.0)
     digital_put = DigitalPutPayoff(strike=100.0, payout=10.0)
 
-    print(f"\nDigital Call (K=100, payout=10):")
+    print("\nDigital Call (K=100, payout=10):")
     print(f"  Payoffs: {digital_call(spots)}")
 
-    print(f"\nDigital Put (K=100, payout=10):")
+    print("\nDigital Put (K=100, payout=10):")
     print(f"  Payoffs: {digital_put(spots)}")
 
     # Composite payoff (straddle)
     straddle = CompositePayoff([(1.0, call), (1.0, put)])
-    print(f"\nStraddle (Call + Put at K=100):")
+    print("\nStraddle (Call + Put at K=100):")
     print(f"  Payoffs: {straddle(spots)}")
 
     # Test path dependency
-    print(f"\nPath dependency:")
+    print("\nPath dependency:")
     print(f"  Call: {call.is_path_dependent}")
     print(f"  Straddle: {straddle.is_path_dependent}")
 

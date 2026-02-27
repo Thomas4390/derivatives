@@ -13,7 +13,7 @@ Created: 2025
 """
 
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import List
 import numpy as np
 from scipy.stats import norm
 
@@ -333,20 +333,20 @@ if __name__ == "__main__":
     model = GBMModel(sigma=0.20)
     market = MarketEnvironment(spot=100, rate=0.05, dividend_yield=0.02)
 
-    print(f"\n--- Setup ---")
+    print("\n--- Setup ---")
     print(f"Option: K={option.strike}, T={option.maturity}, Call={option.is_call}")
     print(f"Model: {model}")
     print(f"Market: S0={market.spot}, r={market.rate}, q={market.dividend_yield}")
 
     # Test pricing
-    print(f"\n--- Pricing ---")
+    print("\n--- Pricing ---")
     result = engine.price(option, model, market)
     print(f"Price: ${result.price:.4f}")
     print(f"Engine: {result.engine}")
     print(f"Model: {result.model}")
 
     # Test Greeks
-    print(f"\n--- Greeks ---")
+    print("\n--- Greeks ---")
     greeks = engine.greeks(option, model, market)
     print(f"Delta: {greeks.delta:.4f}")
     print(f"Gamma: {greeks.gamma:.6f}")
@@ -357,7 +357,7 @@ if __name__ == "__main__":
     print(f"Volga: {greeks.volga:.6f}")
 
     # Test put option
-    print(f"\n--- Put Option ---")
+    print("\n--- Put Option ---")
     put_option = VanillaOption(strike=100, maturity=0.5, is_call=False)
     put_result = engine.price(put_option, model, market)
     put_greeks = engine.greeks(put_option, model, market)
@@ -365,7 +365,7 @@ if __name__ == "__main__":
     print(f"Put Delta: {put_greeks.delta:.4f}")
 
     # Verify put-call parity
-    print(f"\n--- Put-Call Parity Check ---")
+    print("\n--- Put-Call Parity Check ---")
     call_price = result.price
     put_price = put_result.price
     parity_rhs = market.spot * np.exp(-market.dividend_yield * option.maturity) - option.strike * np.exp(-market.rate * option.maturity)
@@ -375,7 +375,7 @@ if __name__ == "__main__":
     print(f"Parity holds: {abs(parity_lhs - parity_rhs) < 0.001}")
 
     # Test implied volatility
-    print(f"\n--- Implied Volatility ---")
+    print("\n--- Implied Volatility ---")
     target_price = result.price
     iv = engine.implied_volatility(target_price, option, market)
     print(f"Original sigma: {model.sigma:.4f}")
@@ -383,7 +383,7 @@ if __name__ == "__main__":
     print(f"IV recovery: {abs(iv - model.sigma) < 1e-6}")
 
     # Test can_price
-    print(f"\n--- Compatibility Check ---")
+    print("\n--- Compatibility Check ---")
     print(f"Can price European call with GBM: {engine.can_price(option, model)}")
 
     from backend.models.heston import HestonModel

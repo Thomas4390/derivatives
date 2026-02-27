@@ -14,7 +14,7 @@ Author: Thomas
 Created: 2025
 """
 
-from typing import Optional, Union, List
+from typing import Optional
 import numpy as np
 
 
@@ -583,8 +583,8 @@ if __name__ == "__main__":
             v0=0.04, kappa=1.0, theta=0.04, xi=1.0, rho=-0.7
         )
         print("  ERROR: Should have raised FellerConditionError")
-    except FellerConditionError as e:
-        print(f"  Feller violation: Caught FellerConditionError")
+    except FellerConditionError:
+        print("  Feller violation: Caught FellerConditionError")
 
     # Test arbitrage bounds
     print("\n--- Arbitrage Validation ---")
@@ -603,8 +603,8 @@ if __name__ == "__main__":
             maturity=1.0, rate=0.05, is_call=True
         )
         print("  ERROR: Should have raised for price > spot")
-    except ArbitrageViolationError as e:
-        print(f"  Price too high: Caught ArbitrageViolationError")
+    except ArbitrageViolationError:
+        print("  Price too high: Caught ArbitrageViolationError")
 
     print("\n" + "=" * 50)
     print("Validation module smoke test passed")

@@ -13,14 +13,12 @@ import numpy as np
 
 from streamlit_app.simulation.config.model_registry import (
     MODEL_REGISTRY,
-    ModelSpec,
     ModelCategory,
     PricingMethod,
     ParameterSpec,
     MARKET_PARAMETERS,
     SIMULATION_PARAMETERS,
     get_model,
-    get_parameter_defaults,
 )
 
 
@@ -392,7 +390,6 @@ def compute_skewness(x: np.ndarray) -> float:
 
 def compute_kurtosis(x: np.ndarray) -> float:
     """Compute excess kurtosis."""
-    n = len(x)
     mean = np.mean(x)
     std = np.std(x, ddof=1)
     m4 = np.mean((x - mean) ** 4)

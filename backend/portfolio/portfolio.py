@@ -13,7 +13,6 @@ Author: Thomas
 Created: 2025
 """
 
-from dataclasses import dataclass
 from typing import List, Optional, Union, Tuple
 import numpy as np
 
@@ -595,8 +594,7 @@ if __name__ == "__main__":
     from backend.models.gbm import GBMModel
     from backend.models.heston import HestonModel
     from backend.core.market import MarketEnvironment
-    from backend.engines import BSAnalyticEngine, FFTEngine
-    from backend.portfolio.positions import long_call, short_call, long_put, long_stock
+    from backend.portfolio.positions import long_call, short_call, long_stock
 
     print("=" * 50)
     print("Portfolio Module Smoke Test")
@@ -606,12 +604,12 @@ if __name__ == "__main__":
     gbm = GBMModel(sigma=0.20)
     market = MarketEnvironment(spot=100, rate=0.05, dividend_yield=0.02)
 
-    print(f"\n--- Setup ---")
+    print("\n--- Setup ---")
     print(f"Model: {gbm}")
     print(f"Market: S={market.spot}, r={market.rate}, q={market.dividend_yield}")
 
     # Build portfolio (Bull Call Spread)
-    print(f"\n--- Bull Call Spread ---")
+    print("\n--- Bull Call Spread ---")
     portfolio = OptionsPortfolio(model=gbm)
     portfolio.add(long_call(strike=95, maturity=0.5, premium=8.0))
     portfolio.add(short_call(strike=105, maturity=0.5, premium=3.0))
@@ -624,7 +622,7 @@ if __name__ == "__main__":
 
     # Greeks
     greeks = portfolio.greeks(market)
-    print(f"\n--- Greeks ---")
+    print("\n--- Greeks ---")
     print(f"Delta: {greeks.delta:.4f}")
     print(f"Gamma: {greeks.gamma:.6f}")
     print(f"Theta: {greeks.theta:.4f}")
@@ -632,14 +630,14 @@ if __name__ == "__main__":
     print(f"Rho: {greeks.rho:.4f}")
 
     # P&L at expiry
-    print(f"\n--- P&L at Expiry ---")
+    print("\n--- P&L at Expiry ---")
     spots = np.array([85, 90, 95, 100, 105, 110, 115])
     pnls = portfolio.pnl_at_expiry(spots)
     for s, p in zip(spots, pnls):
         print(f"  Spot={s}: P&L=${p:.2f}")
 
     # Test with Heston model
-    print(f"\n--- Heston Model ---")
+    print("\n--- Heston Model ---")
     heston = HestonModel(v0=0.04, kappa=2.0, theta=0.04, xi=0.3, rho=-0.7)
     portfolio_heston = OptionsPortfolio(model=heston)
     portfolio_heston.add(long_call(strike=100, maturity=0.5, premium=5.0))
@@ -650,7 +648,7 @@ if __name__ == "__main__":
     print(f"Delta: {greeks_heston.delta:.4f}")
 
     # Test with stock
-    print(f"\n--- Portfolio with Stock ---")
+    print("\n--- Portfolio with Stock ---")
     covered_call = OptionsPortfolio(model=gbm)
     covered_call.add(long_stock(quantity=100, entry_price=100.0))
     covered_call.add(short_call(strike=105, maturity=0.5, premium=3.0))

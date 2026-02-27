@@ -132,7 +132,6 @@ class TestPricingCapabilityIdentity:
 
     def test_pricing_capability_consistency(self):
         """Registry capabilities should be identical to model capabilities."""
-        from backend.core.result_types import PricingCapability
 
         model = GBMModel(sigma=0.20)
         engines = get_registered_engines_for_model(model.name)
@@ -194,7 +193,6 @@ class TestEngineRegistryLifecycle:
     def test_get_engine_preferred_capability(self):
         """Verify preferred capability selection."""
         from backend.instruments.options import VanillaOption
-        from backend.core.market import MarketEnvironment
         from backend.engines import FFTEngine
 
         model = GBMModel(sigma=0.20)

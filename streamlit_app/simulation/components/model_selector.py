@@ -17,7 +17,6 @@ from config.model_registry import (
 )
 from utils.model_helpers import (
     get_model_icon,
-    get_short_description,
     get_volatility_type,
     get_feature_badges,
 )

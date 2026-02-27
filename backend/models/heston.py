@@ -419,7 +419,7 @@ if __name__ == "__main__":
     print(f"Supported engines: {model.supported_engines}")
 
     # Feller condition
-    print(f"\n--- Feller Condition ---")
+    print("\n--- Feller Condition ---")
     print(f"Feller satisfied: {model.feller_satisfied}")
     print(f"Feller ratio: {model.feller_ratio:.2f}")
     print(f"Initial vol: {model.initial_volatility:.1%}")
@@ -451,7 +451,7 @@ if __name__ == "__main__":
     print(f"Variance diffusion at V=0.04: {var_diff:.4f}")
 
     # Expected variance
-    print(f"\n--- Variance Evolution ---")
+    print("\n--- Variance Evolution ---")
     for t in [0.0, 0.5, 1.0, 5.0]:
         print(f"E[V_{t}] = {model.mean_variance(t):.4f} (vol = {np.sqrt(model.mean_variance(t)):.1%})")
 

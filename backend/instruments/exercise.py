@@ -324,7 +324,7 @@ if __name__ == "__main__":
 
     # Test European
     european = create_exercise('european', maturity=1.0)
-    print(f"\nEuropean Exercise:")
+    print("\nEuropean Exercise:")
     print(f"  Maturity: {european.maturity}")
     print(f"  Can exercise at t=0.5: {european.can_exercise(0.5)}")
     print(f"  Can exercise at t=1.0: {european.can_exercise(1.0)}")
@@ -332,7 +332,7 @@ if __name__ == "__main__":
 
     # Test American
     american = create_exercise('american', maturity=1.0)
-    print(f"\nAmerican Exercise:")
+    print("\nAmerican Exercise:")
     print(f"  Maturity: {american.maturity}")
     print(f"  Can exercise at t=0.0: {american.can_exercise(0.0)}")
     print(f"  Can exercise at t=0.5: {american.can_exercise(0.5)}")
@@ -345,7 +345,7 @@ if __name__ == "__main__":
         maturity=1.0,
         exercise_dates=[0.25, 0.5, 0.75, 1.0]
     )
-    print(f"\nBermudan Exercise:")
+    print("\nBermudan Exercise:")
     print(f"  Maturity: {bermudan.maturity}")
     print(f"  Exercise dates: {bermudan.exercise_dates}")
     print(f"  Can exercise at t=0.25: {bermudan.can_exercise(0.25)}")
@@ -355,7 +355,7 @@ if __name__ == "__main__":
     bermudan_monthly = BermudanExercise.from_schedule(
         start=0.25, end=1.0, frequency='monthly'
     )
-    print(f"\nBermudan (monthly from t=0.25 to t=1.0):")
+    print("\nBermudan (monthly from t=0.25 to t=1.0):")
     print(f"  N dates: {len(bermudan_monthly.exercise_dates)}")
     print(f"  First: {bermudan_monthly.exercise_dates[0]:.4f}")
     print(f"  Last: {bermudan_monthly.exercise_dates[-1]:.4f}")

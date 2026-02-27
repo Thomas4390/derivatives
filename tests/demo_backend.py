@@ -429,7 +429,6 @@ def demo_simulation_module():
         GBMSimulator,
         HestonSimulator,
         MertonSimulator,
-        BatesSimulator,
         GARCHSimulator,
         create_simulator,
         DiscretizationScheme,
@@ -470,7 +469,7 @@ def demo_simulation_module():
 
     # Percentile paths
     pcts = heston_result.percentile_paths([5, 25, 50, 75, 95])
-    print(f"\nTerminal Distribution:")
+    print("\nTerminal Distribution:")
     print(f"  5th percentile:  ${pcts[0, -1]:.2f}")
     print(f"  25th percentile: ${pcts[1, -1]:.2f}")
     print(f"  50th percentile: ${pcts[2, -1]:.2f}")
@@ -584,7 +583,7 @@ def demo_portfolio_module():
 
     # Risk analysis
     unlimited_profit, unlimited_loss = check_unlimited_risk_from_portfolio(spread_portfolio)
-    print(f"\nRisk Analysis:")
+    print("\nRisk Analysis:")
     print(f"  Unlimited Profit: {unlimited_profit}")
     print(f"  Unlimited Loss: {unlimited_loss}")
 
@@ -665,7 +664,7 @@ def demo_portfolio_module():
         max_loss_spot=None
     )
     summary = get_risk_summary(risk_profile)
-    print(f"\nRisk Summary:")
+    print("\nRisk Summary:")
     print(f"  Risk Level: {summary['risk_level']}")
     print(f"  Profit Potential: {summary['profit_potential']}")
     print(f"  Loss Potential: {summary['loss_potential']}")
@@ -834,7 +833,7 @@ def demo_advanced_examples():
     # Compute risk metrics from P&L array
     metrics = compute_risk_metrics(pnl)
 
-    print(f"\nRisk Metrics (1-Month Horizon, 50K paths):")
+    print("\nRisk Metrics (1-Month Horizon, 50K paths):")
     print(f"  Mean P&L:    ${metrics.mean_pnl:.2f}")
     print(f"  Std P&L:     ${metrics.std_pnl:.2f}")
     print(f"  VaR (95%):   ${-metrics.var_95:.2f}")
@@ -887,7 +886,7 @@ def demo_combined_scenarios():
         FFTEngine, BSAnalyticEngine, MonteCarloEngine,
         HestonSimulator, DiscretizationScheme
     )
-    from backend.greeks import bs_all_greeks, GreeksCalculator
+    from backend.greeks import bs_all_greeks
     from backend.portfolio import (
         OptionsPortfolio, long_call, long_put, short_call, short_put, long_stock,
         find_breakevens_from_portfolio, compute_risk_metrics,
@@ -931,7 +930,7 @@ def demo_combined_scenarios():
     pnl = hedged.pnl_at_expiry_fast(terminal, multiplier=1.0)
     metrics = compute_risk_metrics(pnl)
 
-    print(f"\n3-Month Risk Profile (100K Heston paths):")
+    print("\n3-Month Risk Profile (100K Heston paths):")
     print(f"  Expected P&L:    ${metrics.mean_pnl:,.2f}")
     print(f"  P&L Volatility:  ${metrics.std_pnl:,.2f}")
     print(f"  VaR (95%):       ${-metrics.var_95:,.2f}")
@@ -963,7 +962,7 @@ def demo_combined_scenarios():
     mc_engine = MonteCarloEngine(n_paths=100_000, n_steps=252, seed=42)
     mc_result = mc_engine.price(option, heston, market)
 
-    print(f"\nATM Call (K=100, T=0.5)")
+    print("\nATM Call (K=100, T=0.5)")
     print(f"  GBM/BS:      ${bs_price:.4f}")
     print(f"  Heston/FFT:  ${fft_price:.4f}")
     print(f"  Heston/MC:   ${mc_result.price:.4f} +/- ${mc_result.error:.4f}")
@@ -1097,7 +1096,7 @@ def demo_combined_scenarios():
     greek_names = ['Price', 'Delta', 'Gamma', 'Vega', 'Theta', 'Rho',
                    'Vanna', 'Volga', 'Charm', 'Veta', 'Speed', 'Zomma', 'Color', 'Ultima']
 
-    print(f"\nPortfolio Greeks @ S=$100, σ=25%, T=0.5yr, r=5%:")
+    print("\nPortfolio Greeks @ S=$100, σ=25%, T=0.5yr, r=5%:")
     print("-" * 40)
 
     # Sum Greeks across positions
@@ -1132,7 +1131,7 @@ def demo_combined_scenarios():
     gbm_model = GBMModel(sigma=0.20)
     heston_model = HestonModel(v0=0.04, kappa=2.0, theta=0.04, xi=0.3, rho=-0.7)
 
-    print(f"\nATM Call Prices (S=K=100) across term structure:")
+    print("\nATM Call Prices (S=K=100) across term structure:")
     print(f"\n{'Maturity':<10} {'GBM/BS':>10} {'Heston/FFT':>12} {'Spread':>10} {'Vol Smile':>12}")
     print("-" * 56)
 
@@ -1160,7 +1159,7 @@ def demo_combined_scenarios():
     strikes_smile = np.array([85, 90, 95, 100, 105, 110, 115])
     T_smile = 0.25
 
-    print(f"\nImplied Volatility Smile (T=3M, S=100):")
+    print("\nImplied Volatility Smile (T=3M, S=100):")
     print(f"\n{'Strike':<10} {'Heston Price':>12} {'Implied Vol':>12} {'Moneyness':>12}")
     print("-" * 50)
 
@@ -1249,7 +1248,7 @@ def demo_combined_scenarios():
     butterfly.add(long_call(strike=110, maturity=0.25, premium=1.50, quantity=1))
 
     net_credit = -1.50 + 5.00 + 5.00 - 1.50  # Net premium received
-    print(f"Strategy: Iron Butterfly @ K=100")
+    print("Strategy: Iron Butterfly @ K=100")
     print(f"  Net Credit: ${net_credit:.2f}")
 
     print("\n--- PHASE 2: Greeks Analysis ---")
@@ -1335,22 +1334,20 @@ def demo_combined_scenarios():
         [0.6, 1.0, 0.5],
         [0.3, 0.5, 1.0]
     ])
-    chol = compute_cholesky(corr_matrix)
+    compute_cholesky(corr_matrix)
 
     n_paths_corr = 50_000
-    n_steps_corr = 252
     T_corr = 1.0
-    dt_corr = T_corr / n_steps_corr
 
     # Initial prices and vols
     S0_assets = np.array([100.0, 50.0, 200.0])
     sigma_assets = np.array([0.20, 0.30, 0.15])
     mu_assets = np.array([0.08, 0.10, 0.06])
 
-    print(f"\n3-Asset Portfolio (ρ12=0.6, ρ13=0.3, ρ23=0.5):")
-    print(f"  Asset 1: S0=$100, σ=20%, μ=8%")
-    print(f"  Asset 2: S0=$50, σ=30%, μ=10%")
-    print(f"  Asset 3: S0=$200, σ=15%, μ=6%")
+    print("\n3-Asset Portfolio (ρ12=0.6, ρ13=0.3, ρ23=0.5):")
+    print("  Asset 1: S0=$100, σ=20%, μ=8%")
+    print("  Asset 2: S0=$50, σ=30%, μ=10%")
+    print("  Asset 3: S0=$200, σ=15%, μ=6%")
 
     # Generate correlated paths
     np.random.seed(123)
@@ -1373,7 +1370,7 @@ def demo_combined_scenarios():
     # Individual asset returns
     asset_returns = (terminal_prices_corr - S0_assets) / S0_assets
 
-    print(f"\n1-Year Return Statistics:")
+    print("\n1-Year Return Statistics:")
     print(f"\n{'Asset':<15} {'Mean':>10} {'Std':>10} {'VaR95':>10} {'Sharpe':>10}")
     print("-" * 55)
 
@@ -1405,7 +1402,7 @@ def demo_combined_scenarios():
     print("SCENARIO 12: Greeks Evolution Over Time")
     print("-" * 60)
 
-    print(f"\nATM Call (K=100, σ=20%) Greeks vs Time to Expiry:")
+    print("\nATM Call (K=100, σ=20%) Greeks vs Time to Expiry:")
     times_to_expiry = [0.5, 0.25, 0.125, 0.0625, 0.02]  # 6M, 3M, 6W, 3W, 1W
     time_labels = ["6M", "3M", "6W", "3W", "1W"]
 
@@ -1448,7 +1445,7 @@ def demo_combined_scenarios():
     gbm_terminal = gbm_paths_jd.price_paths[:, -1]
     merton_terminal = merton_paths_jd.price_paths[:, -1]
 
-    print(f"\nTerminal Distribution Comparison (T=3M, 100K paths):")
+    print("\nTerminal Distribution Comparison (T=3M, 100K paths):")
     print(f"{'Model':<12} {'Mean':>10} {'Std':>10} {'Skew':>10} {'Kurt':>10}")
     print("-" * 55)
 
@@ -1467,7 +1464,7 @@ def demo_combined_scenarios():
     print(f"{'Merton':<12} ${merton_mean:>9.2f} ${merton_std:>9.2f} {merton_skew:>10.3f} {merton_kurt:>10.3f}")
 
     # Option pricing impact
-    print(f"\nOTM Put (K=90) Pricing Impact:")
+    print("\nOTM Put (K=90) Pricing Impact:")
     put_payoff_gbm = np.maximum(90 - gbm_terminal, 0)
     put_payoff_merton = np.maximum(90 - merton_terminal, 0)
 
@@ -1486,7 +1483,6 @@ def demo_combined_scenarios():
     print("-" * 60)
 
     from backend.simulation import BatesSimulator
-    from backend.models import BatesModel
 
     print("\nComparing Heston vs Bates (Heston + Jumps):")
 
@@ -1507,7 +1503,7 @@ def demo_combined_scenarios():
     heston_term_b = heston_paths_b.price_paths[:, -1]
     bates_term = bates_paths.price_paths[:, -1]
 
-    print(f"\nTerminal Distribution (T=6M, 50K paths):")
+    print("\nTerminal Distribution (T=6M, 50K paths):")
     print(f"{'Model':<12} {'Mean':>10} {'Std':>10} {'Skew':>10} {'Kurt':>10}")
     print("-" * 55)
 
@@ -1526,7 +1522,7 @@ def demo_combined_scenarios():
     print(f"{'Bates':<12} ${b_mean:>9.2f} ${b_std:>9.2f} {b_skew:>10.3f} {b_kurt:>10.3f}")
 
     # Option pricing impact
-    print(f"\nOption Pricing (MC - 50K paths):")
+    print("\nOption Pricing (MC - 50K paths):")
     strikes_bates = [90, 95, 100, 105, 110]
     print(f"{'Strike':<10} {'Heston':>12} {'Bates':>12} {'Jump Premium':>14}")
     print("-" * 50)
@@ -1564,7 +1560,7 @@ def demo_combined_scenarios():
     garch_term = garch_paths.price_paths[:, -1]
     const_term = const_paths.price_paths[:, -1]
 
-    print(f"\nTerminal Distribution (T=3M, 50K paths):")
+    print("\nTerminal Distribution (T=3M, 50K paths):")
     print(f"{'Model':<15} {'Mean':>10} {'Std':>10} {'Skew':>10} {'Kurt':>10}")
     print("-" * 58)
 
@@ -1581,7 +1577,7 @@ def demo_combined_scenarios():
     print(f"{'Constant Vol':<15} ${c_mean:>9.2f} ${c_std:>9.2f} {c_skew:>10.3f} {c_kurt:>10.3f}")
 
     # Volatility path analysis
-    print(f"\nVolatility Clustering Effect (sample path variance):")
+    print("\nVolatility Clustering Effect (sample path variance):")
     garch_vol_path = np.sqrt(garch_paths.variance_paths[0]) if hasattr(garch_paths, 'variance_paths') else None
     if garch_vol_path is not None:
         print(f"  GARCH vol range: {garch_vol_path.min()*np.sqrt(252)*100:.1f}% - {garch_vol_path.max()*np.sqrt(252)*100:.1f}%")
@@ -1611,7 +1607,7 @@ def demo_combined_scenarios():
         'Heston': (HestonModel(v0=0.04, kappa=2.0, theta=0.04, xi=0.3, rho=-0.7), FFTEngine()),
     }
 
-    print(f"ATM Call (K=100, T=6M) Model Prices:")
+    print("ATM Call (K=100, T=6M) Model Prices:")
     for name, (model, engine) in models_test.items():
         price = engine.price(test_option, model, market_test).price
         print(f"  {name:>10}: ${price:.4f}")
@@ -1647,7 +1643,7 @@ def demo_combined_scenarios():
     backtest_paths = backtest_sim.simulate_paths(s0=100, mu=0.05, t=0.5, n_paths=100_000, n_steps=126, seed=1111)
     backtest_pnl = straddle.pnl_at_expiry_fast(backtest_paths.price_paths[:, -1], multiplier=1.0)
 
-    print(f"  Simulated P&L (100K Heston paths):")
+    print("  Simulated P&L (100K Heston paths):")
     print(f"    Mean:     ${backtest_pnl.mean():.2f}")
     print(f"    Std:      ${backtest_pnl.std():.2f}")
     print(f"    Win Rate: {(backtest_pnl > 0).mean()*100:.1f}%")
@@ -1693,13 +1689,13 @@ def main():
     print("*" * 70)
 
     # Run all sections
-    market = demo_core_module()
+    demo_core_module()
     call, put = demo_instruments_module()
     models = demo_models_module()
     bs_engine, fft_engine = demo_engines_module(models)
     demo_greeks_module()
-    sim_result = demo_simulation_module()
-    portfolio = demo_portfolio_module()
+    demo_simulation_module()
+    demo_portfolio_module()
     demo_utils_module()
     demo_advanced_examples()
     demo_combined_scenarios()  # NEW comprehensive examples

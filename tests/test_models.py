@@ -10,7 +10,6 @@ Created: 2025
 
 import pytest
 import numpy as np
-from typing import Callable
 
 from backend.models.gbm import GBMModel
 from backend.models.heston import HestonModel
@@ -409,7 +408,7 @@ class TestBatesModel:
 
         heston = bates_model.to_heston()
 
-        print(f"  Bates -> Heston conversion:")
+        print("  Bates -> Heston conversion:")
         print(f"    v0:    {heston.v0} == {bates_model.v0}")
         print(f"    kappa: {heston.kappa} == {bates_model.kappa}")
         print(f"    theta: {heston.theta} == {bates_model.theta}")

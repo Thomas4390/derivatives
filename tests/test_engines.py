@@ -153,8 +153,8 @@ class TestBSAnalyticEngine:
     def test_price_across_spots(self, gbm_model, bs_engine, spot):
         """Test pricing across different spot prices."""
         report.header(f"BS Engine: Price at Spot={spot}")
-        report.info(f"Tests option pricing with varying spot prices (K=100 fixed)")
-        report.info(f"Spot < K: OTM call, Spot > K: ITM call")
+        report.info("Tests option pricing with varying spot prices (K=100 fixed)")
+        report.info("Spot < K: OTM call, Spot > K: ITM call")
 
         market = MarketEnvironment(spot=spot, rate=0.05, dividend_yield=0.0)
         call = VanillaOption(strike=100, maturity=0.25, is_call=True)

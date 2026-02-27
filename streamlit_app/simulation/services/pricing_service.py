@@ -16,7 +16,6 @@ import numpy as np
 from backend.simulation.base import SimulationResult
 from backend.engines.analytic_engine import BSAnalyticEngine
 from backend.engines.fft_engine import FFTEngine, FFTConfig
-from backend.engines.mc_engine import MonteCarloEngine
 from backend.models.gbm import GBMModel
 from backend.models.heston import HestonModel
 from backend.models.merton import MertonModel

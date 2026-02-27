@@ -114,7 +114,6 @@ def render_strategy_summary_compact(
     """
     positions = params.get('option_positions', [])
     stock_position = params.get('stock_position')
-    position_arrays = params.get('position_arrays', {})
 
     if len(positions) == 0:
         st.info("No strategy configured. Go to Configuration tab to set up option positions.")

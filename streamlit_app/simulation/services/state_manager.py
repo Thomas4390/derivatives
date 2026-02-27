@@ -6,7 +6,7 @@ This module provides a centralized interface for managing Streamlit session stat
 
 import streamlit as st
 from typing import Any, Dict, Optional
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, asdict
 
 from config.constants import (
     DEFAULT_SPOT_PRICE,

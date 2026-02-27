@@ -10,7 +10,6 @@ Created: 2025
 
 import pytest
 import numpy as np
-from typing import Tuple
 
 # =============================================================================
 # Backend Imports
@@ -26,8 +25,6 @@ from backend.engines import BSAnalyticEngine, FFTEngine, MonteCarloEngine
 from backend.core.market import MarketEnvironment
 from backend.portfolio import (
     OptionsPortfolio,
-    PortfolioPosition,
-    StockPosition,
     long_call,
     short_call,
     long_put,

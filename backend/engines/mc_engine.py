@@ -12,7 +12,7 @@ Author: Thomas
 Created: 2025
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import List, Optional, Callable, Tuple
 import numpy as np
 
@@ -22,9 +22,8 @@ from backend.core.result_types import (
     PricingResult, PricingCapability, ExerciseStyle, GreeksResult
 )
 from backend.instruments.options import VanillaOption
-from backend.instruments.payoffs import VanillaCallPayoff, VanillaPutPayoff
 from backend.engines.monte_carlo.mc_base import (
-    GenericMCEngine, MCConfig, MCResult
+    GenericMCEngine, MCConfig
 )
 
 # Import model types for type checking
@@ -484,13 +483,13 @@ if __name__ == "__main__":
     option = VanillaOption(strike=100, maturity=0.5, is_call=True)
     market = MarketEnvironment(spot=100, rate=0.05, dividend_yield=0.02)
 
-    print(f"\n--- Setup ---")
+    print("\n--- Setup ---")
     print(f"Option: K={option.strike}, T={option.maturity}, Call={option.is_call}")
     print(f"Market: S0={market.spot}, r={market.rate}, q={market.dividend_yield}")
     print(f"MC Config: n_paths={engine.n_paths}, seed={engine.seed}")
 
     # Test with GBM (compare to analytical)
-    print(f"\n--- GBM Model (vs Analytical) ---")
+    print("\n--- GBM Model (vs Analytical) ---")
     gbm = GBMModel(sigma=0.20)
     mc_result = engine.price(option, gbm, market)
     print(f"MC Price: ${mc_result.price:.4f} ± ${mc_result.error:.4f}")
@@ -501,7 +500,7 @@ if __name__ == "__main__":
     print(f"Difference: ${abs(mc_result.price - bs_result.price):.4f} ({abs(mc_result.price - bs_result.price)/bs_result.price*100:.2f}%)")
 
     # Test with Heston (compare to FFT)
-    print(f"\n--- Heston Model (vs FFT) ---")
+    print("\n--- Heston Model (vs FFT) ---")
     heston = HestonModel(v0=0.04, kappa=2.0, theta=0.04, xi=0.3, rho=-0.7)
     mc_heston = engine.price(option, heston, market)
     print(f"MC Price: ${mc_heston.price:.4f} ± ${mc_heston.error:.4f}")
@@ -512,7 +511,7 @@ if __name__ == "__main__":
     print(f"Difference: ${abs(mc_heston.price - fft_result.price):.4f}")
 
     # Test with Bates
-    print(f"\n--- Bates Model (vs FFT) ---")
+    print("\n--- Bates Model (vs FFT) ---")
     bates = BatesModel(
         v0=0.04, kappa=2.0, theta=0.04, xi=0.3, rho=-0.7,
         lambda_j=0.5, mu_j=-0.1, sigma_j=0.2
@@ -525,7 +524,7 @@ if __name__ == "__main__":
     print(f"Difference: ${abs(mc_bates.price - fft_bates.price):.4f}")
 
     # Test with Merton
-    print(f"\n--- Merton Model (vs FFT) ---")
+    print("\n--- Merton Model (vs FFT) ---")
     merton = MertonModel(sigma=0.20, lambda_j=0.5, mu_j=-0.1, sigma_j=0.2)
     mc_merton = engine.price(option, merton, market)
     print(f"MC Price: ${mc_merton.price:.4f} ± ${mc_merton.error:.4f}")
@@ -535,27 +534,27 @@ if __name__ == "__main__":
     print(f"Difference: ${abs(mc_merton.price - fft_merton.price):.4f}")
 
     # Test put option
-    print(f"\n--- Put Options ---")
+    print("\n--- Put Options ---")
     put_option = VanillaOption(strike=100, maturity=0.5, is_call=False)
     for model_name, model in [("GBM", gbm), ("Heston", heston)]:
         mc_put = engine.price(put_option, model, market)
         print(f"{model_name} Put: ${mc_put.price:.4f} ± ${mc_put.error:.4f}")
 
     # Test multiple strikes
-    print(f"\n--- Multiple Strikes (Heston) ---")
+    print("\n--- Multiple Strikes (Heston) ---")
     strikes = np.array([90, 95, 100, 105, 110])
     prices, errors = engine.price_strikes(option, heston, market, strikes)
     for k, p, e in zip(strikes, prices, errors):
         print(f"  K={k}: ${p:.4f} ± ${e:.4f}")
 
     # Test price_with_paths
-    print(f"\n--- Price with Paths ---")
+    print("\n--- Price with Paths ---")
     result, terminals = engine.price_with_paths(option, gbm, market)
     print(f"Terminal prices: mean=${terminals.mean():.2f}, std=${terminals.std():.2f}")
     print(f"Price: ${result.price:.4f}")
 
     # Test can_price
-    print(f"\n--- Compatibility Check ---")
+    print("\n--- Compatibility Check ---")
     print(f"Can price European call with Heston: {engine.can_price(option, heston)}")
     print(f"Can price European call with GBM: {engine.can_price(option, gbm)}")
 

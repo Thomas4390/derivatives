@@ -17,15 +17,13 @@ Created: 2025
 
 import pytest
 import numpy as np
-from scipy.stats import norm
 
 from backend.instruments.options import VanillaOption
 from backend.models.gbm import GBMModel
 from backend.models.heston import HestonModel
 from backend.models.bates import BatesModel
-from backend.engines import BSAnalyticEngine, FFTEngine, MonteCarloEngine
+from backend.engines import BSAnalyticEngine, MonteCarloEngine
 from backend.core.market import MarketEnvironment
-from backend.greeks import bs_all_greeks
 
 from tests.conftest import report
 
@@ -69,7 +67,7 @@ class TestPutCallParity:
         report.value("Call Price", call_price, unit="$")
         report.value("Put Price", put_price, unit="$")
         report.value("C - P (LHS)", lhs, expected=rhs, unit="$")
-        report.success(f"Put-Call Parity holds: C - P = S*exp(-qT) - K*exp(-rT)")
+        report.success("Put-Call Parity holds: C - P = S*exp(-qT) - K*exp(-rT)")
 
         np.testing.assert_allclose(lhs, rhs, rtol=1e-10)
 

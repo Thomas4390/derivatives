@@ -17,7 +17,6 @@ from services.pricing_service import (
     price_with_analytical,
     price_with_fft,
     price_from_terminals,
-    get_available_pricing_methods,
 )
 from services.simulation_service import _extract_model_params
 from backend.simulation.factory import create_simulator
@@ -504,6 +503,7 @@ def render_animated_convergence_chart(conv: dict) -> None:
     fig.update_yaxes(
         title="MC Price ($)",
         range=price_range,
+        tickprefix="$", tickformat=",.2f",
         **_AXIS_STYLE,
         row=1, col=1,
     )
@@ -519,6 +519,7 @@ def render_animated_convergence_chart(conv: dict) -> None:
     fig.update_yaxes(
         title="|Error| ($)" if has_ref else "Std Error ($)",
         range=err_range,
+        tickprefix="$", tickformat=",.2f",
         **_AXIS_STYLE,
         row=2, col=1,
     )

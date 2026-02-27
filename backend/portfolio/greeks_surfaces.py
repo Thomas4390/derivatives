@@ -18,7 +18,6 @@ Created: 2025
 
 import numpy as np
 from numba import njit, prange
-from typing import Tuple
 
 # Import Greeks calculation functions from vectorized_bs
 # (same convention: option_type 1=call, 0=put)

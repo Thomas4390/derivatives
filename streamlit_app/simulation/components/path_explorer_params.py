@@ -10,7 +10,7 @@ import streamlit as st
 from typing import Dict, Any
 
 from config.model_registry import get_model, get_parameter_defaults
-from utils.model_helpers import check_feller_condition, check_garch_stationarity
+from utils.model_helpers import check_feller_condition
 
 # ── Compact centered label ─────────────────────────────────────────────────
 

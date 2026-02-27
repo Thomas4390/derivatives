@@ -21,7 +21,9 @@ Author: Thomas
 Created: 2025
 """
 
-from typing import Dict, Type, Optional, List, Any, TYPE_CHECKING
+from __future__ import annotations
+
+from typing import Any, Dict, Type, Optional, List, TYPE_CHECKING
 
 from backend.core.interfaces import Model as BaseModel
 from backend.core.result_types import PricingCapability
@@ -170,7 +172,7 @@ class ModelRegistry:
         key: str,
         method: Optional[PricingCapability] = None,
         **params
-    ) -> "BasePricer":
+    ) -> Any:
         """
         Create pricer directly from model key and params.
 

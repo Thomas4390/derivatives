@@ -10,7 +10,6 @@ Created: 2025
 
 import pytest
 import numpy as np
-from typing import List, Tuple
 
 from backend.simulation import (
     create_simulator,
@@ -20,7 +19,7 @@ from backend.simulation import (
     create_bates,
     list_models,
 )
-from backend.simulation.base import SimulationResult, BaseSimulator
+from backend.simulation.base import SimulationResult
 
 # Import reporter from conftest
 from tests.conftest import report

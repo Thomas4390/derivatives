@@ -43,7 +43,6 @@ Created: 2025
 
 import numpy as np
 from numba import njit, prange
-from dataclasses import dataclass
 from typing import Tuple, NamedTuple
 
 
@@ -584,9 +583,9 @@ if __name__ == "__main__":
     quantities = np.array([1.0, 1.0], dtype=np.float64)
     premiums = np.array([8.0, 3.0], dtype=np.float64)  # Net debit: $5
 
-    print(f"  Long Call K=95 @ $8.00")
-    print(f"  Short Call K=105 @ $3.00")
-    print(f"  Net Debit: $5.00")
+    print("  Long Call K=95 @ $8.00")
+    print("  Short Call K=105 @ $3.00")
+    print("  Net Debit: $5.00")
 
     # Simulated terminal prices
     terminal_prices = np.array([80, 90, 95, 100, 105, 110, 120], dtype=np.float64)

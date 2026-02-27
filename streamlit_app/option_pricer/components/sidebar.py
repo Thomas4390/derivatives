@@ -13,19 +13,14 @@ from config.constants import (
     DEFAULT_RISK_FREE_RATE,
     DEFAULT_DTE,
     DEFAULT_IV,
-    AVAILABLE_STRATEGIES,
     STRATEGY_DISPLAY_NAMES,
     STRATEGY_LEGS,
     STRATEGIES_WITH_STOCK,
     STRATEGY_STOCK_POSITION,
     INSTRUMENT_CLASSES,
     EXOTIC_TYPE_NAMES,
-    BARRIER_SUBTYPES,
-    EXOTIC_DESCRIPTIONS,
-    DEFAULT_EXOTIC_DTE,
     DEFAULT_DIGITAL_PAYOUT,
     DEFAULT_BARRIER_UP_FACTOR,
-    DEFAULT_BARRIER_DOWN_FACTOR,
 )
 from config.styles import (
     net_position_card_html,
@@ -662,7 +657,6 @@ def _render_leg_editor(
 
     # Visual styling
     border_color = "#10b981" if is_long else "#ef4444"
-    accent_color = "#059669" if is_long else "#dc2626"
     bg_gradient = "linear-gradient(135deg, #f0fdf4 0%, #ecfdf5 100%)" if is_long else "linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%)"
     position_badge_bg = "#d1fae5" if is_long else "#fee2e2"
     position_badge_color = "#047857" if is_long else "#b91c1c"
@@ -761,7 +755,6 @@ def _render_leg_editor(
 
     # Cost display
     is_long_now = new_position_type == 'long'
-    cost_label = "Debit" if is_long_now else "Credit"
     cost_color = "#dc2626" if is_long_now else "#059669"
     cost_prefix = "-" if is_long_now else "+"
 
@@ -1033,7 +1026,6 @@ def _render_stock_leg_editor(spot_price: float, is_custom: bool, selected_strate
 
     stock_cost = stock_entry * stock_qty
     is_long = stock_direction == "long"
-    cost_label = "Cost" if is_long else "Credit"
     cost_color = "#dc2626" if is_long else "#059669"
     cost_prefix = "-" if is_long else "+"
 

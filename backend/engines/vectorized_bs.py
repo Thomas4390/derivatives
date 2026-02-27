@@ -26,7 +26,6 @@ from numba import njit, prange
 
 # Import from single source of truth
 from backend.utils.math import (
-    DAYS_PER_YEAR,
     bs_greeks as _bs_greeks,
     bs_second_order_greeks,
     bs_third_order_greeks,
@@ -269,7 +268,7 @@ if __name__ == "__main__":
     price, delta, gamma, vega, theta, rho = calculate_first_order_greeks(
         spot, strike, t, r, vol, option_type=1  # Call
     )
-    print(f"Call option (ATM):")
+    print("Call option (ATM):")
     print(f"  Price: ${price:.4f}")
     print(f"  Delta: {delta:.4f}")
     print(f"  Gamma: {gamma:.6f}")
@@ -281,7 +280,7 @@ if __name__ == "__main__":
     price_put, delta_put, _, _, _, _ = calculate_first_order_greeks(
         spot, strike, t, r, vol, option_type=0  # Put
     )
-    print(f"\nPut option (ATM):")
+    print("\nPut option (ATM):")
     print(f"  Price: ${price_put:.4f}")
     print(f"  Delta: {delta_put:.4f}")
 

@@ -1060,7 +1060,6 @@ def section_header_html(icon: str, title: str) -> str:
 
 def info_box_html(message: str, box_type: str = "info") -> str:
     """Generate HTML for an info/warning/success box."""
-    icons = {"info": "i", "success": "check", "warning": "!"}
     return f"""
     <div class="{box_type}-box">
         <span class="content">{message}</span>
@@ -1276,7 +1275,7 @@ def comparison_table_html(
                     error_class = 'warning'
                 else:
                     error_class = 'bad'
-            except:
+            except Exception:
                 error_class = ''
             cells_html += f'<td class="error-cell {error_class}">{error_val}</td>'
 

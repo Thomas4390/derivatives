@@ -9,8 +9,8 @@ Provides comprehensive information about each model including:
 - Mathematical equations (LaTeX)
 """
 
-from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Any
+from dataclasses import dataclass
+from typing import Dict, List, Optional
 from enum import Enum
 
 

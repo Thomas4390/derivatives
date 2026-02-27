@@ -153,8 +153,8 @@ def render_payoff_with_distribution(
         bargap=0.02,
     )
 
-    fig.update_xaxes(title_text="Terminal Price S(T)", row=1, col=1, **_AXIS_STYLE)
-    fig.update_yaxes(title_text="P&L ($)", row=1, col=1, **_AXIS_STYLE)
+    fig.update_xaxes(title_text="Terminal Price S(T)", row=1, col=1, tickprefix="$", tickformat=",.2f", **_AXIS_STYLE)
+    fig.update_yaxes(title_text="P&L ($)", row=1, col=1, tickprefix="$", tickformat=",.2f", **_AXIS_STYLE)
     fig.update_xaxes(title_text="Count", row=1, col=2, showticklabels=False, **_AXIS_STYLE)
     fig.update_yaxes(row=1, col=2, showticklabels=False, **_AXIS_STYLE)
 
@@ -220,6 +220,8 @@ def render_3d_pnl_chart(
             colorbar=dict(
                 title=dict(text="P&L ($)", font=dict(color=_AXIS_LABEL, size=11)),
                 tickfont=dict(color=_TICK_COLOR, size=9),
+                tickprefix="$",
+                tickformat=",.2f",
                 thickness=14,
                 len=0.6,
                 outlinewidth=0,
@@ -247,9 +249,9 @@ def render_3d_pnl_chart(
         paper_bgcolor=_PAPER_BG,
         margin=dict(t=20, b=10, l=10, r=10),
         scene=dict(
-            xaxis=dict(title="Realized Volatility (%)", **_scene_axis),
-            yaxis=dict(title="Terminal Price S(T)", **_scene_axis),
-            zaxis=dict(title="P&L ($)", **_scene_axis),
+            xaxis=dict(title="Realized Volatility (%)", ticksuffix="%", tickformat=".1f", **_scene_axis),
+            yaxis=dict(title="Terminal Price S(T)", tickprefix="$", tickformat=",.2f", **_scene_axis),
+            zaxis=dict(title="P&L ($)", tickprefix="$", tickformat=",.2f", **_scene_axis),
             bgcolor=_PLOT_BG,
             camera=dict(eye=dict(x=1.5, y=-1.5, z=0.8)),
         ),

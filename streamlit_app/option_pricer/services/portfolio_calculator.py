@@ -4,15 +4,19 @@ Portfolio calculation services for Options Greeks Explorer.
 This module provides functions for calculating portfolio metrics, P&L, and Greeks.
 """
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
 import streamlit as st
 import numpy as np
 import json
 from functools import lru_cache
+
+if TYPE_CHECKING:
+    from .pricing_adapter import BreakevenResult
 from config.constants import (
     CONTRACT_MULTIPLIER,
     GREEK_NAMES,
-    DTE_RANGE,
-    IV_RANGE,
     STRIKE_RANGE_FACTORS,
     SPOT_RANGE_FACTOR,
     SPOT_RANGE_POINTS
@@ -458,7 +462,6 @@ def _find_breakeven(
         m['instrument_class'] != 'vanilla' for m in exotic_metadata
     )
     if has_exotic and expiry_pnl is not None and spot_range_arr is not None:
-        from .pricing_adapter import BreakevenResult
         return _breakeven_from_pnl_curve(expiry_pnl, spot_range_arr)
 
     # Use wide range for theoretical extremes

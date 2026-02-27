@@ -10,7 +10,6 @@ import numpy as np
 from config.constants import DTE_RANGE, IV_RANGE, STRIKE_RANGE_FACTORS
 from config.chart_theme import (
     CHART_COLORS,
-    LAYOUT_DEFAULTS,
     AXIS_DEFAULTS,
     SLIDER_DEFAULTS,
     LINE_STYLES,

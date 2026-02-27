@@ -11,7 +11,6 @@ Created: 2025
 import pytest
 import numpy as np
 
-from backend.models.garch import GARCHModel, NGARCHModel, GJRGARCHModel
 
 
 class TestGARCHSimulation:

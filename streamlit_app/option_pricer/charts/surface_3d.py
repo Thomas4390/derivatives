@@ -16,8 +16,7 @@ from config.constants import (
 from config.chart_theme import (
     SCENE_DEFAULTS,
     SURFACE_COLORSCALES,
-    LAYOUT_DEFAULTS,
-    CHART_COLORS
+    LAYOUT_DEFAULTS
 )
 
 
@@ -82,7 +81,7 @@ def create_3d_surface_figure(
             }
         },
         hovertemplate=(
-            f'<b>Underlying:</b> $%{{x:,.2f}}<br>' +
+            '<b>Underlying:</b> $%{x:,.2f}<br>' +
             f'<b>{y_label}:</b> %{{y:.1f}}<br>' +
             f'<b>{greek_title}:</b> %{{z:.4f}}<br>' +
             '<extra></extra>'

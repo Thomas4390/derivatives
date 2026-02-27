@@ -12,13 +12,12 @@ import pytest
 import numpy as np
 import warnings
 
-from backend.core.interfaces import Model
 from backend.core.result_types import ExerciseStyle, PricingCapability
 from backend.models import GBMModel, HestonModel, MertonModel, BatesModel
 from backend.instruments import (
     VanillaCallPayoff, VanillaPutPayoff,
     DigitalCallPayoff, DigitalPutPayoff,
-    EuropeanCall, VanillaOption,
+    EuropeanCall,
 )
 from backend.instruments.strategies import StrategyLeg
 from backend.models.registry import registry

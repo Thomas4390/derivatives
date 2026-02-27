@@ -323,7 +323,7 @@ if __name__ == "__main__":
 
     # Test basic normal generation
     normals = generate_normal(1000)
-    print(f"\nNormal generation:")
+    print("\nNormal generation:")
     print(f"  Mean: {normals.mean():.4f} (expected ~0)")
     print(f"  Std:  {normals.std():.4f} (expected ~1)")
 
@@ -344,12 +344,12 @@ if __name__ == "__main__":
     # Test Cholesky
     corr_matrix = np.array([[1.0, 0.5], [0.5, 1.0]])
     L = compute_cholesky(corr_matrix)
-    print(f"\nCholesky factor of [[1, 0.5], [0.5, 1]]:")
+    print("\nCholesky factor of [[1, 0.5], [0.5, 1]]:")
     print(f"  L = {L}")
 
     # Test antithetic
     orig, anti = generate_antithetic_normals(1000)
-    print(f"\nAntithetic variates:")
+    print("\nAntithetic variates:")
     print(f"  Sum of pairs: {(orig + anti).sum():.10f} (expected 0)")
 
     print("\n" + "=" * 50)

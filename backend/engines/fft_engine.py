@@ -13,7 +13,7 @@ Created: 2025
 """
 
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import List
 import numpy as np
 
 from backend.core.interfaces import PricingEngine, Instrument, Model
@@ -315,12 +315,12 @@ if __name__ == "__main__":
     option = VanillaOption(strike=100, maturity=0.5, is_call=True)
     market = MarketEnvironment(spot=100, rate=0.05, dividend_yield=0.02)
 
-    print(f"\n--- Setup ---")
+    print("\n--- Setup ---")
     print(f"Option: K={option.strike}, T={option.maturity}, Call={option.is_call}")
     print(f"Market: S0={market.spot}, r={market.rate}, q={market.dividend_yield}")
 
     # Test with GBM (compare to analytical)
-    print(f"\n--- GBM Model (vs Analytical) ---")
+    print("\n--- GBM Model (vs Analytical) ---")
     gbm = GBMModel(sigma=0.20)
     fft_result = engine.price(option, gbm, market)
     print(f"FFT Price: ${fft_result.price:.4f}")
@@ -331,14 +331,14 @@ if __name__ == "__main__":
     print(f"Difference: ${abs(fft_result.price - bs_result.price):.6f}")
 
     # Test with Heston
-    print(f"\n--- Heston Model ---")
+    print("\n--- Heston Model ---")
     heston = HestonModel(v0=0.04, kappa=2.0, theta=0.04, xi=0.3, rho=-0.7)
     heston_result = engine.price(option, heston, market)
     print(f"Heston Price: ${heston_result.price:.4f}")
     print(f"Model: {heston_result.model}")
 
     # Test with Bates
-    print(f"\n--- Bates Model ---")
+    print("\n--- Bates Model ---")
     bates = BatesModel(
         v0=0.04, kappa=2.0, theta=0.04, xi=0.3, rho=-0.7,
         lambda_j=0.5, mu_j=-0.1, sigma_j=0.2
@@ -347,34 +347,34 @@ if __name__ == "__main__":
     print(f"Bates Price: ${bates_result.price:.4f}")
 
     # Test with Merton
-    print(f"\n--- Merton Model ---")
+    print("\n--- Merton Model ---")
     merton = MertonModel(sigma=0.20, lambda_j=0.5, mu_j=-0.1, sigma_j=0.2)
     merton_result = engine.price(option, merton, market)
     print(f"Merton Price: ${merton_result.price:.4f}")
 
     # Test put option
-    print(f"\n--- Put Options ---")
+    print("\n--- Put Options ---")
     put_option = VanillaOption(strike=100, maturity=0.5, is_call=False)
     for model_name, model in [("GBM", gbm), ("Heston", heston), ("Bates", bates)]:
         put_result = engine.price(put_option, model, market)
         print(f"{model_name} Put: ${put_result.price:.4f}")
 
     # Test multiple strikes
-    print(f"\n--- Multiple Strikes (Heston) ---")
+    print("\n--- Multiple Strikes (Heston) ---")
     strikes = np.array([90, 95, 100, 105, 110])
     prices = engine.price_strikes(option, heston, market, strikes)
     for k, p in zip(strikes, prices):
         print(f"  K={k}: ${p:.4f}")
 
     # Test price surface
-    print(f"\n--- Price Surface ---")
+    print("\n--- Price Surface ---")
     maturities = np.array([0.25, 0.5, 1.0])
     surface = engine.price_surface(heston, market, strikes, maturities)
     print(f"Surface shape: {surface.shape}")
     print(f"ATM prices by maturity: {surface[2, :]}")
 
     # Test can_price
-    print(f"\n--- Compatibility Check ---")
+    print("\n--- Compatibility Check ---")
     print(f"Can price European call with Heston: {engine.can_price(option, heston)}")
     print(f"Can price European call with GBM: {engine.can_price(option, gbm)}")
 

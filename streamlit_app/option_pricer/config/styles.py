@@ -810,7 +810,6 @@ def exotic_position_item_html(
     exotic_type_name: str,
 ) -> str:
     """Generate HTML for an exotic option position card."""
-    pos_class = "long" if is_long else "short"
     type_label = "LONG" if is_long else "SHORT"
     amount_label = "Debit" if is_long else "Credit"
 

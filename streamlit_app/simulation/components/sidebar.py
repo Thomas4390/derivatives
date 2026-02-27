@@ -5,7 +5,7 @@ Provides model selection and parameter configuration interface.
 """
 
 import streamlit as st
-from typing import Tuple, Dict, Any
+from typing import Dict, Any
 
 from config.constants import (
     PRICE_MODELS,
@@ -20,7 +20,6 @@ from config.constants import (
     DEFAULT_NUM_STEPS,
     DEFAULT_EXPECTED_RETURN
 )
-from config.styles import param_group_html
 
 # Import Black-Scholes for premium calculation
 from backend.option_pricing.options_calculator import (
@@ -646,9 +645,7 @@ def _render_option_pnl_params(
     """Render parameters specific to Option P&L simulation."""
     from components.strategy_builder import (
         render_strategy_builder,
-        export_positions_for_pnl_engine,
-        SimulationOptionPosition,
-        SimulationStockPosition
+        export_positions_for_pnl_engine
     )
 
     params = {}
