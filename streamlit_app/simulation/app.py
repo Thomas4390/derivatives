@@ -172,7 +172,7 @@ pnl_result = st.session_state.get("pnl_result")
 has_strategy = result is not None and pnl_result is not None
 
 # Precompute shared data
-pnl_vals = pnl_result["pnl_values"] if has_strategy else None
+pnl_vals = np.round(pnl_result["pnl_values"], 2) if has_strategy else None
 breakevens = None
 payoff_curve = None
 spot_range = None

@@ -45,6 +45,7 @@ def render_payoff_with_distribution(
 ) -> None:
     """MC simulated P&L scatter (green/red) + marginal P&L histogram."""
 
+    pnl_values = np.round(pnl_values, 2)
     terminal = result.terminal_prices
     n = len(terminal)
 
@@ -153,8 +154,8 @@ def render_payoff_with_distribution(
         bargap=0.02,
     )
 
-    fig.update_xaxes(title_text="Terminal Price S(T)", row=1, col=1, tickprefix="$", tickformat=",.2f", **_AXIS_STYLE)
-    fig.update_yaxes(title_text="P&L ($)", row=1, col=1, tickprefix="$", tickformat=",.2f", **_AXIS_STYLE)
+    fig.update_xaxes(title_text="Terminal Price S(T)", row=1, col=1, tickprefix="$", tickformat=",.2f", hoverformat=",.2f", **_AXIS_STYLE)
+    fig.update_yaxes(title_text="P&L ($)", row=1, col=1, tickprefix="$", tickformat=",.2f", hoverformat=",.2f", **_AXIS_STYLE)
     fig.update_xaxes(title_text="Count", row=1, col=2, showticklabels=False, **_AXIS_STYLE)
     fig.update_yaxes(row=1, col=2, showticklabels=False, **_AXIS_STYLE)
 
@@ -169,6 +170,7 @@ def render_3d_pnl_chart(
 ) -> None:
     """3D scatter: realized volatility x terminal price x P&L, with formula."""
 
+    pnl_values = np.round(pnl_values, 2)
     terminal = result.terminal_prices
     n_steps = result.n_steps
 
