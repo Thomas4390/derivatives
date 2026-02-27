@@ -662,8 +662,13 @@ def render_custom_model_editor():
         code = st.session_state.custom_editor_code
         register_custom_model(validation.model_class, code)
         st.session_state.selected_model = "custom"
-        st.success(f"Model **{validation.model_class.__name__}** registered! Select it in the sidebar.")
+        st.session_state.custom_just_registered = validation.model_class.__name__
         st.rerun()
+
+    # Show registration confirmation (survives rerun)
+    just_registered = st.session_state.pop("custom_just_registered", None)
+    if just_registered:
+        st.success(f"Model **{just_registered}** registered and selected in the sidebar.")
 
     if not can_register:
         st.caption("Validate your model first. All tests must pass before registration.")

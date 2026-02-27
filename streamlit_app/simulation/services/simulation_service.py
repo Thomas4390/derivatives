@@ -71,9 +71,10 @@ def _extract_model_params(model: str, params: Dict[str, Any]) -> Dict[str, Any]:
     model_lower = model.lower()
 
     if model_lower == "gbm":
-        return {
-            "sigma": params.get("sigma", 0.20),
-        }
+        result = {"sigma": params.get("sigma", 0.20)}
+        if params.get("n_paths", 10000) < 2:
+            result["antithetic"] = False
+        return result
 
     elif model_lower == "heston":
         return {
