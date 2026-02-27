@@ -55,6 +55,8 @@ from services.portfolio_calculator import (
     prepare_portfolio_data
 )
 from guide_formula import render_guide_section
+from charts.exotic_charts import render_exotic_tab
+from services.exotic_pricing_adapter import calculate_exotic_all_greeks
 
 
 # =============================================================================
@@ -150,7 +152,8 @@ with st.spinner('Calculating options data...'):
         _calculate_all_greeks_func=calculate_all_greeks,
         _calculate_pnl_at_expiry_func=calculate_portfolio_pnl_at_expiry,
         _find_breakeven_func=find_breakeven_points,
-        has_positions=has_positions
+        has_positions=has_positions,
+        _calculate_exotic_greeks_func=calculate_exotic_all_greeks,
     )
 
 
@@ -158,14 +161,31 @@ with st.spinner('Calculating options data...'):
 # MAIN TABS
 # =============================================================================
 
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+has_exotic_legs = any(
+    pos.get('instrument_class', 'vanilla') != 'vanilla'
+    for pos in st.session_state.positions
+)
+
+tab_names = [
     "P&L Profile",
     "First-Order Greeks",
     "Second-Order Greeks",
     "Third-Order Greeks",
     "3D Surface",
-    "Reference Guide"
-])
+]
+if has_exotic_legs:
+    tab_names.append("Exotic Options")
+tab_names.append("Reference Guide")
+
+tabs = st.tabs(tab_names)
+
+tab1, tab2, tab3, tab4, tab5 = tabs[0], tabs[1], tabs[2], tabs[3], tabs[4]
+if has_exotic_legs:
+    tab6 = tabs[5]
+    tab7 = tabs[6]
+else:
+    tab6 = None
+    tab7 = tabs[5]
 
 
 # Tab 1: P&L Profile
@@ -181,7 +201,8 @@ with tab1:
         risk_free_rate=risk_free_rate,
         calculate_all_greeks_func=calculate_all_greeks,
         calculate_pnl_at_expiry_func=calculate_portfolio_pnl_at_expiry,
-        find_breakeven_func=find_breakeven_points
+        find_breakeven_func=find_breakeven_points,
+        has_exotic_legs=all_data.get('has_exotic_legs', False),
     )
 
 
@@ -196,7 +217,8 @@ with tab2:
         risk_free_rate=risk_free_rate,
         calculate_all_greeks_func=calculate_all_greeks,
         calculate_pnl_at_expiry_func=calculate_portfolio_pnl_at_expiry,
-        portfolio_json=portfolio_json
+        portfolio_json=portfolio_json,
+        calculate_exotic_greeks_func=calculate_exotic_all_greeks,
     )
 
 
@@ -211,7 +233,9 @@ with tab3:
         risk_free_rate=risk_free_rate,
         calculate_all_greeks_func=calculate_all_greeks,
         calculate_pnl_at_expiry_func=calculate_portfolio_pnl_at_expiry,
-        portfolio_json=portfolio_json
+        portfolio_json=portfolio_json,
+        has_exotic_legs=all_data.get('has_exotic_legs', False),
+        calculate_exotic_greeks_func=calculate_exotic_all_greeks,
     )
 
 
@@ -226,7 +250,9 @@ with tab4:
         risk_free_rate=risk_free_rate,
         calculate_all_greeks_func=calculate_all_greeks,
         calculate_pnl_at_expiry_func=calculate_portfolio_pnl_at_expiry,
-        portfolio_json=portfolio_json
+        portfolio_json=portfolio_json,
+        has_exotic_legs=all_data.get('has_exotic_legs', False),
+        calculate_exotic_greeks_func=calculate_exotic_all_greeks,
     )
 
 
@@ -246,8 +272,14 @@ with tab5:
     )
 
 
-# Tab 6: Reference Guide
-with tab6:
+# Tab 6: Exotic Options (conditional)
+if tab6 is not None:
+    with tab6:
+        render_exotic_tab(spot_price=spot_price, risk_free_rate=risk_free_rate)
+
+
+# Tab 7: Reference Guide
+with tab7:
     render_guide_section()
 
 

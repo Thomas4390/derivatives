@@ -74,7 +74,7 @@ def render_payoff_with_distribution(
         mode="markers",
         marker=dict(size=3.5, color=_GREEN_MARKER),
         name="Profit", legendgroup="profit",
-        hovertemplate="S(T)=%{x:.1f}<br>P&L=%{y:+.2f}<extra></extra>",
+        hovertemplate="<b>S(T):</b> $%{x:.2f}<br><b>P&L:</b> $%{y:+.2f}<extra></extra>",
     ), row=1, col=1)
 
     # Scatter — loss paths (red)
@@ -83,7 +83,7 @@ def render_payoff_with_distribution(
         mode="markers",
         marker=dict(size=3.5, color=_RED_MARKER),
         name="Loss", legendgroup="loss",
-        hovertemplate="S(T)=%{x:.1f}<br>P&L=%{y:+.2f}<extra></extra>",
+        hovertemplate="<b>S(T):</b> $%{x:.2f}<br><b>P&L:</b> $%{y:+.2f}<extra></extra>",
     ), row=1, col=1)
 
     # P&L = 0 line
@@ -127,7 +127,7 @@ def render_payoff_with_distribution(
             y=profit_pnl,
             ybins=dict(start=0, end=all_max, size=bin_size),
             marker_color=_GREEN_HIST, showlegend=False,
-            hovertemplate="P&L=%{y:+.2f}<br>Count=%{x}<extra></extra>",
+            hovertemplate="<b>P&L:</b> $%{y:+.2f}<br><b>Count:</b> %{x}<extra></extra>",
         ), row=1, col=2)
 
     if len(loss_pnl) > 0:
@@ -135,7 +135,7 @@ def render_payoff_with_distribution(
             y=loss_pnl,
             ybins=dict(start=all_min, end=0, size=bin_size),
             marker_color=_RED_HIST, showlegend=False,
-            hovertemplate="P&L=%{y:+.2f}<br>Count=%{x}<extra></extra>",
+            hovertemplate="<b>P&L:</b> $%{y:+.2f}<br><b>Count:</b> %{x}<extra></extra>",
         ), row=1, col=2)
 
     # ── Layout ───────────────────────────────────────────────────────────
@@ -229,9 +229,9 @@ def render_3d_pnl_chart(
             ),
         ),
         hovertemplate=(
-            "Realized Vol=%{x:.1f}%<br>"
-            "S(T)=$%{y:.1f}<br>"
-            "P&L=$%{z:+.2f}<extra></extra>"
+            "<b>Realized Vol:</b> %{x:.2f}%<br>"
+            "<b>S(T):</b> $%{y:.2f}<br>"
+            "<b>P&L:</b> $%{z:+.2f}<extra></extra>"
         ),
     )])
 

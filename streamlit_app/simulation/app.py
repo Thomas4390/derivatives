@@ -413,6 +413,8 @@ active_model = st.session_state.get("simulation_model", model_key)
 try:
     spec = get_model(active_model)
     with st.expander(f"Model Equations — {spec.name}", expanded=False):
+        # ── SDE dynamics ──
+        st.markdown("**Stochastic Dynamics**")
         st.latex(spec.equation_main)
         if spec.equation_vol:
             st.caption("Volatility dynamics:")
@@ -420,6 +422,23 @@ try:
         if spec.equation_jump:
             st.caption("Jump distribution:")
             st.latex(spec.equation_jump)
+
+        # ── Pricing method equations ──
+        eq_analytical = getattr(spec, "equation_analytical", None)
+        eq_cf = getattr(spec, "equation_cf", None)
+        eq_mc = getattr(spec, "equation_mc", None)
+        if eq_analytical or eq_cf or eq_mc:
+            st.markdown("---")
+            st.markdown("**Pricing Methods**")
+            if eq_analytical:
+                st.caption("Analytical (Black-Scholes):")
+                st.latex(eq_analytical)
+            if eq_cf:
+                st.caption("FFT — Characteristic Function:")
+                st.latex(eq_cf)
+            if eq_mc:
+                st.caption("Monte Carlo — Discretization:")
+                st.latex(eq_mc)
 except ValueError:
     pass
 

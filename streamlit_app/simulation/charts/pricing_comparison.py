@@ -298,7 +298,7 @@ def render_animated_convergence_chart(conv: dict) -> None:
             hovertemplate=(
                 f"<b>{_leg_label(leg)}</b><br>"
                 "<b>N Paths:</b> %{x:,.0f}<br>"
-                f"<b>{'|Error|' if has_ref else 'Std Error'}:</b> $%{{y:.4f}}"
+                f"<b>{'|Error|' if has_ref else 'Std Error'}:</b> $%{{y:.2f}}"
                 "<extra></extra>"
             ),
         ), row=2, col=1)
@@ -322,7 +322,7 @@ def render_animated_convergence_chart(conv: dict) -> None:
                 y=ref, row=1, col=1,
                 line_dash="dash", line_color=c, line_width=1.2,
                 opacity=0.6,
-                annotation_text=f"Ref {_leg_label(leg)}: ${ref:.4f}",
+                annotation_text=f"Ref {_leg_label(leg)}: ${ref:.2f}",
                 annotation_font_size=9,
                 annotation_font_color=c,
                 annotation_position="top left" if i % 2 == 0 else "bottom left",
@@ -544,9 +544,9 @@ def render_final_table(conv: dict) -> None:
         rows.append({
             "Leg": _leg_label(leg),
             f"MC Price ({max_n:,})": f"${mc:.2f}",
-            "Std Error": f"${se:.4f}",
+            "Std Error": f"${se:.2f}",
             "Reference": f"${ref:.2f}" if ref else "\u2014",
-            "|Error|": f"${err:.4f}" if err is not None else "\u2014",
+            "|Error|": f"${err:.2f}" if err is not None else "\u2014",
             "Error (%)": f"{err / ref * 100:.2f}%" if err is not None and ref else "\u2014",
         })
     st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)

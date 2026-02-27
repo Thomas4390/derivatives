@@ -512,7 +512,8 @@ def render_greeks_tab(
     risk_free_rate: float = 0.05,
     calculate_all_greeks_func=None,
     calculate_pnl_at_expiry_func=None,
-    portfolio_json: str = None
+    portfolio_json: str = None,
+    calculate_exotic_greeks_func=None,
 ) -> None:
     """
     Render a complete Greeks tab.
@@ -601,7 +602,8 @@ def render_greeks_tab(
                 dte_values=tuple(DTE_RANGE),
                 iv_values=tuple(IV_RANGE),
                 risk_free_rate=risk_free_rate,
-                _calculate_all_greeks_func=calculate_all_greeks_func
+                _calculate_all_greeks_func=calculate_all_greeks_func,
+                _calculate_exotic_greeks_func=calculate_exotic_greeks_func,
             )
 
     # Handle Strike variation for single-leg
@@ -713,7 +715,8 @@ def render_first_order_greeks(
     risk_free_rate: float = 0.05,
     calculate_all_greeks_func=None,
     calculate_pnl_at_expiry_func=None,
-    portfolio_json: str = None
+    portfolio_json: str = None,
+    calculate_exotic_greeks_func=None,
 ) -> None:
     """Render the first-order Greeks tab."""
     render_greeks_tab(
@@ -730,7 +733,8 @@ def render_first_order_greeks(
         risk_free_rate=risk_free_rate,
         calculate_all_greeks_func=calculate_all_greeks_func,
         calculate_pnl_at_expiry_func=calculate_pnl_at_expiry_func,
-        portfolio_json=portfolio_json
+        portfolio_json=portfolio_json,
+        calculate_exotic_greeks_func=calculate_exotic_greeks_func,
     )
 
 
@@ -743,9 +747,13 @@ def render_second_order_greeks(
     risk_free_rate: float = 0.05,
     calculate_all_greeks_func=None,
     calculate_pnl_at_expiry_func=None,
-    portfolio_json: str = None
+    portfolio_json: str = None,
+    has_exotic_legs: bool = False,
+    calculate_exotic_greeks_func=None,
 ) -> None:
     """Render the second-order Greeks tab."""
+    if has_exotic_legs:
+        st.info("Higher-order Greeks for exotic legs are computed via numerical finite differences and may be less precise than the analytic vanilla Greeks.", icon="ℹ️")
     render_greeks_tab(
         greeks_list=SECOND_ORDER,
         greeks_data=greeks_data,
@@ -760,7 +768,8 @@ def render_second_order_greeks(
         risk_free_rate=risk_free_rate,
         calculate_all_greeks_func=calculate_all_greeks_func,
         calculate_pnl_at_expiry_func=calculate_pnl_at_expiry_func,
-        portfolio_json=portfolio_json
+        portfolio_json=portfolio_json,
+        calculate_exotic_greeks_func=calculate_exotic_greeks_func,
     )
 
 
@@ -773,9 +782,13 @@ def render_third_order_greeks(
     risk_free_rate: float = 0.05,
     calculate_all_greeks_func=None,
     calculate_pnl_at_expiry_func=None,
-    portfolio_json: str = None
+    portfolio_json: str = None,
+    has_exotic_legs: bool = False,
+    calculate_exotic_greeks_func=None,
 ) -> None:
     """Render the third-order Greeks tab."""
+    if has_exotic_legs:
+        st.info("Higher-order Greeks for exotic legs are computed via numerical finite differences and may be less precise than the analytic vanilla Greeks.", icon="ℹ️")
     render_greeks_tab(
         greeks_list=THIRD_ORDER,
         greeks_data=greeks_data,
@@ -790,5 +803,6 @@ def render_third_order_greeks(
         risk_free_rate=risk_free_rate,
         calculate_all_greeks_func=calculate_all_greeks_func,
         calculate_pnl_at_expiry_func=calculate_pnl_at_expiry_func,
-        portfolio_json=portfolio_json
+        portfolio_json=portfolio_json,
+        calculate_exotic_greeks_func=calculate_exotic_greeks_func,
     )

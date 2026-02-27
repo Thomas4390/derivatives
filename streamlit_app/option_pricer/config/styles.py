@@ -196,6 +196,27 @@ CUSTOM_CSS = """
         border-left: 4px solid #0284c7;
     }
 
+    .position-card.exotic {
+        border-left: 4px solid #8b5cf6;
+        background: linear-gradient(135deg, #faf5ff 0%, #f5f3ff 100%);
+    }
+
+    .position-card.exotic:hover {
+        border-color: #c4b5fd;
+        background: linear-gradient(135deg, #f5f3ff 0%, #ede9fe 100%);
+    }
+
+    .position-card .position-type.exotic-badge {
+        background: #ddd6fe;
+        color: #6d28d9;
+    }
+
+    .position-card .exotic-type-label {
+        font-size: 0.7rem;
+        color: #7c3aed;
+        font-weight: 500;
+    }
+
     .position-card .position-header {
         display: flex;
         justify-content: space-between;
@@ -768,6 +789,40 @@ def position_item_html(
             <span class="position-type {pos_class}">{type_label}</span>
         </div>
         <div class="position-meta">
+            Premium: <span class="position-value">${premium:,.2f}</span> per contract
+            &nbsp;·&nbsp;
+            {amount_label}: <span class="position-value">${total_amount:,.2f}</span>
+        </div>
+    </div>
+    """
+
+
+def exotic_position_item_html(
+    index: int,
+    quantity: int,
+    position_type: str,
+    option_type: str,
+    strike: float,
+    premium: float,
+    total_amount: float,
+    shares_controlled: int,
+    is_long: bool,
+    exotic_type_name: str,
+) -> str:
+    """Generate HTML for an exotic option position card."""
+    pos_class = "long" if is_long else "short"
+    type_label = "LONG" if is_long else "SHORT"
+    amount_label = "Debit" if is_long else "Credit"
+
+    return f"""
+    <div class="position-card exotic">
+        <div class="position-header">
+            <span class="position-details">{quantity}x {option_type.upper()} @ ${strike:,.2f}</span>
+            <span class="position-type exotic-badge">{type_label}</span>
+        </div>
+        <div class="position-meta">
+            <span class="exotic-type-label">{exotic_type_name}</span>
+            &nbsp;·&nbsp;
             Premium: <span class="position-value">${premium:,.2f}</span> per contract
             &nbsp;·&nbsp;
             {amount_label}: <span class="position-value">${total_amount:,.2f}</span>

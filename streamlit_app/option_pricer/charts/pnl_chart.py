@@ -590,7 +590,8 @@ def render_pnl_tab(
     risk_free_rate: float = 0.05,
     calculate_all_greeks_func=None,
     calculate_pnl_at_expiry_func=None,
-    find_breakeven_func=None
+    find_breakeven_func=None,
+    has_exotic_legs: bool = False,
 ) -> None:
     """
     Render the complete P&L tab content.
@@ -616,6 +617,18 @@ def render_pnl_tab(
 
     # Position info banner
     render_position_info_banner(positions, stock_position, default_premium)
+
+    # Path-dependent disclaimer
+    if has_exotic_legs:
+        path_dependent = any(
+            pos.get('instrument_class') in ('asian', 'lookback_fixed', 'lookback_floating')
+            for pos in positions
+        )
+        if path_dependent:
+            st.caption("P&L at expiry for path-dependent options (Asian, Lookback) is approximate.")
+        barrier_legs = any(pos.get('instrument_class') == 'barrier' for pos in positions)
+        if barrier_legs:
+            st.caption("Barrier P&L at expiry uses a simplified terminal barrier check (not full path monitoring).")
 
     # Detect single-leg position
     is_single_leg = (

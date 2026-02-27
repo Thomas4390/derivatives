@@ -38,6 +38,7 @@ class MyGBM(Model):
 
     EQUATION_LATEX = {
         "main": r"dS = (r - q) \\, S \\, dt + \\sigma \\, S \\, dW",
+        "mc": r"S_{t+\\Delta t} = S_t \\exp\\!\\left[\\left(r - q - \\tfrac{1}{2}\\sigma^2\\right)\\!\\Delta t + \\sigma\\sqrt{\\Delta t}\\, Z\\right]",
     }
 
     def __init__(self, sigma=0.20):
@@ -81,6 +82,7 @@ class CEVModel(Model):
     EQUATION_LATEX = {
         "main": r"dS = (r - q) \\, S \\, dt + \\sigma \\, S^{\\gamma} \\, dW",
         "vol": r"\\text{Effective vol}(S) = \\sigma \\, S^{\\gamma - 1} \\quad (\\gamma=1 \\Rightarrow \\text{GBM}, \\; \\gamma=0 \\Rightarrow \\text{Normal})",
+        "mc": r"S_{t+\\Delta t} = S_t + (r - q) S_t \\Delta t + \\sigma S_t^{\\gamma} \\sqrt{\\Delta t}\\, Z",
     }
 
     PARAMETER_SPECS = [
@@ -130,6 +132,7 @@ class OUModel(Model):
     EQUATION_LATEX = {
         "main": r"dS = \\kappa \\, (\\theta - S) \\, dt + \\sigma \\, S \\, dW",
         "vol": r"t_{1/2} = \\frac{\\ln 2}{\\kappa} \\quad \\text{(half-life of mean reversion)}",
+        "mc": r"S_{t+\\Delta t} = S_t + \\kappa(\\theta - S_t)\\Delta t + \\sigma S_t \\sqrt{\\Delta t}\\, Z",
     }
 
     PARAMETER_SPECS = [
@@ -187,6 +190,8 @@ class MertonJD(Model):
     EQUATION_LATEX = {
         "main": r"\\frac{dS}{S} = (r - q - \\lambda k) \\, dt + \\sigma \\, dW + (e^J - 1) \\, dN",
         "jump": r"dN \\sim \\mathrm{Poisson}(\\lambda \\, dt), \\quad J \\sim \\mathcal{N}(\\mu_J, \\sigma_J^2), \\quad k = e^{\\mu_J + \\frac{1}{2}\\sigma_J^2} - 1",
+        "cf": r"\\varphi(u) = \\varphi_{\\text{GBM}}(u) \\cdot \\exp\\!\\left[\\lambda T\\!\\left(e^{iu\\mu_J - \\frac{1}{2}\\sigma_J^2 u^2} - 1\\right)\\right]",
+        "mc": r"S_{t+\\Delta t} = S_t \\exp\\!\\left[(r-q-\\lambda k - \\tfrac{\\sigma^2}{2})\\Delta t + \\sigma\\sqrt{\\Delta t}\\, Z\\right] \\cdot \\prod_{j=1}^{N_t} e^{J_j}",
     }
 
     PARAMETER_SPECS = [
@@ -282,6 +287,7 @@ class CIRModel(Model):
     EQUATION_LATEX = {
         "main": r"dS = \\kappa \\, (\\theta - S) \\, dt + \\sigma \\sqrt{S} \\, dW",
         "vol": r"\\text{Feller condition: } 2\\kappa\\theta > \\sigma^2 \\; \\Rightarrow \\; S_t > 0 \\;\\; \\forall t",
+        "mc": r"S_{t+\\Delta t} = S_t + \\kappa(\\theta - S_t)\\Delta t + \\sigma\\sqrt{\\max(S_t, 0) \\cdot \\Delta t}\\, Z",
     }
 
     PARAMETER_SPECS = [
@@ -337,6 +343,7 @@ class ExpOUModel(Model):
     EQUATION_LATEX = {
         "main": r"d(\\ln S) = \\kappa \\, (\\ln \\theta - \\ln S) \\, dt + \\sigma \\, dW",
         "vol": r"dS = S\\!\\left[\\kappa(\\ln\\theta - \\ln S) + \\tfrac{1}{2}\\sigma^2\\right] dt + \\sigma \\, S \\, dW",
+        "mc": r"\\ln S_{t+\\Delta t} = \\ln S_t + \\kappa(\\ln\\theta - \\ln S_t)\\Delta t + \\sigma\\sqrt{\\Delta t}\\, Z",
     }
 
     PARAMETER_SPECS = [
@@ -396,6 +403,8 @@ class HestonLike(Model):
     EQUATION_LATEX = {
         "main": r"dS = (r - q) \\, S \\, dt + \\sqrt{V} \\, S \\, dW_1",
         "vol": r"dV = \\kappa(\\theta - V) \\, dt + \\xi \\sqrt{V} \\, dW_2, \\quad \\mathrm{corr}(dW_1, dW_2) = \\rho",
+        "cf": r"\\varphi(u) = \\exp\\!\\bigl(C(u,T) + D(u,T)\\,v_0 + iu\\ln S_0\\bigr)",
+        "mc": r"\\begin{aligned} S_{t+\\Delta t} &= S_t \\exp\\!\\left[(r-q-\\tfrac{V_t}{2})\\Delta t + \\sqrt{V_t\\Delta t}\\, Z_1\\right] \\\\ V_{t+\\Delta t} &= V_t + \\kappa(\\theta - V_t)\\Delta t + \\xi\\sqrt{V_t\\Delta t}\\, Z_2 \\end{aligned}",
     }
 
     PARAMETER_SPECS = [
@@ -489,7 +498,8 @@ class GBMWithFFT(Model):
 
     EQUATION_LATEX = {
         "main": r"dS = (r - q) \\, S \\, dt + \\sigma \\, S \\, dW",
-        "vol": r"\\varphi(u) = \\exp\\!\\left[iu\\left(\\ln S_0 + (r - q - \\tfrac{1}{2}\\sigma^2)T\\right) - \\tfrac{1}{2}\\sigma^2 T u^2\\right]",
+        "cf": r"\\varphi(u) = \\exp\\!\\left[iu\\left(\\ln S_0 + (r - q - \\tfrac{1}{2}\\sigma^2)T\\right) - \\tfrac{1}{2}\\sigma^2 T u^2\\right]",
+        "mc": r"S_{t+\\Delta t} = S_t \\exp\\!\\left[\\left(r - q - \\tfrac{1}{2}\\sigma^2\\right)\\!\\Delta t + \\sigma\\sqrt{\\Delta t}\\, Z\\right]",
     }
 
     PARAMETER_SPECS = [

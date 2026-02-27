@@ -161,7 +161,13 @@ def create_option_position(
     quantity: int,
     premium_paid: float,
     dte_days: Optional[int] = None,
-    volatility: Optional[float] = None
+    volatility: Optional[float] = None,
+    instrument_class: str = 'vanilla',
+    barrier: Optional[float] = None,
+    is_up: Optional[bool] = None,
+    is_knock_in: Optional[bool] = None,
+    rebate: float = 0.0,
+    payout: float = 1.0,
 ) -> dict:
     """
     Create an option position dict.
@@ -174,6 +180,13 @@ def create_option_position(
         premium_paid: Premium per share
         dte_days: Days to expiration (optional)
         volatility: Implied volatility (optional)
+        instrument_class: 'vanilla', 'barrier', 'asian', 'digital',
+                          'lookback_fixed', or 'lookback_floating'
+        barrier: Barrier level (for barrier options)
+        is_up: True for up-barrier, False for down-barrier
+        is_knock_in: True for knock-in, False for knock-out
+        rebate: Rebate amount (for barrier options)
+        payout: Fixed payout (for digital options)
 
     Returns:
         Option position dict
@@ -189,6 +202,18 @@ def create_option_position(
         position['dte_days'] = dte_days
     if volatility is not None:
         position['volatility'] = volatility
+    if instrument_class != 'vanilla':
+        position['instrument_class'] = instrument_class
+        if barrier is not None:
+            position['barrier'] = barrier
+        if is_up is not None:
+            position['is_up'] = is_up
+        if is_knock_in is not None:
+            position['is_knock_in'] = is_knock_in
+        if rebate != 0.0:
+            position['rebate'] = rebate
+        if payout != 1.0:
+            position['payout'] = payout
     return position
 
 

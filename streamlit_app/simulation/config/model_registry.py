@@ -56,6 +56,9 @@ class ModelSpec:
     equation_main: str
     equation_vol: Optional[str] = None
     equation_jump: Optional[str] = None
+    equation_analytical: Optional[str] = None   # Closed-form pricing (BS)
+    equation_cf: Optional[str] = None           # Characteristic function (FFT)
+    equation_mc: Optional[str] = None           # Monte Carlo discretization
     description: str = ""
     stationarity_condition: Optional[str] = None
     feller_condition: Optional[str] = None
@@ -377,6 +380,9 @@ MODEL_REGISTRY: Dict[str, ModelSpec] = {
         pricing_methods=[PricingMethod.ANALYTICAL, PricingMethod.FFT, PricingMethod.MONTE_CARLO],
         parameters=GBM_PARAMETERS,
         equation_main=r"dS = \mu S \, dt + \sigma S \, dW",
+        equation_analytical=r"C = S_0 N(d_1) - Ke^{-rT}N(d_2), \quad d_{1,2} = \frac{\ln(S_0/K) + (r \pm \tfrac{1}{2}\sigma^2)T}{\sigma\sqrt{T}}",
+        equation_cf=r"\varphi(u) = \exp\!\left[iu\!\left(\ln S_0 + (r - q - \tfrac{1}{2}\sigma^2)T\right) - \tfrac{1}{2}\sigma^2 T u^2\right]",
+        equation_mc=r"S_{t+\Delta t} = S_t \exp\!\left[\left(r - q - \tfrac{1}{2}\sigma^2\right)\!\Delta t + \sigma\sqrt{\Delta t}\, Z\right], \quad Z \sim \mathcal{N}(0,1)",
         description="Classic log-normal model. Constant volatility, continuous paths.",
     ),
 
@@ -391,6 +397,8 @@ MODEL_REGISTRY: Dict[str, ModelSpec] = {
         parameters=HESTON_PARAMETERS,
         equation_main=r"dS = \mu S \, dt + \sqrt{V} S \, dW_S",
         equation_vol=r"dV = \kappa(\theta - V) \, dt + \xi \sqrt{V} \, dW_V",
+        equation_cf=r"\varphi(u) = \exp\!\bigl(C(u,T) + D(u,T)\,v_0 + iu\ln S_0\bigr), \quad d = \sqrt{(\kappa - i\rho\xi u)^2 + \xi^2(iu + u^2)}",
+        equation_mc=r"\begin{aligned} S_{t+\Delta t} &= S_t \exp\!\left[(r-q-\tfrac{V_t}{2})\Delta t + \sqrt{V_t\Delta t}\, Z_1\right] \\ V_{t+\Delta t} &= V_t + \kappa(\theta - V_t)\Delta t + \xi\sqrt{V_t\Delta t}\, Z_2, \quad \mathrm{corr}(Z_1,Z_2) = \rho \end{aligned}",
         description="Mean-reverting stochastic variance. Captures volatility smile.",
         feller_condition=r"2\kappa\theta > \xi^2",
     ),
@@ -406,6 +414,8 @@ MODEL_REGISTRY: Dict[str, ModelSpec] = {
         parameters=MERTON_PARAMETERS,
         equation_main=r"dS/S = (\mu - \lambda k) \, dt + \sigma \, dW + (J-1) \, dN",
         equation_jump=r"J \sim \log\mathcal{N}(\mu_J, \sigma_J^2)",
+        equation_cf=r"\varphi(u) = \varphi_{\text{GBM}}(u) \cdot \exp\!\left[\lambda T\!\left(e^{iu\mu_J - \frac{1}{2}\sigma_J^2 u^2} - 1\right)\right]",
+        equation_mc=r"S_{t+\Delta t} = S_t \exp\!\left[(r-q-\lambda k - \tfrac{\sigma^2}{2})\Delta t + \sigma\sqrt{\Delta t}\, Z\right] \cdot \prod_{j=1}^{N_t} e^{J_j}, \;\; N_t \sim \mathrm{Poisson}(\lambda\Delta t)",
         description="GBM with random jumps. Models crash risk and fat tails.",
     ),
 
@@ -421,6 +431,8 @@ MODEL_REGISTRY: Dict[str, ModelSpec] = {
         equation_main=r"dS = (\mu - \lambda k) S \, dt + \sqrt{V} S \, dW_S + (J-1) S \, dN",
         equation_vol=r"dV = \kappa(\theta - V) \, dt + \xi \sqrt{V} \, dW_V",
         equation_jump=r"J \sim \log\mathcal{N}(\mu_J, \sigma_J^2)",
+        equation_cf=r"\varphi(u) = \varphi_{\text{Heston}}(u) \cdot \exp\!\left[\lambda T\!\left(e^{iu\mu_J - \frac{1}{2}\sigma_J^2 u^2} - 1\right)\right]",
+        equation_mc=r"\begin{aligned} S_{t+\Delta t} &= S_t \exp\!\left[(r-q-\lambda k - \tfrac{V_t}{2})\Delta t + \sqrt{V_t\Delta t}\, Z_1\right] \cdot \prod_{j=1}^{N_t} e^{J_j} \\ V_{t+\Delta t} &= V_t + \kappa(\theta - V_t)\Delta t + \xi\sqrt{V_t\Delta t}\, Z_2 \end{aligned}",
         description="Combines stochastic vol and jumps. Most flexible continuous-time model.",
         feller_condition=r"2\kappa\theta > \xi^2",
     ),
@@ -436,6 +448,7 @@ MODEL_REGISTRY: Dict[str, ModelSpec] = {
         parameters=GARCH_PARAMETERS,
         equation_main=r"r_t = \mu - \frac{1}{2}\sigma_t^2 + \sigma_t z_t",
         equation_vol=r"\sigma_t^2 = \omega + \alpha \epsilon_{t-1}^2 + \beta \sigma_{t-1}^2",
+        equation_mc=r"S_t = S_{t-1}\exp\!\left(\mu - \tfrac{1}{2}\sigma_t^2 + \sigma_t z_t\right), \quad z_t \sim \mathcal{N}(0,1)",
         description="Volatility clustering from past returns. Industry standard.",
         stationarity_condition=r"\alpha + \beta < 1",
     ),
@@ -451,6 +464,7 @@ MODEL_REGISTRY: Dict[str, ModelSpec] = {
         parameters=NGARCH_PARAMETERS,
         equation_main=r"r_t = \mu - \frac{1}{2}\sigma_t^2 + \sigma_t z_t",
         equation_vol=r"\sigma_t^2 = \omega + \alpha(\epsilon_{t-1} - \theta\sigma_{t-1})^2 + \beta \sigma_{t-1}^2",
+        equation_mc=r"S_t = S_{t-1}\exp\!\left(\mu - \tfrac{1}{2}\sigma_t^2 + \sigma_t z_t\right), \quad z_t \sim \mathcal{N}(0,1)",
         description="GARCH with leverage effect. Bad news increases vol more than good news.",
         stationarity_condition=r"\alpha(1 + \theta^2) + \beta < 1",
     ),
@@ -466,6 +480,7 @@ MODEL_REGISTRY: Dict[str, ModelSpec] = {
         parameters=GJR_GARCH_PARAMETERS,
         equation_main=r"r_t = \mu - \frac{1}{2}\sigma_t^2 + \sigma_t z_t",
         equation_vol=r"\sigma_t^2 = \omega + (\alpha + \gamma I_{t-1}) \epsilon_{t-1}^2 + \beta \sigma_{t-1}^2",
+        equation_mc=r"S_t = S_{t-1}\exp\!\left(\mu - \tfrac{1}{2}\sigma_t^2 + \sigma_t z_t\right), \quad z_t \sim \mathcal{N}(0,1)",
         description="GARCH with asymmetric response to negative shocks.",
         stationarity_condition=r"\alpha + \beta + \gamma/2 < 1",
     ),

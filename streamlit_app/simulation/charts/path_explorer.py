@@ -61,7 +61,7 @@ def render_path_explorer_chart(
         mode="lines",
         line=dict(width=1.8, color=_PRICE_COLOR),
         name="S(t)",
-        hovertemplate="Time: %{x:.2f} yr<br>Price: $%{y:.2f}<extra></extra>",
+        hovertemplate="<b>Time:</b> %{x:.2f} yr<br><b>Price:</b> $%{y:.2f}<extra></extra>",
     ), row=1, col=1)
 
     # S0 reference
@@ -83,7 +83,7 @@ def render_path_explorer_chart(
             mode="lines",
             line=dict(width=1.8, color=_VOL_COLOR),
             name="\u03c3(t)",
-            hovertemplate="Time: %{x:.2f} yr<br>Volatility: %{y:.2f}%<extra></extra>",
+            hovertemplate="<b>Time:</b> %{x:.2f} yr<br><b>Volatility:</b> %{y:.2f}%<extra></extra>",
         ), row=2, col=1)
 
         # Reference lines — initial & long-run volatility
@@ -96,7 +96,7 @@ def render_path_explorer_chart(
             mode="lines",
             line=dict(width=1.5, color=_VOL_FLAT_COLOR),
             name=f"\u03c3 = {init_vol:.1f}%",
-            hovertemplate="Time: %{x:.2f} yr<br>Volatility: " + f"{init_vol:.2f}%" + "<extra></extra>",
+            hovertemplate="<b>Time:</b> %{x:.2f} yr<br><b>Volatility:</b> " + f"{init_vol:.2f}%" + "<extra></extra>",
         ), row=2, col=1)
 
     # ── Layout ─────────────────────────────────────────────────────────────
@@ -134,7 +134,7 @@ def render_path_explorer_chart(
     fig.update_yaxes(title_text=vol_label, row=2, col=1, **_ax)
     fig.update_xaxes(title_text="Time (years)", row=2, col=1, **_ax)
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
 
 def _add_vol_references(

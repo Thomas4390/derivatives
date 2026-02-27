@@ -114,7 +114,16 @@ AVAILABLE_STRATEGIES = [
     "butterfly",
     "covered_call",
     "protective_put",
-    "collar"
+    "collar",
+    # Exotic strategies
+    "barrier_up_out_call",
+    "barrier_down_out_put",
+    "barrier_knock_in_call",
+    "digital_call",
+    "digital_put",
+    "digital_range_bet",
+    "asian_call",
+    "lookback_floating_call",
 ]
 
 # Strategy display names
@@ -140,7 +149,16 @@ STRATEGY_DISPLAY_NAMES = {
     "butterfly": "Butterfly",
     "covered_call": "Covered Call",
     "protective_put": "Protective Put",
-    "collar": "Collar"
+    "collar": "Collar",
+    # Exotic
+    "barrier_up_out_call": "Up-and-Out Call",
+    "barrier_down_out_put": "Down-and-Out Put",
+    "barrier_knock_in_call": "Down-and-In Call",
+    "digital_call": "Digital Call",
+    "digital_put": "Digital Put",
+    "digital_range_bet": "Digital Range Bet",
+    "asian_call": "Asian Call (Geometric)",
+    "lookback_floating_call": "Lookback Call (Floating)",
 }
 
 # Strategy leg definitions (option_type, position_type, strike_offset from spot)
@@ -257,7 +275,61 @@ STRATEGY_LEGS = {
     "collar": [
         {"option_type": "put", "position_type": "long", "strike_factor": 0.95, "quantity": 1},     # 5% OTM put
         {"option_type": "call", "position_type": "short", "strike_factor": 1.05, "quantity": 1}    # 5% OTM call
-    ]
+    ],
+
+    # ==========================================================================
+    # EXOTIC STRATEGIES
+    # ==========================================================================
+    # Up-and-Out Call: cheap directional bet, knocked out if spot rises too high
+    "barrier_up_out_call": [
+        {"option_type": "call", "position_type": "long", "strike_factor": 1.0, "quantity": 1,
+         "instrument_class": "barrier", "barrier_factor": 1.10, "is_up": True, "is_knock_in": False}
+    ],
+
+    # Down-and-Out Put: cheap downside protection, knocked out if spot drops too far
+    "barrier_down_out_put": [
+        {"option_type": "put", "position_type": "long", "strike_factor": 1.0, "quantity": 1,
+         "instrument_class": "barrier", "barrier_factor": 0.90, "is_up": False, "is_knock_in": False}
+    ],
+
+    # Down-and-In Call: activates only if spot dips below barrier first
+    "barrier_knock_in_call": [
+        {"option_type": "call", "position_type": "long", "strike_factor": 1.0, "quantity": 1,
+         "instrument_class": "barrier", "barrier_factor": 0.90, "is_up": False, "is_knock_in": True}
+    ],
+
+    # Digital Call: pays fixed amount if spot > strike at expiry
+    "digital_call": [
+        {"option_type": "call", "position_type": "long", "strike_factor": 1.0, "quantity": 1,
+         "instrument_class": "digital", "payout": 1.0}
+    ],
+
+    # Digital Put: pays fixed amount if spot < strike at expiry
+    "digital_put": [
+        {"option_type": "put", "position_type": "long", "strike_factor": 1.0, "quantity": 1,
+         "instrument_class": "digital", "payout": 1.0}
+    ],
+
+    # Digital Range Bet: pays if spot ends between two strikes
+    # Long digital call at lower strike + Short digital call at upper strike
+    "digital_range_bet": [
+        {"option_type": "call", "position_type": "long", "strike_factor": 0.95, "quantity": 1,
+         "instrument_class": "digital", "payout": 1.0},
+        {"option_type": "call", "position_type": "short", "strike_factor": 1.05, "quantity": 1,
+         "instrument_class": "digital", "payout": 1.0},
+    ],
+
+    # Asian Call (Geometric): payoff based on geometric average price
+    "asian_call": [
+        {"option_type": "call", "position_type": "long", "strike_factor": 1.0, "quantity": 1,
+         "instrument_class": "asian"}
+    ],
+
+    # Lookback Floating Call: buy at the minimum price observed
+    "lookback_floating_call": [
+        {"option_type": "call", "position_type": "long", "strike_factor": 1.0, "quantity": 1,
+         "instrument_class": "lookback_floating"}
+    ],
 }
 
 # Strategies that include a stock position
@@ -283,3 +355,76 @@ CHART_HEIGHT_3D = 700
 SLIDER_POSITION_Y = -0.10
 SLIDER_LENGTH = 0.9
 SLIDER_POSITION_X = 0.05
+
+
+# =============================================================================
+# EXOTIC OPTIONS CONFIGURATION
+# =============================================================================
+
+# Instrument classes available as portfolio legs
+INSTRUMENT_CLASSES = {
+    'barrier': 'Barrier',
+    'asian': 'Asian (Geo)',
+    'digital': 'Digital',
+    'lookback_fixed': 'Lookback (Fixed)',
+    'lookback_floating': 'Lookback (Float)',
+}
+
+# Exotic type display names
+EXOTIC_TYPE_NAMES = {
+    "barrier": "Barrier Option",
+    "asian": "Asian Option (Geometric)",
+    "digital": "Digital Option (Cash-or-Nothing)",
+    "lookback_floating": "Lookback (Floating Strike)",
+    "lookback_fixed": "Lookback (Fixed Strike)",
+}
+
+# Barrier subtypes: all 8 combinations of up/down, in/out, call/put
+BARRIER_SUBTYPES = {
+    "up_out_call": {"label": "Up-and-Out Call", "is_call": True, "is_up": True, "is_knock_in": False},
+    "up_in_call": {"label": "Up-and-In Call", "is_call": True, "is_up": True, "is_knock_in": True},
+    "down_out_call": {"label": "Down-and-Out Call", "is_call": True, "is_up": False, "is_knock_in": False},
+    "down_in_call": {"label": "Down-and-In Call", "is_call": True, "is_up": False, "is_knock_in": True},
+    "up_out_put": {"label": "Up-and-Out Put", "is_call": False, "is_up": True, "is_knock_in": False},
+    "up_in_put": {"label": "Up-and-In Put", "is_call": False, "is_up": True, "is_knock_in": True},
+    "down_out_put": {"label": "Down-and-Out Put", "is_call": False, "is_up": False, "is_knock_in": False},
+    "down_in_put": {"label": "Down-and-In Put", "is_call": False, "is_up": False, "is_knock_in": True},
+}
+
+# Educational descriptions for each exotic type
+EXOTIC_DESCRIPTIONS = {
+    "barrier": (
+        "**Barrier options** activate (knock-in) or deactivate (knock-out) when the underlying "
+        "hits a specified barrier level. **Key identity:** Knock-In + Knock-Out = Vanilla option "
+        "(for same strike and barrier). Barriers are cheaper than vanilla because they can become "
+        "worthless (knock-out) or may never activate (knock-in)."
+    ),
+    "asian": (
+        "**Asian (Geometric) options** have a payoff based on the geometric average price of the "
+        "underlying over the option's life, rather than the terminal price. They are **always cheaper** "
+        "than vanilla options because averaging reduces the effective volatility "
+        "(by a factor of 1/sqrt(3) for geometric averaging)."
+    ),
+    "digital": (
+        "**Digital (Cash-or-Nothing) options** pay a fixed amount if the option expires in-the-money, "
+        "and zero otherwise. The price equals PV(probability of ITM) x Payout. "
+        "**Key identity:** Digital Call + Digital Put = e^(-rT) x Payout."
+    ),
+    "lookback_floating": (
+        "**Floating-strike lookback options** allow the holder to buy at the lowest price (call) "
+        "or sell at the highest price (put) observed during the option's life. This \"no-regret\" "
+        "feature makes them **always more expensive** than vanilla options."
+    ),
+    "lookback_fixed": (
+        "**Fixed-strike lookback options** have payoff based on the maximum (call) or minimum (put) "
+        "of the underlying price vs a fixed strike. Call payoff: max(M_max - K, 0). "
+        "Put payoff: max(K - M_min, 0). They are more expensive than vanilla since the "
+        "lookback feature can only improve the payoff."
+    ),
+}
+
+# Default values for exotic options
+DEFAULT_EXOTIC_DTE = 90
+DEFAULT_DIGITAL_PAYOUT = 1.0
+DEFAULT_BARRIER_UP_FACTOR = 1.10   # Barrier at 110% of spot for up-barriers
+DEFAULT_BARRIER_DOWN_FACTOR = 0.90  # Barrier at 90% of spot for down-barriers

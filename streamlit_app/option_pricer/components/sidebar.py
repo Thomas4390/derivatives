@@ -17,14 +17,24 @@ from config.constants import (
     STRATEGY_DISPLAY_NAMES,
     STRATEGY_LEGS,
     STRATEGIES_WITH_STOCK,
-    STRATEGY_STOCK_POSITION
+    STRATEGY_STOCK_POSITION,
+    INSTRUMENT_CLASSES,
+    EXOTIC_TYPE_NAMES,
+    BARRIER_SUBTYPES,
+    EXOTIC_DESCRIPTIONS,
+    DEFAULT_EXOTIC_DTE,
+    DEFAULT_DIGITAL_PAYOUT,
+    DEFAULT_BARRIER_UP_FACTOR,
+    DEFAULT_BARRIER_DOWN_FACTOR,
 )
 from config.styles import (
     net_position_card_html,
     position_item_html,
+    exotic_position_item_html,
     stock_position_html
 )
 from services.pricing_adapter import calculate_option_premium
+from services.exotic_pricing_adapter import calculate_exotic_premium
 from services.state_manager import create_option_position, create_stock_position
 
 
@@ -137,6 +147,15 @@ def _render_strategy_builder(
         "covered_call": "🛡️  Covered Call",
         "protective_put": "🛡️  Protective Put",
         "collar": "🛡️  Collar",
+        "── Exotic ──": None,
+        "barrier_up_out_call": "🔮  Up-and-Out Call",
+        "barrier_down_out_put": "🔮  Down-and-Out Put",
+        "barrier_knock_in_call": "🔮  Down-and-In Call",
+        "digital_call": "🎯  Digital Call",
+        "digital_put": "🎯  Digital Put",
+        "digital_range_bet": "🎯  Digital Range Bet",
+        "asian_call": "📊  Asian Call (Geometric)",
+        "lookback_floating_call": "🔍  Lookback Call (Floating)",
     }
 
     # Build options list (excluding separators for actual selection)
@@ -191,6 +210,7 @@ def _render_strategy_builder(
         st.session_state.additional_stock = {}
         st.session_state.custom_legs = []
         st.session_state.custom_has_stock = False
+        st.session_state.removed_base_legs = {}
 
     # Now calculate has_stock and strategy_legs with clean state
     has_stock = selected_strategy in STRATEGIES_WITH_STOCK
@@ -198,11 +218,22 @@ def _render_strategy_builder(
     if is_custom:
         strategy_legs = st.session_state.custom_legs
         has_stock = st.session_state.get('custom_has_stock', False)
+        base_leg_count = 0
+        base_original_map = []
     else:
-        # Combine base strategy legs with any additional legs
+        # Filter out removed base legs
+        removed_base_indices = st.session_state.get('removed_base_legs', {}).get(selected_strategy, set())
+        filtered_base = []
+        base_original_map = []
+        for orig_i, leg in enumerate(base_strategy_legs):
+            if orig_i not in removed_base_indices:
+                filtered_base.append(leg)
+                base_original_map.append(orig_i)
+        # Combine filtered base legs with any additional legs
         additional_legs_key = selected_strategy
         additional = st.session_state.additional_legs.get(additional_legs_key, [])
-        strategy_legs = list(base_strategy_legs) + additional
+        strategy_legs = filtered_base + additional
+        base_leg_count = len(filtered_base)
         # Check if stock was added manually to this strategy
         has_stock = has_stock or st.session_state.additional_stock.get(additional_legs_key, False)
 
@@ -272,18 +303,26 @@ def _render_strategy_builder(
     # Render each option leg with improved styling
     leg_costs = []
     legs_to_remove = []
-    base_leg_count = len(base_strategy_legs) if not is_custom else 0
 
     for i, leg in enumerate(strategy_legs):
-        # Allow removal for custom legs OR additional legs on predefined strategies
         is_additional_leg = i >= base_leg_count
-        allow_remove = is_custom or is_additional_leg
+        allow_remove = True  # All legs are removable
 
-        leg_cost, should_remove = _render_leg_editor(
-            i, leg, spot_price, risk_free_rate, num_legs,
-            allow_remove=allow_remove,
-            is_additional=is_additional_leg and not is_custom
-        )
+        # Check if this is an exotic leg
+        leg_state = st.session_state.strategy_legs_state.get(i, {})
+        inst_class = leg_state.get('instrument_class', leg.get('instrument_class', 'vanilla'))
+
+        if inst_class != 'vanilla':
+            leg_cost, should_remove = _render_exotic_leg_editor(
+                i, leg, spot_price, risk_free_rate, num_legs,
+                allow_remove=allow_remove,
+            )
+        else:
+            leg_cost, should_remove = _render_leg_editor(
+                i, leg, spot_price, risk_free_rate, num_legs,
+                allow_remove=allow_remove,
+                is_additional=is_additional_leg and not is_custom
+            )
         leg_costs.append(leg_cost)
 
         if should_remove:
@@ -302,11 +341,20 @@ def _render_strategy_builder(
                 if idx < len(st.session_state.custom_legs):
                     st.session_state.custom_legs.pop(idx)
             else:
-                # Remove from additional legs (adjust index for base legs)
-                additional_idx = idx - base_leg_count
-                additional_legs_key = selected_strategy
-                if additional_idx >= 0 and additional_idx < len(st.session_state.additional_legs.get(additional_legs_key, [])):
-                    st.session_state.additional_legs[additional_legs_key].pop(additional_idx)
+                if idx < base_leg_count:
+                    # Base strategy leg — track as removed
+                    orig_idx = base_original_map[idx]
+                    if 'removed_base_legs' not in st.session_state:
+                        st.session_state.removed_base_legs = {}
+                    if selected_strategy not in st.session_state.removed_base_legs:
+                        st.session_state.removed_base_legs[selected_strategy] = set()
+                    st.session_state.removed_base_legs[selected_strategy].add(orig_idx)
+                else:
+                    # Additional leg
+                    additional_idx = idx - base_leg_count
+                    additional_legs_key = selected_strategy
+                    if 0 <= additional_idx < len(st.session_state.additional_legs.get(additional_legs_key, [])):
+                        st.session_state.additional_legs[additional_legs_key].pop(additional_idx)
         # Reset the legs state
         st.session_state.strategy_legs_state = {}
         st.session_state.strategy_version = st.session_state.get('strategy_version', 0) + 1
@@ -332,12 +380,36 @@ def _render_strategy_builder(
 
             # Update strategy_legs_state from widget values if they exist
             if type_key in st.session_state:
-                st.session_state.strategy_legs_state[i] = {
+                # Preserve existing exotic fields from current state
+                existing_state = st.session_state.strategy_legs_state.get(i, {})
+                new_state = {
                     'option_type': st.session_state[type_key],
                     'position_type': st.session_state[dir_key],
                     'strike': st.session_state[strike_key],
-                    'quantity': st.session_state[qty_key]
+                    'quantity': st.session_state[qty_key],
                 }
+                # Carry over exotic fields
+                inst_class = existing_state.get('instrument_class', 'vanilla')
+                if inst_class != 'vanilla':
+                    new_state['instrument_class'] = inst_class
+                    for ekey in ('barrier', 'is_up', 'is_knock_in', 'rebate', 'payout'):
+                        # Read from widget if available, else from existing state
+                        widget_key = f"leg_{i}_{ekey}_v{version}"
+                        if widget_key in st.session_state:
+                            new_state[ekey] = st.session_state[widget_key]
+                        elif ekey in existing_state:
+                            new_state[ekey] = existing_state[ekey]
+                    # Handle barrier direction widget
+                    barrier_dir_key = f"leg_{i}_barrier_dir_v{version}"
+                    if barrier_dir_key in st.session_state:
+                        new_state['is_up'] = (st.session_state[barrier_dir_key] == "Up")
+                    ki_key = f"leg_{i}_ki_v{version}"
+                    if ki_key in st.session_state:
+                        new_state['is_knock_in'] = (st.session_state[ki_key] == "Knock-In")
+                    payout_key = f"leg_{i}_payout_v{version}"
+                    if payout_key in st.session_state:
+                        new_state['payout'] = st.session_state[payout_key]
+                st.session_state.strategy_legs_state[i] = new_state
 
         # Also update stock state from widget values
         if has_stock:
@@ -397,12 +469,22 @@ def _initialize_strategy_state(
             del st.session_state[key]
 
         for i, leg in enumerate(strategy_legs):
-            st.session_state.strategy_legs_state[i] = {
+            state = {
                 'option_type': leg['option_type'],
                 'position_type': leg['position_type'],
-                'strike': round(spot_price * leg['strike_factor'], 2),
+                'strike': round(spot_price * leg.get('strike_factor', 1.0), 2),
                 'quantity': leg['quantity']
             }
+            # Preserve exotic fields if present
+            inst_class = leg.get('instrument_class', 'vanilla')
+            if inst_class != 'vanilla':
+                state['instrument_class'] = inst_class
+                if 'barrier_factor' in leg:
+                    state['barrier'] = round(spot_price * leg['barrier_factor'], 2)
+                for ekey in ('is_up', 'is_knock_in', 'rebate', 'payout'):
+                    if ekey in leg:
+                        state[ekey] = leg[ekey]
+            st.session_state.strategy_legs_state[i] = state
 
         if has_stock:
             # Get the stock position type from strategy definition (default to 'long')
@@ -432,12 +514,13 @@ def _render_add_leg_button(spot_price: float, is_custom: bool, selected_strategy
     if additional_legs_key not in st.session_state.additional_legs:
         st.session_state.additional_legs[additional_legs_key] = []
 
-    # Two buttons: Add Option and Add Stock (always show both for consistency)
-    col1, col2 = st.columns(2)
+    # Three buttons: Add Option, Add Exotic, Add Stock
+    col1, col2, col3 = st.columns(3)
     with col1:
-        add_option_clicked = st.button("➕ Option", width="stretch", key="add_option_leg_btn", type="secondary")
+        add_option_clicked = st.button("➕ Vanilla", width="stretch", key="add_option_leg_btn", type="secondary")
     with col2:
-        # Disable stock button if already has stock
+        add_exotic_clicked = st.button("➕ Exotic", width="stretch", key="add_exotic_leg_btn", type="secondary")
+    with col3:
         add_stock_clicked = st.button(
             "➕ Stock",
             width="stretch",
@@ -445,6 +528,62 @@ def _render_add_leg_button(spot_price: float, is_custom: bool, selected_strategy
             type="secondary",
             disabled=has_stock
         )
+
+    # Toggle exotic selector visibility on button click
+    if add_exotic_clicked:
+        st.session_state.show_exotic_selector = not st.session_state.get('show_exotic_selector', False)
+
+    # Show exotic type selector only when toggled on
+    if st.session_state.get('show_exotic_selector', False):
+        exotic_types = list(INSTRUMENT_CLASSES.keys())
+        pending_idx = exotic_types.index(st.session_state.get('pending_exotic_type', 'barrier'))
+        selected_exotic = st.selectbox(
+            "Exotic type",
+            exotic_types,
+            index=pending_idx,
+            format_func=lambda x: INSTRUMENT_CLASSES[x],
+            key="sidebar_exotic_type_selector",
+            label_visibility="collapsed"
+        )
+        st.session_state.pending_exotic_type = selected_exotic
+
+        confirm_exotic = st.button("✓ Add Exotic Leg", width="stretch", key="confirm_exotic_btn", type="primary")
+        if confirm_exotic:
+            exotic_type = st.session_state.get('pending_exotic_type', 'barrier')
+            new_leg = {
+                "option_type": "call",
+                "position_type": "long",
+                "strike_factor": 1.0,
+                "quantity": 1,
+                "instrument_class": exotic_type,
+            }
+            if exotic_type == 'barrier':
+                new_leg['barrier_factor'] = DEFAULT_BARRIER_UP_FACTOR
+                new_leg['is_up'] = True
+                new_leg['is_knock_in'] = False
+
+            if is_custom:
+                st.session_state.custom_legs.append(new_leg)
+                new_index = len(st.session_state.custom_legs) - 1
+            else:
+                st.session_state.additional_legs[additional_legs_key].append(new_leg)
+                new_index = len(STRATEGY_LEGS.get(selected_strategy, [])) + len(st.session_state.additional_legs[additional_legs_key]) - 1
+
+            st.session_state.strategy_legs_state[new_index] = {
+                'option_type': 'call',
+                'position_type': 'long',
+                'strike': round(spot_price, 2),
+                'quantity': 1,
+                'instrument_class': exotic_type,
+                'barrier': round(spot_price * DEFAULT_BARRIER_UP_FACTOR, 2) if exotic_type == 'barrier' else 0.0,
+                'is_up': True,
+                'is_knock_in': False,
+                'rebate': 0.0,
+                'payout': DEFAULT_DIGITAL_PAYOUT if exotic_type == 'digital' else 1.0,
+            }
+            st.session_state.show_exotic_selector = False
+            st.session_state.strategy_version = st.session_state.get('strategy_version', 0) + 1
+            st.rerun()
 
     if add_option_clicked:
         # Add a new default option leg
@@ -639,6 +778,173 @@ def _render_leg_editor(
     return total_cost, should_remove
 
 
+def _render_exotic_leg_editor(
+    leg_index: int,
+    leg_config: dict,
+    spot_price: float,
+    risk_free_rate: float,
+    total_legs: int,
+    allow_remove: bool = True,
+) -> tuple[float, bool]:
+    """Render an exotic leg editor with purple styling. Returns (total_cost, should_remove)."""
+    leg_state = st.session_state.strategy_legs_state.get(leg_index, {})
+    should_remove = False
+    version = st.session_state.get('strategy_version', 0)
+
+    inst_class = leg_state.get('instrument_class', leg_config.get('instrument_class', 'barrier'))
+    display_name = INSTRUMENT_CLASSES.get(inst_class, inst_class)
+    option_type = leg_state.get('option_type', leg_config.get('option_type', 'call'))
+    position_type = leg_state.get('position_type', leg_config.get('position_type', 'long'))
+    is_long = position_type == 'long'
+
+    # Purple styling for exotic legs
+    border_color = "#8b5cf6"
+    bg_gradient = "linear-gradient(135deg, #f5f3ff 0%, #ede9fe 100%)"
+    position_badge_bg = "#ddd6fe" if is_long else "#fecaca"
+    position_badge_color = "#6d28d9" if is_long else "#b91c1c"
+
+    leg_header_html = f'''<div style="background: {bg_gradient}; border: 1px solid {border_color}40; border-left: 4px solid {border_color}; border-radius: 8px; padding: 0.75rem; margin-bottom: 0.625rem;"><div style="display: flex; justify-content: space-between; align-items: center;"><div style="display: flex; align-items: center; gap: 0.5rem;"><span style="font-size: 0.7rem; font-weight: 700; color: #475569; text-transform: uppercase;">Leg {leg_index + 1}</span><span style="background: #c4b5fd; color: #4c1d95; font-size: 0.55rem; font-weight: 600; padding: 0.15rem 0.35rem; border-radius: 3px;">EXOTIC</span><span style="background: #e9d5ff; color: #6b21a8; font-size: 0.55rem; font-weight: 500; padding: 0.15rem 0.35rem; border-radius: 3px;">{display_name}</span></div><span style="background: {position_badge_bg}; color: {position_badge_color}; font-size: 0.65rem; font-weight: 700; padding: 0.2rem 0.5rem; border-radius: 4px; text-transform: uppercase;">{position_type}</span></div></div>'''
+
+    if allow_remove:
+        header_col1, header_col2 = st.columns([4, 1])
+        with header_col1:
+            st.markdown(leg_header_html, unsafe_allow_html=True)
+        with header_col2:
+            st.markdown("<div style='height: 0.25rem'></div>", unsafe_allow_html=True)
+            if st.button("🗑️", key=f"remove_leg_{leg_index}_v{version}", help="Remove this leg", width="stretch"):
+                should_remove = True
+    else:
+        st.markdown(leg_header_html, unsafe_allow_html=True)
+
+    # Type and direction
+    col1, col2 = st.columns(2)
+    with col1:
+        new_option_type = st.selectbox(
+            "Type", ["call", "put"],
+            index=0 if option_type == "call" else 1,
+            format_func=lambda x: f"{'📈' if x == 'call' else '📉'} {x.upper()}",
+            key=f"leg_{leg_index}_type_v{version}"
+        )
+    with col2:
+        new_position_type = st.selectbox(
+            "Direction", ["long", "short"],
+            index=0 if position_type == "long" else 1,
+            format_func=lambda x: f"{'🟢' if x == 'long' else '🔴'} {x.upper()}",
+            key=f"leg_{leg_index}_dir_v{version}"
+        )
+
+    # Strike and quantity
+    default_strike = leg_state.get('strike', round(spot_price * leg_config.get('strike_factor', 1.0), 2))
+    col3, col4 = st.columns(2)
+    with col3:
+        new_strike = st.number_input(
+            "Strike ($)", value=float(default_strike), step=1.0, format="%.2f",
+            key=f"leg_{leg_index}_strike_v{version}"
+        )
+    with col4:
+        default_qty = leg_state.get('quantity', leg_config.get('quantity', 1))
+        new_quantity = st.number_input(
+            "Contracts", value=int(default_qty), min_value=1, step=1,
+            key=f"leg_{leg_index}_qty_v{version}"
+        )
+
+    # Exotic-specific parameters
+    new_barrier = leg_state.get('barrier', 0.0)
+    new_is_up = leg_state.get('is_up', True)
+    new_is_knock_in = leg_state.get('is_knock_in', False)
+    new_rebate = leg_state.get('rebate', 0.0)
+    new_payout = leg_state.get('payout', 1.0)
+
+    if inst_class == 'barrier':
+        col5, col6 = st.columns(2)
+        with col5:
+            new_barrier = st.number_input(
+                "Barrier ($)", value=float(leg_state.get('barrier', round(spot_price * DEFAULT_BARRIER_UP_FACTOR, 2))),
+                step=1.0, format="%.2f",
+                key=f"leg_{leg_index}_barrier_v{version}"
+            )
+        with col6:
+            barrier_dir_options = ["Up", "Down"]
+            barrier_dir_idx = 0 if leg_state.get('is_up', True) else 1
+            barrier_dir = st.selectbox(
+                "Direction", barrier_dir_options, index=barrier_dir_idx,
+                key=f"leg_{leg_index}_barrier_dir_v{version}"
+            )
+            new_is_up = (barrier_dir == "Up")
+
+        col7, col8 = st.columns(2)
+        with col7:
+            ki_options = ["Knock-Out", "Knock-In"]
+            ki_idx = 1 if leg_state.get('is_knock_in', False) else 0
+            ki_type = st.selectbox(
+                "Barrier Type", ki_options, index=ki_idx,
+                key=f"leg_{leg_index}_ki_v{version}"
+            )
+            new_is_knock_in = (ki_type == "Knock-In")
+        with col8:
+            new_rebate = st.number_input(
+                "Rebate ($)", value=float(leg_state.get('rebate', 0.0)),
+                step=0.1, format="%.2f",
+                key=f"leg_{leg_index}_rebate_v{version}"
+            )
+
+    elif inst_class == 'digital':
+        new_payout = st.number_input(
+            "Payout ($)", value=float(leg_state.get('payout', DEFAULT_DIGITAL_PAYOUT)),
+            step=0.1, format="%.2f", min_value=0.01,
+            key=f"leg_{leg_index}_payout_v{version}"
+        )
+
+    # Update state
+    new_state = {
+        'option_type': new_option_type,
+        'position_type': new_position_type,
+        'strike': new_strike,
+        'quantity': new_quantity,
+        'instrument_class': inst_class,
+        'barrier': new_barrier,
+        'is_up': new_is_up,
+        'is_knock_in': new_is_knock_in,
+        'rebate': new_rebate,
+        'payout': new_payout,
+    }
+    st.session_state.strategy_legs_state[leg_index] = new_state
+
+    # Calculate premium using exotic pricing
+    premium = calculate_exotic_premium(
+        spot=spot_price,
+        strike=new_strike,
+        dte_days=DEFAULT_DTE,
+        risk_free_rate=risk_free_rate,
+        volatility=DEFAULT_IV / 100,
+        option_type=new_option_type,
+        exotic_type=inst_class,
+        barrier=new_barrier,
+        is_up=new_is_up,
+        is_knock_in=new_is_knock_in,
+        rebate=new_rebate,
+        payout=new_payout,
+    )
+    total_cost = premium * new_quantity * CONTRACT_MULTIPLIER
+
+    is_long_now = new_position_type == 'long'
+    cost_color = "#dc2626" if is_long_now else "#059669"
+    cost_prefix = "-" if is_long_now else "+"
+
+    st.markdown(f"""
+    <div style="display: flex; justify-content: space-between; align-items: center; padding: 0.5rem 0.75rem; background: #ffffff; border-radius: 6px; border: 1px solid #ddd6fe; margin-top: -0.5rem; margin-bottom: 0.5rem;">
+        <span style="color: #64748b; font-size: 0.8rem;">
+            Premium: <span style="font-family: 'JetBrains Mono', monospace; font-weight: 500;">${premium:.2f}</span>
+        </span>
+        <span style="color: {cost_color}; font-weight: 700; font-size: 0.85rem; font-family: 'JetBrains Mono', monospace;">
+            {cost_prefix}${total_cost:,.2f}
+        </span>
+    </div>
+    """, unsafe_allow_html=True)
+
+    return total_cost, should_remove
+
+
 def _render_stock_leg_editor(spot_price: float, is_custom: bool, selected_strategy: str, is_removable: bool = False) -> tuple[float, bool]:
     """Render stock position editor. Returns (stock_cost, should_remove)."""
     stock_state = st.session_state.strategy_legs_state.get('stock', {
@@ -777,15 +1083,34 @@ def _apply_strategy(
     for i, _ in enumerate(strategy_legs):
         leg_state = st.session_state.strategy_legs_state.get(i, {})
         if leg_state:
-            # Calculate premium using Black-Scholes
-            premium = calculate_option_premium(
-                spot=spot_price,
-                strike=leg_state['strike'],
-                dte_days=DEFAULT_DTE,
-                risk_free_rate=risk_free_rate,
-                volatility=DEFAULT_IV / 100,  # Convert from percentage
-                option_type=leg_state['option_type']
-            )
+            inst_class = leg_state.get('instrument_class', 'vanilla')
+            is_exotic = inst_class != 'vanilla'
+
+            # Calculate premium
+            if is_exotic:
+                premium = calculate_exotic_premium(
+                    spot=spot_price,
+                    strike=leg_state['strike'],
+                    dte_days=DEFAULT_DTE,
+                    risk_free_rate=risk_free_rate,
+                    volatility=DEFAULT_IV / 100,
+                    option_type=leg_state['option_type'],
+                    exotic_type=inst_class,
+                    barrier=leg_state.get('barrier', 0.0),
+                    is_up=leg_state.get('is_up', True),
+                    is_knock_in=leg_state.get('is_knock_in', False),
+                    rebate=leg_state.get('rebate', 0.0),
+                    payout=leg_state.get('payout', 1.0),
+                )
+            else:
+                premium = calculate_option_premium(
+                    spot=spot_price,
+                    strike=leg_state['strike'],
+                    dte_days=DEFAULT_DTE,
+                    risk_free_rate=risk_free_rate,
+                    volatility=DEFAULT_IV / 100,
+                    option_type=leg_state['option_type']
+                )
 
             # Create dict-based position
             position = create_option_position(
@@ -793,7 +1118,13 @@ def _apply_strategy(
                 position_type=leg_state['position_type'],
                 strike=leg_state['strike'],
                 quantity=leg_state['quantity'],
-                premium_paid=premium
+                premium_paid=premium,
+                instrument_class=inst_class,
+                barrier=leg_state.get('barrier'),
+                is_up=leg_state.get('is_up'),
+                is_knock_in=leg_state.get('is_knock_in'),
+                rebate=leg_state.get('rebate', 0.0),
+                payout=leg_state.get('payout', 1.0),
             )
             new_positions.append(position)
 
@@ -854,21 +1185,41 @@ def _render_positions_section(positions: list, stock_position) -> None:
     for i, pos in enumerate(positions):
         total_amount = pos['premium_paid'] * pos['quantity'] * CONTRACT_MULTIPLIER
         shares_controlled = pos['quantity'] * CONTRACT_MULTIPLIER
+        inst_class = pos.get('instrument_class', 'vanilla')
 
-        st.markdown(
-            position_item_html(
-                index=i + 1,
-                quantity=pos['quantity'],
-                position_type=pos['position_type'],
-                option_type=pos['option_type'],
-                strike=pos['strike'],
-                premium=pos['premium_paid'],
-                total_amount=total_amount,
-                shares_controlled=shares_controlled,
-                is_long=(pos['position_type'] == 'long')
-            ),
-            unsafe_allow_html=True
-        )
+        if inst_class != 'vanilla':
+            # Exotic position display (harmonized with vanilla card)
+            display_name = EXOTIC_TYPE_NAMES.get(inst_class, inst_class)
+            st.markdown(
+                exotic_position_item_html(
+                    index=i + 1,
+                    quantity=pos['quantity'],
+                    position_type=pos['position_type'],
+                    option_type=pos['option_type'],
+                    strike=pos['strike'],
+                    premium=pos['premium_paid'],
+                    total_amount=total_amount,
+                    shares_controlled=shares_controlled,
+                    is_long=(pos['position_type'] == 'long'),
+                    exotic_type_name=display_name,
+                ),
+                unsafe_allow_html=True
+            )
+        else:
+            st.markdown(
+                position_item_html(
+                    index=i + 1,
+                    quantity=pos['quantity'],
+                    position_type=pos['position_type'],
+                    option_type=pos['option_type'],
+                    strike=pos['strike'],
+                    premium=pos['premium_paid'],
+                    total_amount=total_amount,
+                    shares_controlled=shares_controlled,
+                    is_long=(pos['position_type'] == 'long')
+                ),
+                unsafe_allow_html=True
+            )
 
     st.markdown("<div style='height: 0.5rem'></div>", unsafe_allow_html=True)
 

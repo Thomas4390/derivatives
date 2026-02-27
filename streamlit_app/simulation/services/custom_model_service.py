@@ -297,6 +297,8 @@ def register_custom_model(model_class: Type[Model], source_code: str) -> None:
     eq_main = eq_latex.get("main", r"\text{User-defined SDE}")
     eq_vol = eq_latex.get("vol")
     eq_jump = eq_latex.get("jump")
+    eq_cf = eq_latex.get("cf")
+    eq_mc = eq_latex.get("mc")
 
     # Detect features from model methods
     _has_stoch_vol = (
@@ -318,6 +320,8 @@ def register_custom_model(model_class: Type[Model], source_code: str) -> None:
         equation_main=eq_main,
         equation_vol=eq_vol,
         equation_jump=eq_jump,
+        equation_cf=eq_cf,
+        equation_mc=eq_mc,
         description="Custom user-defined model",
     )
 

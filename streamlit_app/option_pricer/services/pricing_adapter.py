@@ -225,6 +225,92 @@ def find_breakeven_points(
 # 3D SURFACE CALCULATIONS (Using Numba Vectorized Functions)
 # =============================================================================
 
+def _split_vanilla_exotic(options: list) -> tuple[list, list, list, list]:
+    """Split options into vanilla and exotic lists with their indices.
+
+    Returns:
+        (vanilla_options, vanilla_indices, exotic_options, exotic_indices)
+    """
+    vanilla_opts, vanilla_idx = [], []
+    exotic_opts, exotic_idx = [], []
+    for i, opt in enumerate(options):
+        if opt.get('instrument_class', 'vanilla') != 'vanilla':
+            exotic_opts.append(opt)
+            exotic_idx.append(i)
+        else:
+            vanilla_opts.append(opt)
+            vanilla_idx.append(i)
+    return vanilla_opts, vanilla_idx, exotic_opts, exotic_idx
+
+
+def _exotic_greeks_surface_dte(
+    exotic_options: list,
+    spot_range: np.ndarray,
+    dte_range: np.ndarray,
+    risk_free_rate: float,
+    base_iv: float,
+    greek_index: int,
+) -> np.ndarray:
+    """Calculate 3D surface for exotic legs varying spot and DTE."""
+    from services.exotic_pricing_adapter import calculate_exotic_all_greeks
+
+    result = np.zeros((len(spot_range), len(dte_range)))
+    for opt in exotic_options:
+        opt_type_int = 1 if opt['option_type'] == 'call' else 0
+        pos_sign = 1 if opt['position_type'] == 'long' else -1
+        qty = opt['quantity'] * 100
+
+        for i, spot in enumerate(spot_range):
+            for j, dte in enumerate(dte_range):
+                t = dte / 365.0
+                greeks = calculate_exotic_all_greeks(
+                    spot, opt['strike'], t,
+                    risk_free_rate, base_iv, opt_type_int,
+                    exotic_type=opt['instrument_class'],
+                    barrier=opt.get('barrier', 0.0),
+                    is_up=opt.get('is_up', True),
+                    is_knock_in=opt.get('is_knock_in', False),
+                    rebate=opt.get('rebate', 0.0),
+                    payout=opt.get('payout', 1.0),
+                )
+                result[i, j] += greeks[greek_index] * qty * pos_sign
+    return result
+
+
+def _exotic_greeks_surface_iv(
+    exotic_options: list,
+    spot_range: np.ndarray,
+    iv_range: np.ndarray,
+    risk_free_rate: float,
+    base_dte: float,
+    greek_index: int,
+) -> np.ndarray:
+    """Calculate 3D surface for exotic legs varying spot and IV."""
+    from services.exotic_pricing_adapter import calculate_exotic_all_greeks
+
+    t = base_dte / 365.0
+    result = np.zeros((len(spot_range), len(iv_range)))
+    for opt in exotic_options:
+        opt_type_int = 1 if opt['option_type'] == 'call' else 0
+        pos_sign = 1 if opt['position_type'] == 'long' else -1
+        qty = opt['quantity'] * 100
+
+        for i, spot in enumerate(spot_range):
+            for j, iv in enumerate(iv_range):
+                greeks = calculate_exotic_all_greeks(
+                    spot, opt['strike'], t,
+                    risk_free_rate, iv, opt_type_int,
+                    exotic_type=opt['instrument_class'],
+                    barrier=opt.get('barrier', 0.0),
+                    is_up=opt.get('is_up', True),
+                    is_knock_in=opt.get('is_knock_in', False),
+                    rebate=opt.get('rebate', 0.0),
+                    payout=opt.get('payout', 1.0),
+                )
+                result[i, j] += greeks[greek_index] * qty * pos_sign
+    return result
+
+
 def calculate_portfolio_greeks_3d_dte(
     portfolio_json: str,
     spot_range: np.ndarray,
@@ -236,7 +322,7 @@ def calculate_portfolio_greeks_3d_dte(
     """
     Calculate 3D Greek surface varying spot and DTE.
 
-    Uses Numba-compiled parallel function for performance.
+    Uses Numba for vanilla legs and Python loop for exotic legs.
 
     Args:
         portfolio_json: JSON string of portfolio
@@ -254,23 +340,29 @@ def calculate_portfolio_greeks_3d_dte(
     if not portfolio_data.get('options') and not portfolio_data.get('stock'):
         return np.zeros((len(spot_range), len(dte_range)))
 
-    # Extract arrays from portfolio for Numba function
     options = portfolio_data.get('options', [])
-    n_options = len(options)
+    vanilla_opts, _, exotic_opts, _ = _split_vanilla_exotic(options)
 
-    if n_options > 0:
-        strikes = np.array([pos['strike'] for pos in options])
-        option_types = np.array([1 if pos['option_type'] == 'call' else 0 for pos in options])
-        position_types = np.array([1 if pos['position_type'] == 'long' else -1 for pos in options])
-        quantities = np.array([pos['quantity'] * 100 for pos in options])  # Contract multiplier
+    result = np.zeros((len(spot_range), len(dte_range)))
 
-        # Use vectorized Numba function
-        result = calculate_portfolio_greeks_3d_dte_vectorized(
+    # Vanilla legs: fast Numba path
+    if vanilla_opts:
+        strikes = np.array([pos['strike'] for pos in vanilla_opts])
+        option_types = np.array([1 if pos['option_type'] == 'call' else 0 for pos in vanilla_opts])
+        position_types = np.array([1 if pos['position_type'] == 'long' else -1 for pos in vanilla_opts])
+        quantities = np.array([pos['quantity'] * 100 for pos in vanilla_opts])
+
+        result += calculate_portfolio_greeks_3d_dte_vectorized(
             strikes, option_types, position_types, quantities,
             spot_range, dte_range, risk_free_rate, base_iv, greek_index
         )
-    else:
-        result = np.zeros((len(spot_range), len(dte_range)))
+
+    # Exotic legs: Python loop
+    if exotic_opts:
+        result += _exotic_greeks_surface_dte(
+            exotic_opts, spot_range, dte_range,
+            risk_free_rate, base_iv, greek_index
+        )
 
     # Add stock contribution (only affects delta)
     if portfolio_data.get('stock') and greek_index == 1:
@@ -292,7 +384,7 @@ def calculate_portfolio_greeks_3d_iv(
     """
     Calculate 3D Greek surface varying spot and IV.
 
-    Uses Numba-compiled parallel function for performance.
+    Uses Numba for vanilla legs and Python loop for exotic legs.
 
     Args:
         portfolio_json: JSON string of portfolio
@@ -310,23 +402,29 @@ def calculate_portfolio_greeks_3d_iv(
     if not portfolio_data.get('options') and not portfolio_data.get('stock'):
         return np.zeros((len(spot_range), len(iv_range)))
 
-    # Extract arrays from portfolio for Numba function
     options = portfolio_data.get('options', [])
-    n_options = len(options)
+    vanilla_opts, _, exotic_opts, _ = _split_vanilla_exotic(options)
 
-    if n_options > 0:
-        strikes = np.array([pos['strike'] for pos in options])
-        option_types = np.array([1 if pos['option_type'] == 'call' else 0 for pos in options])
-        position_types = np.array([1 if pos['position_type'] == 'long' else -1 for pos in options])
-        quantities = np.array([pos['quantity'] * 100 for pos in options])
+    result = np.zeros((len(spot_range), len(iv_range)))
 
-        # Use vectorized Numba function
-        result = calculate_portfolio_greeks_3d_iv_vectorized(
+    # Vanilla legs: fast Numba path
+    if vanilla_opts:
+        strikes = np.array([pos['strike'] for pos in vanilla_opts])
+        option_types = np.array([1 if pos['option_type'] == 'call' else 0 for pos in vanilla_opts])
+        position_types = np.array([1 if pos['position_type'] == 'long' else -1 for pos in vanilla_opts])
+        quantities = np.array([pos['quantity'] * 100 for pos in vanilla_opts])
+
+        result += calculate_portfolio_greeks_3d_iv_vectorized(
             strikes, option_types, position_types, quantities,
             spot_range, iv_range, risk_free_rate, base_dte, greek_index
         )
-    else:
-        result = np.zeros((len(spot_range), len(iv_range)))
+
+    # Exotic legs: Python loop
+    if exotic_opts:
+        result += _exotic_greeks_surface_iv(
+            exotic_opts, spot_range, iv_range,
+            risk_free_rate, base_dte, greek_index
+        )
 
     # Add stock contribution (only affects delta)
     if portfolio_data.get('stock') and greek_index == 1:

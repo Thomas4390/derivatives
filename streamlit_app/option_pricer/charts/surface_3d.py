@@ -253,14 +253,16 @@ def render_3d_tab(
         _calculate_greeks_3d_iv_func: Function for IV calculations
         _calculate_greeks_3d_strike_func: Function for Strike calculations (single-leg only)
     """
-    # Detect single-leg position
-    is_single_leg = (
+    # Detect single-leg vanilla position (Strike variation only for vanilla)
+    is_single_vanilla_leg = (
         len(positions) == 1 and
-        stock_position is None
+        stock_position is None and
+        positions[0].get('instrument_class', 'vanilla') == 'vanilla'
     ) or (
         len(positions) == 0 and
         stock_position is None
     )
+    is_single_leg = is_single_vanilla_leg
 
     if not positions and not stock_position:
         st.markdown("""

@@ -31,7 +31,6 @@ _BAND_EDGE = "#e5b820"
 _VOL_ORANGE = "rgba(255, 160, 50, 0.35)"
 _VOL_BAND_FILL = "rgba(255, 160, 50, 0.18)"
 _VOL_BAND_EDGE = "#ffa032"
-_SPOT_LINE = "rgba(255, 255, 255, 0.45)"
 _BE_LINE = "#a78bfa"
 
 # Vol reference lines
@@ -120,24 +119,15 @@ def render_simulation_chart(
             x=time_grid, y=pct[1], mode="lines",
             line=dict(width=1.2, color=_BAND_EDGE, dash="dot"),
             name="95th pct", legendgroup="band",
-            hovertemplate="Time: %{x:.2f} yr<br>95th Percentile: $%{y:.2f}<extra></extra>",
+            hovertemplate="<b>Time:</b> %{x:.2f} yr<br><b>95th Percentile:</b> $%{y:.2f}<extra></extra>",
         ), row=1, col=1)
         fig.add_trace(go.Scatter(
             x=time_grid, y=pct[0], mode="lines",
             line=dict(width=1.2, color=_BAND_EDGE, dash="dot"),
             fill="tonexty", fillcolor=_BAND_FILL,
             name="5th pct", legendgroup="band",
-            hovertemplate="Time: %{x:.2f} yr<br>5th Percentile: $%{y:.2f}<extra></extra>",
+            hovertemplate="<b>Time:</b> %{x:.2f} yr<br><b>5th Percentile:</b> $%{y:.2f}<extra></extra>",
         ), row=1, col=1)
-
-    # Spot reference
-    fig.add_hline(
-        y=result.initial_price, line_dash="dash",
-        line_color=_SPOT_LINE, line_width=1,
-        annotation_text=f"S\u2080 = {result.initial_price:.2f}",
-        annotation_font_size=11, annotation_font_color="rgba(255,255,255,0.55)",
-        row=1, col=1,
-    )
 
     # Breakeven lines
     if breakeven_prices is not None and len(breakeven_prices) > 0:
@@ -157,14 +147,14 @@ def render_simulation_chart(
         if has_pnl:
             _add_paths(fig, time_grid, vol_paths * 100,
                        idx_sample[profit_mask], _GREEN, None, "profit",
-                       row=2, show_legend=False, hover_fmt="Volatility: %{y:.2f}%")
+                       row=2, show_legend=False, hover_fmt="<b>Volatility:</b> %{y:.2f}%")
             _add_paths(fig, time_grid, vol_paths * 100,
                        idx_sample[~profit_mask], _RED, None, "loss",
-                       row=2, show_legend=False, hover_fmt="Volatility: %{y:.2f}%")
+                       row=2, show_legend=False, hover_fmt="<b>Volatility:</b> %{y:.2f}%")
         else:
             _add_paths(fig, time_grid, vol_paths * 100,
                        idx_sample, _VOL_ORANGE, "Vol Path", "vol",
-                       row=2, hover_fmt="Volatility: %{y:.2f}%")
+                       row=2, hover_fmt="<b>Volatility:</b> %{y:.2f}%")
 
         # Vol 5-95 percentile bands
         if show_bands:
@@ -173,14 +163,14 @@ def render_simulation_chart(
                 x=time_grid, y=vol_pct[1], mode="lines",
                 line=dict(width=1.2, color=_VOL_BAND_EDGE, dash="dot"),
                 name="Vol 95th", legendgroup="vol_band",
-                hovertemplate="Time: %{x:.2f} yr<br>Volatility 95th: %{y:.2f}%<extra></extra>",
+                hovertemplate="<b>Time:</b> %{x:.2f} yr<br><b>Volatility 95th:</b> %{y:.2f}%<extra></extra>",
             ), row=2, col=1)
             fig.add_trace(go.Scatter(
                 x=time_grid, y=vol_pct[0], mode="lines",
                 line=dict(width=1.2, color=_VOL_BAND_EDGE, dash="dot"),
                 fill="tonexty", fillcolor=_VOL_BAND_FILL,
                 name="Vol 5th", legendgroup="vol_band",
-                hovertemplate="Time: %{x:.2f} yr<br>Volatility 5th: %{y:.2f}%<extra></extra>",
+                hovertemplate="<b>Time:</b> %{x:.2f} yr<br><b>Volatility 5th:</b> %{y:.2f}%<extra></extra>",
             ), row=2, col=1)
 
         # Vol reference lines (V0, theta, sigma0, long-run)
@@ -193,7 +183,7 @@ def render_simulation_chart(
             x=time_grid, y=[initial_vol] * len(time_grid),
             mode="lines", line=dict(width=1.5, color="rgba(255,160,50,0.7)"),
             name=f"\u03c3 = {initial_vol:.1f} %",
-            hovertemplate="Time: %{x:.2f} yr<br>Volatility: " + f"{initial_vol:.2f}%" + "<extra></extra>",
+            hovertemplate="<b>Time:</b> %{x:.2f} yr<br><b>Volatility:</b> " + f"{initial_vol:.2f}%" + "<extra></extra>",
         ), row=2, col=1)
 
     # ── Layout ────────────────────────────────────────────────────────────
@@ -238,17 +228,17 @@ def render_simulation_chart(
     if has_vol:
         fig.update_xaxes(showticklabels=False, row=1, col=1)
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
 
 # ── helpers ───────────────────────────────────────────────────────────────
 
 def _add_paths(
     fig, time_grid, data, indices, color, legend_name, legend_group,
-    row=1, show_legend=True, hover_fmt="Price: $%{y:.2f}",
+    row=1, show_legend=True, hover_fmt="<b>Price:</b> $%{y:.2f}",
 ):
     """Add a batch of paths to the figure."""
-    ht = f"Time: %{{x:.2f}} yr<br>{hover_fmt}<extra></extra>"
+    ht = f"<b>Time:</b> %{{x:.2f}} yr<br>{hover_fmt}<extra></extra>"
     first = True
     for idx in indices:
         fig.add_trace(go.Scatter(

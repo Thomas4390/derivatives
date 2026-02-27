@@ -172,6 +172,15 @@ def get_model_equations(model_key: str) -> Dict[str, str]:
         equations["volatility"] = model.equation_vol
     if model.equation_jump:
         equations["jump"] = model.equation_jump
+    eq_analytical = getattr(model, "equation_analytical", None)
+    eq_cf = getattr(model, "equation_cf", None)
+    eq_mc = getattr(model, "equation_mc", None)
+    if eq_analytical:
+        equations["analytical"] = eq_analytical
+    if eq_cf:
+        equations["cf"] = eq_cf
+    if eq_mc:
+        equations["mc"] = eq_mc
 
     return equations
 

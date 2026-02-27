@@ -54,12 +54,12 @@ def _render_price_table(comparison: PricingComparison):
     with cols[0]:
         st.metric(
             label="Monte Carlo",
-            value=f"${comparison.mc_price:.4f}",
+            value=f"${comparison.mc_price:.2f}",
             help=f"N = {comparison.mc_n_paths:,} paths"
         )
         ci_low, ci_high = comparison.mc_confidence_interval
-        st.caption(f"95% CI: [{ci_low:.4f}, {ci_high:.4f}]")
-        st.caption(f"Std Error: {comparison.mc_std_error:.6f}")
+        st.caption(f"95% CI: [{ci_low:.2f}, {ci_high:.2f}]")
+        st.caption(f"Std Error: {comparison.mc_std_error:.2f}")
 
     # Analytical (if available)
     with cols[1]:
@@ -67,12 +67,12 @@ def _render_price_table(comparison: PricingComparison):
             error = comparison.mc_vs_analytical_error
             st.metric(
                 label="Black-Scholes",
-                value=f"${comparison.analytical_price:.4f}",
-                delta=f"{error:+.4f} (MC - BS)" if error else None,
+                value=f"${comparison.analytical_price:.2f}",
+                delta=f"{error:+.2f} (MC - BS)" if error else None,
                 delta_color="off"
             )
             pct_error = abs(error / comparison.analytical_price) * 100 if comparison.analytical_price > 0 else 0
-            st.caption(f"Error: {pct_error:.3f}%")
+            st.caption(f"Error: {pct_error:.2f}%")
         else:
             st.metric(
                 label="Black-Scholes",
@@ -87,12 +87,12 @@ def _render_price_table(comparison: PricingComparison):
             error = comparison.mc_vs_fft_error
             st.metric(
                 label="FFT (Carr-Madan)",
-                value=f"${comparison.fft_price:.4f}",
-                delta=f"{error:+.4f} (MC - FFT)" if error else None,
+                value=f"${comparison.fft_price:.2f}",
+                delta=f"{error:+.2f} (MC - FFT)" if error else None,
                 delta_color="off"
             )
             pct_error = abs(error / comparison.fft_price) * 100 if comparison.fft_price > 0 else 0
-            st.caption(f"Error: {pct_error:.3f}%")
+            st.caption(f"Error: {pct_error:.2f}%")
         else:
             st.metric(
                 label="FFT",
@@ -119,11 +119,11 @@ def _render_error_analysis(comparison: PricingComparison):
 
             with col1:
                 st.markdown(f"**Absolute Error (MC - {ref_name}):**")
-                st.code(f"{error:+.6f}")
+                st.code(f"{error:+.2f}")
 
             with col2:
                 st.markdown("**Percentage Error:**")
-                st.code(f"{pct_error:.4f}%")
+                st.code(f"{pct_error:.2f}%")
 
             # Standard error bands
             st.markdown("**Standard Error Bands:**")
@@ -131,9 +131,9 @@ def _render_error_analysis(comparison: PricingComparison):
             st.markdown(f"""
             | Band | Range |
             |------|-------|
-            | 1σ | [{comparison.mc_price - se:.4f}, {comparison.mc_price + se:.4f}] |
-            | 2σ | [{comparison.mc_price - 2*se:.4f}, {comparison.mc_price + 2*se:.4f}] |
-            | 3σ | [{comparison.mc_price - 3*se:.4f}, {comparison.mc_price + 3*se:.4f}] |
+            | 1σ | [{comparison.mc_price - se:.2f}, {comparison.mc_price + se:.2f}] |
+            | 2σ | [{comparison.mc_price - 2*se:.2f}, {comparison.mc_price + 2*se:.2f}] |
+            | 3σ | [{comparison.mc_price - 3*se:.2f}, {comparison.mc_price + 3*se:.2f}] |
             """)
 
             # Interpretation
@@ -153,18 +153,18 @@ def _render_greeks(comparison: PricingComparison):
         cols = st.columns(5)
 
         with cols[0]:
-            st.metric("Delta (Δ)", f"{comparison.analytical_delta:.4f}")
+            st.metric("Delta (Δ)", f"{comparison.analytical_delta:.2f}")
 
         with cols[1]:
-            st.metric("Gamma (Γ)", f"{comparison.analytical_gamma:.6f}")
+            st.metric("Gamma (Γ)", f"{comparison.analytical_gamma:.2f}")
 
         with cols[2]:
             if comparison.analytical_vega is not None:
-                st.metric("Vega (ν)", f"{comparison.analytical_vega:.4f}")
+                st.metric("Vega (ν)", f"{comparison.analytical_vega:.2f}")
 
         with cols[3]:
             if comparison.analytical_theta is not None:
-                st.metric("Theta (Θ)", f"{comparison.analytical_theta:.4f}")
+                st.metric("Theta (Θ)", f"{comparison.analytical_theta:.2f}")
 
         with cols[4]:
             st.caption("Greeks from BS formula")
@@ -273,12 +273,12 @@ def render_strike_comparison(
         df.style.format({
             "Strike": "${:.2f}",
             "Moneyness": "{:.2f}",
-            "MC Price": "${:.4f}",
-            "MC Std Err": "{:.6f}",
-            "BS Price": "${:.4f}" if analytical_prices is not None else None,
-            "MC - BS": "{:+.6f}" if analytical_prices is not None else None,
-            "FFT Price": "${:.4f}" if fft_prices is not None else None,
-            "MC - FFT": "{:+.6f}" if fft_prices is not None else None,
+            "MC Price": "${:.2f}",
+            "MC Std Err": "{:.2f}",
+            "BS Price": "${:.2f}" if analytical_prices is not None else None,
+            "MC - BS": "{:+.2f}" if analytical_prices is not None else None,
+            "FFT Price": "${:.2f}" if fft_prices is not None else None,
+            "MC - FFT": "{:+.2f}" if fft_prices is not None else None,
         }),
         width="stretch",
         hide_index=True

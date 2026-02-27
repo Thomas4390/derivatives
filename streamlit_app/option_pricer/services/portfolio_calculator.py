@@ -58,16 +58,22 @@ def prepare_portfolio_data(
 
     # Add option positions (positions are already dicts)
     if positions:
-        portfolio_data['options'] = [
-            {
+        portfolio_data['options'] = []
+        for pos in positions:
+            opt = {
                 'option_type': str(pos['option_type']),
                 'position_type': str(pos['position_type']),
                 'strike': pos['strike'],
                 'quantity': pos['quantity'],
-                'premium_paid': pos['premium_paid']
+                'premium_paid': pos['premium_paid'],
+                'instrument_class': pos.get('instrument_class', 'vanilla'),
             }
-            for pos in positions
-        ]
+            # Pass through exotic fields when present
+            if opt['instrument_class'] != 'vanilla':
+                for key in ('barrier', 'is_up', 'is_knock_in', 'rebate', 'payout'):
+                    if key in pos:
+                        opt[key] = pos[key]
+            portfolio_data['options'].append(opt)
 
     # Add stock position (stock_position is already a dict)
     if stock_position:
@@ -89,8 +95,9 @@ def prepare_portfolio_arrays(portfolio_data: dict) -> tuple:
 
     Returns:
         Tuple of (strikes, option_types, position_types, quantities, premiums,
-                 stock_quantity, stock_entry_price)
+                 stock_quantity, stock_entry_price, exotic_metadata)
     """
+    exotic_metadata = []
     if portfolio_data.get('options') and len(portfolio_data['options']) > 0:
         strikes = np.array([pos['strike'] for pos in portfolio_data['options']])
         option_types = np.array([
@@ -106,6 +113,15 @@ def prepare_portfolio_arrays(portfolio_data: dict) -> tuple:
             for pos in portfolio_data['options']
         ])
         premiums = np.array([pos['premium_paid'] for pos in portfolio_data['options']])
+        for pos in portfolio_data['options']:
+            exotic_metadata.append({
+                'instrument_class': pos.get('instrument_class', 'vanilla'),
+                'barrier': pos.get('barrier', 0.0),
+                'is_up': pos.get('is_up', True),
+                'is_knock_in': pos.get('is_knock_in', False),
+                'rebate': pos.get('rebate', 0.0),
+                'payout': pos.get('payout', 1.0),
+            })
     else:
         strikes = np.array([])
         option_types = np.array([], dtype=np.int32)
@@ -121,7 +137,7 @@ def prepare_portfolio_arrays(portfolio_data: dict) -> tuple:
         stock_entry_price = stock['entry_price']
 
     return (strikes, option_types, position_types, quantities, premiums,
-            stock_quantity, stock_entry_price)
+            stock_quantity, stock_entry_price, exotic_metadata)
 
 
 @st.cache_data(ttl=3600)
@@ -134,7 +150,8 @@ def calculate_all_surfaces(
     _calculate_all_greeks_func,
     _calculate_pnl_at_expiry_func,
     _find_breakeven_func,
-    has_positions: bool
+    has_positions: bool,
+    _calculate_exotic_greeks_func=None,
 ) -> dict:
     """
     Calculate all P&L and Greeks data at once.
@@ -149,6 +166,7 @@ def calculate_all_surfaces(
         _calculate_pnl_at_expiry_func: Function to calculate P&L at expiry (not hashed)
         _find_breakeven_func: Function to find breakeven points (not hashed)
         has_positions: Whether there are active positions
+        _calculate_exotic_greeks_func: Function to calculate exotic Greeks (not hashed)
 
     Returns:
         Dictionary with all calculated data
@@ -158,19 +176,27 @@ def calculate_all_surfaces(
 
     # Prepare arrays
     (strikes, option_types, position_types, quantities, premiums,
-     stock_quantity, stock_entry_price) = prepare_portfolio_arrays(portfolio_data)
+     stock_quantity, stock_entry_price, exotic_metadata) = prepare_portfolio_arrays(portfolio_data)
+
+    has_exotic_legs = any(
+        m['instrument_class'] != 'vanilla' for m in exotic_metadata
+    )
 
     # Calculate surfaces
     pnl_data, greeks_data = _calculate_surfaces(
         portfolio_data, spot_range_arr, dte_values, iv_values, risk_free_rate,
         strikes, option_types, position_types, quantities, premiums,
-        stock_quantity, stock_entry_price, _calculate_all_greeks_func
+        stock_quantity, stock_entry_price, _calculate_all_greeks_func,
+        exotic_metadata=exotic_metadata,
+        calculate_exotic_greeks_func=_calculate_exotic_greeks_func,
     )
 
-    # Calculate P&L at expiration
+    # Calculate P&L at expiration (split vanilla / exotic)
     expiry_pnl = _calculate_expiry_pnl(
         spot_range_arr, strikes, option_types, position_types, quantities,
-        premiums, stock_quantity, stock_entry_price, _calculate_pnl_at_expiry_func
+        premiums, stock_quantity, stock_entry_price, _calculate_pnl_at_expiry_func,
+        exotic_metadata=exotic_metadata,
+        portfolio_data=portfolio_data,
     )
     pnl_data['expiry'] = expiry_pnl
 
@@ -193,6 +219,7 @@ def calculate_all_surfaces(
         pnl_data, greeks_data, breakeven_result,
         unlimited_profit, unlimited_loss, expiry_pnl
     )
+    result['has_exotic_legs'] = has_exotic_legs
 
     return result
 
@@ -210,7 +237,9 @@ def _calculate_surfaces(
     premiums: np.ndarray,
     stock_quantity: int,
     stock_entry_price: float,
-    calculate_all_greeks_func
+    calculate_all_greeks_func,
+    exotic_metadata: list = None,
+    calculate_exotic_greeks_func=None,
 ) -> tuple[dict, dict]:
     """Calculate P&L and Greeks surfaces."""
     pnl_data = {}
@@ -226,7 +255,9 @@ def _calculate_surfaces(
             pnl_values, greeks_by_name = _calculate_for_params(
                 spot_range, time_to_expiry, iv_decimal, risk_free_rate,
                 strikes, option_types, position_types, quantities, premiums,
-                stock_quantity, stock_entry_price, calculate_all_greeks_func
+                stock_quantity, stock_entry_price, calculate_all_greeks_func,
+                exotic_metadata=exotic_metadata,
+                calculate_exotic_greeks_func=calculate_exotic_greeks_func,
             )
 
             pnl_data[key] = pnl_values
@@ -247,7 +278,9 @@ def _calculate_for_params(
     premiums: np.ndarray,
     stock_quantity: int,
     stock_entry_price: float,
-    calculate_all_greeks_func
+    calculate_all_greeks_func,
+    exotic_metadata: list = None,
+    calculate_exotic_greeks_func=None,
 ) -> tuple[np.ndarray, dict]:
     """Calculate P&L and Greeks for a specific DTE/IV combination."""
     pnl_values = np.zeros(len(spot_range))
@@ -259,10 +292,25 @@ def _calculate_for_params(
 
         # Calculate for each option position
         for j in range(len(strikes)):
-            greeks = calculate_all_greeks_func(
-                spot, strikes[j], time_to_expiry,
-                risk_free_rate, iv_decimal, option_types[j]
-            )
+            meta = exotic_metadata[j] if exotic_metadata else None
+            is_exotic = meta and meta['instrument_class'] != 'vanilla'
+
+            if is_exotic and calculate_exotic_greeks_func:
+                greeks = calculate_exotic_greeks_func(
+                    spot, strikes[j], time_to_expiry,
+                    risk_free_rate, iv_decimal, option_types[j],
+                    exotic_type=meta['instrument_class'],
+                    barrier=meta.get('barrier', 0.0),
+                    is_up=meta.get('is_up', True),
+                    is_knock_in=meta.get('is_knock_in', False),
+                    rebate=meta.get('rebate', 0.0),
+                    payout=meta.get('payout', 1.0),
+                )
+            else:
+                greeks = calculate_all_greeks_func(
+                    spot, strikes[j], time_to_expiry,
+                    risk_free_rate, iv_decimal, option_types[j]
+                )
 
             # P&L calculation
             option_value = greeks[0]
@@ -298,15 +346,63 @@ def _calculate_expiry_pnl(
     premiums: np.ndarray,
     stock_quantity: int,
     stock_entry_price: float,
-    calculate_pnl_at_expiry_func
+    calculate_pnl_at_expiry_func,
+    exotic_metadata: list = None,
+    portfolio_data: dict = None,
 ) -> np.ndarray:
-    """Calculate P&L at expiration for all spot prices."""
+    """Calculate P&L at expiration for all spot prices.
+
+    Vanilla legs use the fast Numba path. Exotic legs use a Python loop
+    calling calculate_exotic_payoff_at_expiry.
+    """
+    # Separate vanilla and exotic indices
+    vanilla_indices = []
+    exotic_indices = []
+    if exotic_metadata:
+        for j, meta in enumerate(exotic_metadata):
+            if meta['instrument_class'] != 'vanilla':
+                exotic_indices.append(j)
+            else:
+                vanilla_indices.append(j)
+    else:
+        vanilla_indices = list(range(len(strikes)))
+
+    # Vanilla part: use fast Numba function
+    if vanilla_indices:
+        v_strikes = strikes[vanilla_indices]
+        v_option_types = option_types[vanilla_indices]
+        v_position_types = position_types[vanilla_indices]
+        v_quantities = quantities[vanilla_indices]
+        v_premiums = premiums[vanilla_indices]
+    else:
+        v_strikes = np.array([])
+        v_option_types = np.array([], dtype=np.int32)
+        v_position_types = np.array([], dtype=np.int32)
+        v_quantities = np.array([], dtype=np.int32)
+        v_premiums = np.array([])
+
     expiry_pnl = np.zeros(len(spot_range))
     for i, spot in enumerate(spot_range):
-        expiry_pnl[i] = calculate_pnl_at_expiry_func(
-            spot, strikes, option_types, position_types,
-            quantities, premiums, stock_quantity, stock_entry_price
-        )
+        # Vanilla legs (Numba)
+        if len(v_strikes) > 0 or stock_quantity != 0:
+            expiry_pnl[i] = calculate_pnl_at_expiry_func(
+                spot, v_strikes, v_option_types, v_position_types,
+                v_quantities, v_premiums, stock_quantity, stock_entry_price
+            )
+
+        # Exotic legs (Python)
+        if exotic_indices and portfolio_data:
+            from .exotic_pricing_adapter import calculate_exotic_payoff_at_expiry
+            options = portfolio_data.get('options', [])
+            for j in exotic_indices:
+                pos = options[j]
+                payoff = calculate_exotic_payoff_at_expiry(spot, pos)
+                premium = premiums[j]
+                if position_types[j] == 1:  # Long
+                    expiry_pnl[i] += (payoff - premium) * quantities[j]
+                else:  # Short
+                    expiry_pnl[i] += (premium - payoff) * quantities[j]
+
     return expiry_pnl
 
 
@@ -570,7 +666,8 @@ def calculate_individual_leg_greeks(
     dte: int,
     iv: int,
     risk_free_rate: float,
-    _calculate_all_greeks_func
+    _calculate_all_greeks_func,
+    _calculate_exotic_greeks_func=None,
 ) -> dict:
     """
     Calculate Greeks for each individual leg of a multi-leg portfolio.
@@ -582,14 +679,10 @@ def calculate_individual_leg_greeks(
         iv: Implied volatility (percentage)
         risk_free_rate: Risk-free interest rate
         _calculate_all_greeks_func: Function to calculate Greeks
+        _calculate_exotic_greeks_func: Function to calculate exotic Greeks
 
     Returns:
         Dictionary with Greeks data for each leg, keyed by leg index
-        {
-            'leg_0': {'delta': [...], 'gamma': [...], ...},
-            'leg_1': {'delta': [...], 'gamma': [...], ...},
-            'stock': {'delta': [...], ...} if stock position exists
-        }
     """
     portfolio_data = json.loads(portfolio_json)
     spot_range_arr = np.array(spot_range)
@@ -605,26 +698,43 @@ def calculate_individual_leg_greeks(
             option_type = 1 if pos['option_type'] == 'call' else 0
             position_sign = 1 if pos['position_type'] == 'long' else -1
             quantity = pos['quantity'] * CONTRACT_MULTIPLIER
+            inst_class = pos.get('instrument_class', 'vanilla')
+            is_exotic = inst_class != 'vanilla'
 
             greeks_by_name = {name: np.zeros(len(spot_range_arr)) for name in GREEK_NAMES}
 
             for i, spot in enumerate(spot_range_arr):
-                greeks = _calculate_all_greeks_func(
-                    spot, strike, time_to_expiry,
-                    risk_free_rate, iv_decimal, option_type
-                )
+                if is_exotic and _calculate_exotic_greeks_func:
+                    greeks = _calculate_exotic_greeks_func(
+                        spot, strike, time_to_expiry,
+                        risk_free_rate, iv_decimal, option_type,
+                        exotic_type=inst_class,
+                        barrier=pos.get('barrier', 0.0),
+                        is_up=pos.get('is_up', True),
+                        is_knock_in=pos.get('is_knock_in', False),
+                        rebate=pos.get('rebate', 0.0),
+                        payout=pos.get('payout', 1.0),
+                    )
+                else:
+                    greeks = _calculate_all_greeks_func(
+                        spot, strike, time_to_expiry,
+                        risk_free_rate, iv_decimal, option_type
+                    )
 
                 for k, name in enumerate(GREEK_NAMES):
                     greeks_by_name[name][i] = greeks[k] * quantity * position_sign
 
             # Add metadata for display
-            leg_greeks[f'leg_{leg_idx}'] = {
+            leg_data = {
                 'greeks': greeks_by_name,
                 'option_type': pos['option_type'],
                 'position_type': pos['position_type'],
                 'strike': strike,
-                'quantity': pos['quantity']
+                'quantity': pos['quantity'],
             }
+            if is_exotic:
+                leg_data['instrument_class'] = inst_class
+            leg_greeks[f'leg_{leg_idx}'] = leg_data
 
     # Calculate Greeks for stock position
     if portfolio_data.get('stock'):
@@ -632,7 +742,6 @@ def calculate_individual_leg_greeks(
         stock_quantity = stock['quantity'] * (1 if stock['position_type'] == 'long' else -1)
 
         stock_greeks = {name: np.zeros(len(spot_range_arr)) for name in GREEK_NAMES}
-        # Stock only has delta = quantity
         stock_greeks['delta'] = np.full(len(spot_range_arr), stock_quantity)
 
         leg_greeks['stock'] = {
@@ -651,7 +760,8 @@ def calculate_all_individual_leg_greeks(
     dte_values: tuple,
     iv_values: tuple,
     risk_free_rate: float,
-    _calculate_all_greeks_func
+    _calculate_all_greeks_func,
+    _calculate_exotic_greeks_func=None,
 ) -> dict:
     """
     Calculate Greeks for each individual leg for all DTE/IV combinations.
@@ -663,17 +773,10 @@ def calculate_all_individual_leg_greeks(
         iv_values: Tuple of IV values
         risk_free_rate: Risk-free interest rate
         _calculate_all_greeks_func: Function to calculate Greeks
+        _calculate_exotic_greeks_func: Function to calculate exotic Greeks
 
     Returns:
         Dictionary keyed by "DTE_IV" with leg Greeks for each combination
-        {
-            '31_25': {
-                'leg_0': {'greeks': {...}, 'option_type': 'call', ...},
-                'leg_1': {...},
-            },
-            '31_30': {...},
-            ...
-        }
     """
     portfolio_data = json.loads(portfolio_json)
     spot_range_arr = np.array(spot_range)
@@ -682,15 +785,23 @@ def calculate_all_individual_leg_greeks(
     leg_metadata = {}
     if portfolio_data.get('options'):
         for leg_idx, pos in enumerate(portfolio_data['options']):
-            leg_metadata[f'leg_{leg_idx}'] = {
+            meta = {
                 'option_type': pos['option_type'],
                 'position_type': pos['position_type'],
                 'strike': pos['strike'],
                 'quantity': pos['quantity'],
                 'option_type_int': 1 if pos['option_type'] == 'call' else 0,
                 'position_sign': 1 if pos['position_type'] == 'long' else -1,
-                'quantity_mult': pos['quantity'] * CONTRACT_MULTIPLIER
+                'quantity_mult': pos['quantity'] * CONTRACT_MULTIPLIER,
+                'instrument_class': pos.get('instrument_class', 'vanilla'),
             }
+            if meta['instrument_class'] != 'vanilla':
+                meta['barrier'] = pos.get('barrier', 0.0)
+                meta['is_up'] = pos.get('is_up', True)
+                meta['is_knock_in'] = pos.get('is_knock_in', False)
+                meta['rebate'] = pos.get('rebate', 0.0)
+                meta['payout'] = pos.get('payout', 1.0)
+            leg_metadata[f'leg_{leg_idx}'] = meta
 
     if portfolio_data.get('stock'):
         stock = portfolio_data['stock']
@@ -714,7 +825,6 @@ def calculate_all_individual_leg_greeks(
             # Calculate Greeks for each option leg
             for leg_key, meta in leg_metadata.items():
                 if leg_key == 'stock':
-                    # Stock only has delta
                     stock_greeks = {name: np.zeros(len(spot_range_arr)) for name in GREEK_NAMES}
                     stock_greeks['delta'] = np.full(len(spot_range_arr), meta['stock_quantity'])
                     leg_greeks['stock'] = {
@@ -723,25 +833,41 @@ def calculate_all_individual_leg_greeks(
                         'quantity': meta['quantity']
                     }
                 else:
-                    # Option leg
+                    is_exotic = meta['instrument_class'] != 'vanilla'
                     greeks_by_name = {name: np.zeros(len(spot_range_arr)) for name in GREEK_NAMES}
 
                     for i, spot in enumerate(spot_range_arr):
-                        greeks = _calculate_all_greeks_func(
-                            spot, meta['strike'], time_to_expiry,
-                            risk_free_rate, iv_decimal, meta['option_type_int']
-                        )
+                        if is_exotic and _calculate_exotic_greeks_func:
+                            greeks = _calculate_exotic_greeks_func(
+                                spot, meta['strike'], time_to_expiry,
+                                risk_free_rate, iv_decimal, meta['option_type_int'],
+                                exotic_type=meta['instrument_class'],
+                                barrier=meta.get('barrier', 0.0),
+                                is_up=meta.get('is_up', True),
+                                is_knock_in=meta.get('is_knock_in', False),
+                                rebate=meta.get('rebate', 0.0),
+                                payout=meta.get('payout', 1.0),
+                            )
+                        else:
+                            greeks = _calculate_all_greeks_func(
+                                spot, meta['strike'], time_to_expiry,
+                                risk_free_rate, iv_decimal, meta['option_type_int']
+                            )
 
                         for k, name in enumerate(GREEK_NAMES):
-                            greeks_by_name[name][i] = greeks[k] * meta['quantity_mult'] * meta['position_sign']
+                            val = greeks[k] * meta['quantity_mult'] * meta['position_sign']
+                            greeks_by_name[name][i] = val if not np.isnan(val) else 0.0
 
-                    leg_greeks[leg_key] = {
+                    leg_data = {
                         'greeks': greeks_by_name,
                         'option_type': meta['option_type'],
                         'position_type': meta['position_type'],
                         'strike': meta['strike'],
-                        'quantity': meta['quantity']
+                        'quantity': meta['quantity'],
                     }
+                    if is_exotic:
+                        leg_data['instrument_class'] = meta['instrument_class']
+                    leg_greeks[leg_key] = leg_data
 
             all_leg_greeks[key] = leg_greeks
 

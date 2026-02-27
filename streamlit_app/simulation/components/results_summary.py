@@ -324,3 +324,18 @@ def render_model_equations(model_key: str, params: Dict[str, Any]):
 
         if model.stationarity_condition:
             st.markdown(f"*Stationarity:* ${model.stationarity_condition}$")
+
+        # Pricing method equations
+        has_pricing_eq = "analytical" in equations or "cf" in equations or "mc" in equations
+        if has_pricing_eq:
+            st.markdown("---")
+            st.markdown("**Pricing Methods**")
+            if "analytical" in equations:
+                st.markdown("*Analytical (Black-Scholes):*")
+                st.latex(equations["analytical"])
+            if "cf" in equations:
+                st.markdown("*FFT — Characteristic Function:*")
+                st.latex(equations["cf"])
+            if "mc" in equations:
+                st.markdown("*Monte Carlo — Discretization:*")
+                st.latex(equations["mc"])

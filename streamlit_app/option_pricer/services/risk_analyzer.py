@@ -61,6 +61,9 @@ def convert_dict_positions(positions: List[dict]) -> List[PortfolioPosition]:
     """
     result = []
     for pos in positions:
+        # Skip exotic legs - they cannot be converted to VanillaOption
+        if pos.get('instrument_class', 'vanilla') != 'vanilla':
+            continue
         is_call = pos['option_type'] == 'call'
         is_long = pos['position_type'] == 'long'
 
