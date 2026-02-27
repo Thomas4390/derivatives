@@ -275,16 +275,16 @@ def calculate_exotic_payoff_at_expiry(spot: float, position: dict) -> float:
         else:  # knock-out
             return 0.0 if barrier_hit else vanilla_payoff
 
-    # Asian / lookback: use near-expiry analytical price as approximation
-    near_T = 1.0 / 365.0
-    r = 0.05  # fallback rate
-    sigma = 0.25  # fallback vol
-    price = calculate_exotic_price(
-        exotic_type=exotic_type,
-        spot=spot, strike=strike, maturity=near_T,
-        rate=r, sigma=sigma, is_call=is_call,
-    )
-    return max(price, 0.0)
+    if exotic_type == 'lookback_floating':
+        # Floating lookback payoff depends on path extremes unavailable at expiry.
+        return 0.0
+
+    # Asian / lookback fixed: at expiry, path-dependent features collapse to vanilla intrinsic
+    # (without actual path history, vanilla intrinsic is the best deterministic proxy)
+    if is_call:
+        return max(spot - strike, 0.0)
+    else:
+        return max(strike - spot, 0.0)
 
 
 def calculate_exotic_greeks_surface(

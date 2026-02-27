@@ -551,8 +551,8 @@ def render_greeks_tab(
         ">
             <div style="font-size: 1.25rem;">ℹ️</div>
             <div>
-                <div style="font-weight: 600; color: #0c4a6e; font-size: 0.9rem;">Default Position: Long Call ATM</div>
-                <div style="color: #0369a1; font-size: 0.8rem;">Add your own positions using the sidebar to analyze custom strategies</div>
+                <div style="font-weight: 600; color: #0c4a6e; font-size: 0.9rem;">No Positions</div>
+                <div style="color: #0369a1; font-size: 0.8rem;">Add positions using the sidebar to begin analysis</div>
             </div>
         </div>
         """, unsafe_allow_html=True)

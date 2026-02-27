@@ -265,7 +265,13 @@ def asian_geometric_price(S: float, K: float, T: float, r: float, q: float,
         Option price
     """
     if T <= 0:
-        return 0.0
+        return max(S - K, 0.0) if is_call else max(K - S, 0.0)
+
+    if sigma <= 0:
+        b = r - q
+        F = S * math.exp(b * T)
+        df = math.exp(-r * T)
+        return max(F - K, 0.0) * df if is_call else max(K - F, 0.0) * df
 
     # Adjusted parameters for geometric average
     sigma_adj = sigma / math.sqrt(3.0)
@@ -387,7 +393,18 @@ def lookback_fixed_price(S: float, K: float, M_min: float, M_max: float, T: floa
             return max(K - M_min, 0.0)
 
     if sigma <= 0:
-        return 0.0
+        # Deterministic forward: path is monotone, so max/min is at endpoints
+        b = r - q
+        F = S * math.exp(b * T)
+        df = math.exp(-r * T)
+        if is_call:
+            path_max = max(S, F)
+            effective_max = max(M_max, path_max)
+            return max(effective_max - K, 0.0) * df
+        else:
+            path_min = min(S, F)
+            effective_min = min(M_min, path_min)
+            return max(K - effective_min, 0.0) * df
 
     df = math.exp(-r * T)
 
@@ -450,7 +467,16 @@ def lookback_floating_price(S: float, M_min: float, M_max: float, T: float,
             return max(M_max - S, 0.0)
 
     if sigma <= 0:
-        return 0.0
+        # Deterministic forward: path is monotone
+        b = r - q
+        F = S * math.exp(b * T)
+        df = math.exp(-r * T)
+        if is_call:
+            effective_min = min(M_min, min(S, F))
+            return max(F - effective_min, 0.0) * df
+        else:
+            effective_max = max(M_max, max(S, F))
+            return max(effective_max - F, 0.0) * df
 
     b = r - q
     # Guard against b ≈ 0 (division by zero in σ²/(2b) terms)

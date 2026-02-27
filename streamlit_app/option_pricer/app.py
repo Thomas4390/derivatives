@@ -275,7 +275,7 @@ with tab5:
 # Tab 6: Exotic Options (conditional)
 if tab6 is not None:
     with tab6:
-        render_exotic_tab(spot_price=spot_price, risk_free_rate=risk_free_rate)
+        render_exotic_tab(spot_price=spot_price, risk_free_rate=risk_free_rate, positions=st.session_state.positions)
 
 
 # Tab 7: Reference Guide

@@ -1,16 +1,5 @@
 """Services module for Monte Carlo Simulation Explorer."""
 
-from .state_manager import (
-    init_session_state,
-    get_simulation_params,
-    set_simulation_params,
-    get_price_model,
-    set_price_model,
-    get_volatility_model,
-    set_volatility_model
-)
-
-# New unified simulation service
 from .simulation_service import (
     run_simulation,
     run_terminal_simulation,
@@ -18,6 +7,7 @@ from .simulation_service import (
     check_model_conditions,
     compute_long_run_volatility,
     get_initial_volatility,
+    get_model_display_name,
     MODEL_NAMES,
 )
 

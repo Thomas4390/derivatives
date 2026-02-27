@@ -1117,5 +1117,104 @@ class TestExoticEdgeCases:
             f"Call with q=0.03 ({p_div:.4f}) should be < with q=0 ({p_no:.4f})"
 
 
+class TestExoticEdgeCases:
+    """Edge-case tests for exotic pricing kernels at T=0 and sigma=0."""
+
+    def test_asian_geometric_intrinsic_at_expiry_call(self):
+        """Asian geometric call at T=0 should return vanilla intrinsic."""
+        from backend.engines.exotic_engine import asian_geometric_price
+        # ITM call: S=110, K=100 -> intrinsic = 10
+        price = asian_geometric_price(S=110.0, K=100.0, T=0.0, r=0.05, q=0.0, sigma=0.25, is_call=True)
+        assert price == pytest.approx(10.0), f"Expected 10.0, got {price}"
+
+    def test_asian_geometric_intrinsic_at_expiry_put(self):
+        """Asian geometric put at T=0 should return vanilla intrinsic."""
+        from backend.engines.exotic_engine import asian_geometric_price
+        # ITM put: S=90, K=100 -> intrinsic = 10
+        price = asian_geometric_price(S=90.0, K=100.0, T=0.0, r=0.05, q=0.0, sigma=0.25, is_call=False)
+        assert price == pytest.approx(10.0), f"Expected 10.0, got {price}"
+
+    def test_asian_geometric_otm_at_expiry(self):
+        """Asian geometric OTM at T=0 should return 0."""
+        from backend.engines.exotic_engine import asian_geometric_price
+        price = asian_geometric_price(S=90.0, K=100.0, T=0.0, r=0.05, q=0.0, sigma=0.25, is_call=True)
+        assert price == pytest.approx(0.0), f"Expected 0.0, got {price}"
+
+    def test_asian_geometric_at_zero_vol(self):
+        """Asian geometric at sigma=0 should return deterministic forward price."""
+        from backend.engines.exotic_engine import asian_geometric_price
+        import math
+        S, K, T, r, q = 100.0, 95.0, 0.5, 0.05, 0.0
+        F = S * math.exp((r - q) * T)
+        df = math.exp(-r * T)
+        # ITM call
+        expected_call = max(F - K, 0.0) * df
+        price_call = asian_geometric_price(S=S, K=K, T=T, r=r, q=q, sigma=0.0, is_call=True)
+        assert price_call == pytest.approx(expected_call, rel=1e-10), f"Expected {expected_call}, got {price_call}"
+        assert price_call > 0, "ITM asian geometric call at zero vol should have positive price"
+        # OTM put (same params)
+        expected_put = max(K - F, 0.0) * df
+        price_put = asian_geometric_price(S=S, K=K, T=T, r=r, q=q, sigma=0.0, is_call=False)
+        assert price_put == pytest.approx(expected_put, abs=1e-14), "OTM asian geometric put at zero vol should be 0"
+
+    def test_lookback_fixed_at_zero_vol_call(self):
+        """Lookback fixed call at sigma=0 should return deterministic price."""
+        from backend.engines.exotic_engine import lookback_fixed_price
+        import math
+        S, K, T, r, q = 100.0, 95.0, 0.5, 0.05, 0.0
+        # Deterministic forward: F = S * exp((r-q)*T)
+        F = S * math.exp((r - q) * T)
+        # b > 0 so path max = F, path min = S
+        expected_max = max(S, F)  # F since r > 0
+        df = math.exp(-r * T)
+        expected = max(expected_max - K, 0.0) * df
+
+        price = lookback_fixed_price(S=S, K=K, M_min=S, M_max=S, T=T, r=r, q=q, sigma=0.0, is_call=True)
+        assert price == pytest.approx(expected, rel=1e-10), f"Expected {expected}, got {price}"
+        assert price > 0, "ITM lookback fixed call at zero vol should have positive price"
+
+    def test_lookback_fixed_at_zero_vol_put(self):
+        """Lookback fixed put at sigma=0 should return deterministic price."""
+        from backend.engines.exotic_engine import lookback_fixed_price
+        import math
+        S, K, T, r, q = 100.0, 105.0, 0.5, 0.05, 0.0
+        F = S * math.exp((r - q) * T)
+        # b > 0 so path_min = S
+        effective_min = min(S, min(S, F))  # S
+        df = math.exp(-r * T)
+        expected = max(K - effective_min, 0.0) * df
+
+        price = lookback_fixed_price(S=S, K=K, M_min=S, M_max=S, T=T, r=r, q=q, sigma=0.0, is_call=False)
+        assert price == pytest.approx(expected, rel=1e-10), f"Expected {expected}, got {price}"
+        assert price > 0, "ITM lookback fixed put at zero vol should have positive price"
+
+    def test_lookback_floating_at_zero_vol_call(self):
+        """Lookback floating call at sigma=0 should return deterministic price."""
+        from backend.engines.exotic_engine import lookback_floating_price
+        import math
+        S, T, r, q = 100.0, 0.5, 0.05, 0.0
+        F = S * math.exp((r - q) * T)
+        df = math.exp(-r * T)
+        # Call payoff: F - min(S, F). Since r>0, F>S, so min = S
+        expected = max(F - S, 0.0) * df
+
+        price = lookback_floating_price(S=S, M_min=S, M_max=S, T=T, r=r, q=q, sigma=0.0, is_call=True)
+        assert price == pytest.approx(expected, rel=1e-10), f"Expected {expected}, got {price}"
+        assert price > 0, "Lookback floating call at zero vol with r>0 should have positive price"
+
+    def test_lookback_floating_at_zero_vol_put(self):
+        """Lookback floating put at sigma=0 should return deterministic price."""
+        from backend.engines.exotic_engine import lookback_floating_price
+        import math
+        S, T, r, q = 100.0, 0.5, 0.05, 0.0
+        F = S * math.exp((r - q) * T)
+        df = math.exp(-r * T)
+        # Put payoff: max(S, F) - F. Since r>0, F>S, so max = F -> payoff = 0
+        expected = max(max(S, F) - F, 0.0) * df
+
+        price = lookback_floating_price(S=S, M_min=S, M_max=S, T=T, r=r, q=q, sigma=0.0, is_call=False)
+        assert price == pytest.approx(expected, rel=1e-10), f"Expected {expected}, got {price}"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

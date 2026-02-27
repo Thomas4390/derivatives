@@ -204,20 +204,46 @@ def calculate_all_surfaces(
     breakeven_result = _find_breakeven(
         portfolio_data, strikes, option_types, position_types, quantities,
         premiums, stock_quantity, stock_entry_price, _find_breakeven_func,
-        _calculate_pnl_at_expiry_func
+        _calculate_pnl_at_expiry_func,
+        exotic_metadata=exotic_metadata,
+        expiry_pnl=expiry_pnl,
+        spot_range_arr=spot_range_arr,
     )
 
     # Determine unlimited risk
     if not has_positions:
-        # Default position is a long call, which has unlimited profit potential
-        unlimited_profit, unlimited_loss = True, False
+        unlimited_profit, unlimited_loss = False, False
     else:
         unlimited_profit, unlimited_loss = check_unlimited_risk(portfolio_data)
+
+    # Override for exotic portfolios — per-type logic
+    if has_exotic_legs:
+        for j, m in enumerate(exotic_metadata):
+            if m['instrument_class'] == 'vanilla':
+                continue
+            is_long = position_types[j] == 1
+            typ = m['instrument_class']
+            # Lookback and Asian can be unbounded
+            if typ in ('lookback_fixed', 'lookback_floating', 'asian'):
+                if is_long:
+                    unlimited_profit = True
+                else:
+                    unlimited_loss = True
+            elif typ == 'barrier':
+                is_call = portfolio_data['options'][j]['option_type'] == 'call'
+                if is_long:
+                    if is_call:
+                        unlimited_profit = True
+                else:
+                    if is_call:
+                        unlimited_loss = True
+            # Digital: bounded payout, no change needed
 
     # Build result
     result = _build_result(
         pnl_data, greeks_data, breakeven_result,
-        unlimited_profit, unlimited_loss, expiry_pnl
+        unlimited_profit, unlimited_loss, expiry_pnl,
+        has_exotic_legs=has_exotic_legs,
     )
     result['has_exotic_legs'] = has_exotic_legs
 
@@ -320,7 +346,8 @@ def _calculate_for_params(
                 pnl = (premiums[j] - option_value) * quantities[j]
             total_pnl += pnl
 
-            # Greeks aggregation
+            # Greeks aggregation (guard against NaN from exotic discontinuities)
+            greeks = np.where(np.isnan(greeks), 0.0, greeks)
             total_greeks += greeks * quantities[j] * position_types[j]
 
         # Add stock contribution
@@ -416,11 +443,23 @@ def _find_breakeven(
     stock_quantity: int,
     stock_entry_price: float,
     find_breakeven_func,
-    calculate_pnl_at_expiry_func
+    calculate_pnl_at_expiry_func,
+    exotic_metadata: list = None,
+    expiry_pnl: np.ndarray = None,
+    spot_range_arr: np.ndarray = None,
 ):
     """Find breakeven points and max profit/loss."""
     if len(strikes) == 0 and stock_quantity == 0:
         return None
+
+    # When exotic legs are present, compute breakeven from the expiry_pnl array
+    # (the Numba find_breakeven_func treats all legs as vanilla)
+    has_exotic = exotic_metadata and any(
+        m['instrument_class'] != 'vanilla' for m in exotic_metadata
+    )
+    if has_exotic and expiry_pnl is not None and spot_range_arr is not None:
+        from .pricing_adapter import BreakevenResult
+        return _breakeven_from_pnl_curve(expiry_pnl, spot_range_arr)
 
     # Use wide range for theoretical extremes
     theoretical_min = 0.01
@@ -450,13 +489,43 @@ def _find_breakeven(
     return breakeven_result
 
 
+def _breakeven_from_pnl_curve(
+    expiry_pnl: np.ndarray,
+    spot_range: np.ndarray,
+) -> 'BreakevenResult':
+    """Compute breakeven points from a PnL curve via sign-change interpolation."""
+    from .pricing_adapter import BreakevenResult
+
+    # Find sign changes (breakeven crossings)
+    breakeven_points = []
+    for i in range(len(expiry_pnl) - 1):
+        if expiry_pnl[i] * expiry_pnl[i + 1] < 0:
+            # Linear interpolation for the zero crossing
+            frac = abs(expiry_pnl[i]) / (abs(expiry_pnl[i]) + abs(expiry_pnl[i + 1]))
+            bp = spot_range[i] + frac * (spot_range[i + 1] - spot_range[i])
+            breakeven_points.append(float(bp))
+
+    # Max profit / loss from the PnL curve
+    max_profit_idx = int(np.argmax(expiry_pnl))
+    max_loss_idx = int(np.argmin(expiry_pnl))
+
+    return BreakevenResult(
+        breakeven_points=breakeven_points,
+        max_profit=float(expiry_pnl[max_profit_idx]),
+        max_profit_spot=float(spot_range[max_profit_idx]),
+        max_loss=float(expiry_pnl[max_loss_idx]),
+        max_loss_spot=float(spot_range[max_loss_idx]),
+    )
+
+
 def _build_result(
     pnl_data: dict,
     greeks_data: dict,
     breakeven_result,
     unlimited_profit: bool,
     unlimited_loss: bool,
-    expiry_pnl: np.ndarray
+    expiry_pnl: np.ndarray,
+    has_exotic_legs: bool = False,
 ) -> dict:
     """Build the final result dictionary."""
     result = {
@@ -470,6 +539,13 @@ def _build_result(
     if not breakeven_result:
         result['max_profit_display'] = 0
         result['max_loss_display'] = 0
+        return result
+
+    # For exotic legs, use actual PnL curve values instead of breakeven-based
+    # estimates, since the breakeven function treats exotic legs as vanilla
+    if has_exotic_legs:
+        result['max_profit_display'] = float(np.max(expiry_pnl))
+        result['max_loss_display'] = float(np.min(expiry_pnl))
         return result
 
     # Determine display values for max profit/loss

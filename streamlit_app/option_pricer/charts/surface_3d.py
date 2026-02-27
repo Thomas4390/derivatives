@@ -262,6 +262,11 @@ def render_3d_tab(
         len(positions) == 0 and
         stock_position is None
     )
+    is_single_exotic_leg = (
+        len(positions) == 1 and
+        stock_position is None and
+        positions[0].get('instrument_class', 'vanilla') != 'vanilla'
+    )
     is_single_leg = is_single_vanilla_leg
 
     if not positions and not stock_position:
@@ -278,8 +283,8 @@ def render_3d_tab(
         ">
             <div style="font-size: 1.25rem;">ℹ️</div>
             <div>
-                <div style="font-weight: 600; color: #0c4a6e; font-size: 0.9rem;">Default Position: Long Call ATM</div>
-                <div style="color: #0369a1; font-size: 0.8rem;">Add your own positions using the sidebar to analyze custom strategies</div>
+                <div style="font-weight: 600; color: #0c4a6e; font-size: 0.9rem;">No Positions</div>
+                <div style="color: #0369a1; font-size: 0.8rem;">Add positions using the sidebar to begin analysis</div>
             </div>
         </div>
         """, unsafe_allow_html=True)
@@ -331,6 +336,13 @@ def render_3d_tab(
             ):
                 st.session_state['3d_surface_type'] = opt
                 st.rerun()
+
+    # Inform user when Strike variation is unavailable for exotic legs
+    if is_single_exotic_leg:
+        st.caption(
+            "Strike variation is not available for exotic options "
+            "(DTE and IV variation still work)."
+        )
 
     surface_type = st.session_state['3d_surface_type']
 

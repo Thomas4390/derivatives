@@ -124,6 +124,7 @@ AVAILABLE_STRATEGIES = [
     "digital_range_bet",
     "asian_call",
     "lookback_floating_call",
+    "lookback_fixed_call",
 ]
 
 # Strategy display names
@@ -159,6 +160,7 @@ STRATEGY_DISPLAY_NAMES = {
     "digital_range_bet": "Digital Range Bet",
     "asian_call": "Asian Call (Geometric)",
     "lookback_floating_call": "Lookback Call (Floating)",
+    "lookback_fixed_call": "Lookback Call (Fixed Strike)",
 }
 
 # Strategy leg definitions (option_type, position_type, strike_offset from spot)
@@ -329,6 +331,12 @@ STRATEGY_LEGS = {
     "lookback_floating_call": [
         {"option_type": "call", "position_type": "long", "strike_factor": 1.0, "quantity": 1,
          "instrument_class": "lookback_floating"}
+    ],
+
+    # Lookback Fixed Call: payoff based on max price vs fixed strike
+    "lookback_fixed_call": [
+        {"option_type": "call", "position_type": "long", "strike_factor": 1.0, "quantity": 1,
+         "instrument_class": "lookback_fixed"}
     ],
 }
 

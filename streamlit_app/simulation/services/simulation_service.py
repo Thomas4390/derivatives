@@ -9,61 +9,11 @@ Provides:
 """
 
 from typing import Dict, Any, Optional, Union
-from dataclasses import dataclass
 import numpy as np
 
 # Backend imports
 from backend.simulation.factory import create_simulator, ModelType
 from backend.simulation.base import SimulationResult
-
-
-@dataclass
-class UnifiedSimulationParams:
-    """Unified parameters for simulation."""
-    # Market parameters
-    spot: float = 100.0
-    drift: float = 0.08
-    risk_free_rate: float = 0.05
-    time_horizon: float = 1.0
-
-    # Simulation settings
-    n_paths: int = 10000
-    n_steps: int = 252
-    seed: Optional[int] = 42
-
-    # Model selection
-    model: str = "gbm"
-
-    # GBM / Merton diffusion
-    sigma: Optional[float] = None
-
-    # Heston / Bates variance
-    v0: Optional[float] = None
-    kappa: Optional[float] = None
-    theta: Optional[float] = None
-    xi: Optional[float] = None
-    rho: Optional[float] = None
-
-    # Jump parameters (Merton / Bates)
-    lambda_j: Optional[float] = None
-    mu_j: Optional[float] = None
-    sigma_j: Optional[float] = None
-
-    # GARCH family
-    sigma0: Optional[float] = None
-    omega: Optional[float] = None
-    alpha: Optional[float] = None
-    beta: Optional[float] = None
-
-    # NGARCH leverage
-    theta_ngarch: Optional[float] = None
-
-    # GJR-GARCH asymmetry
-    gamma: Optional[float] = None
-
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary, excluding None values."""
-        return {k: v for k, v in self.__dict__.items() if v is not None}
 
 
 def _extract_model_params(model: str, params: Dict[str, Any]) -> Dict[str, Any]:

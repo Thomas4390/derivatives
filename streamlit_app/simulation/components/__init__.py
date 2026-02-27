@@ -1,47 +1,14 @@
 """Components module for Monte Carlo Simulation Explorer."""
 
-# New unified components
 from .model_selector import render_model_selector
-from .parameter_panel import render_parameter_panel
-from .pricing_comparison import render_pricing_comparison
-from .results_summary import render_results_summary
-
-__all__ = [
-    # New components
-    'render_model_selector',
-    'render_parameter_panel',
-    'render_pricing_comparison',
-    'render_results_summary',
-]
-
-# Import additional components
-try:
-    from .sidebar import render_sidebar
-    from .analysis_header import (
-        render_analysis_header,
-        render_strategy_summary_compact,
-        render_no_results_message
-    )
-    from .strategy_builder import (
-        render_strategy_builder,
-        render_strategy_builder_compact,
-        SimulationOptionPosition,
-        SimulationStockPosition,
-        export_positions_for_pnl_engine,
-        get_net_premium
-    )
-    __all__.extend([
-        'render_sidebar',
-        'render_analysis_header',
-        'render_strategy_summary_compact',
-        'render_no_results_message',
-        'render_strategy_builder',
-        'render_strategy_builder_compact',
-        'SimulationOptionPosition',
-        'SimulationStockPosition',
-        'export_positions_for_pnl_engine',
-        'get_net_premium'
-    ])
-except ImportError:
-    # Components not available, skip
-    pass
+from .parameter_panel import (
+    render_market_parameters,
+    render_model_parameters,
+    render_simulation_settings,
+)
+from .strategy_builder import (
+    render_strategy_builder,
+    export_positions_for_pnl_engine,
+)
+from .path_explorer_params import render_explorer_params
+from .custom_model_editor import render_custom_model_editor

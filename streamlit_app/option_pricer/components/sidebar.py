@@ -156,6 +156,7 @@ def _render_strategy_builder(
         "digital_range_bet": "🎯  Digital Range Bet",
         "asian_call": "📊  Asian Call (Geometric)",
         "lookback_floating_call": "🔍  Lookback Call (Floating)",
+        "lookback_fixed_call": "🔍  Lookback Call (Fixed)",
     }
 
     # Build options list (excluding separators for actual selection)
@@ -882,11 +883,27 @@ def _render_exotic_leg_editor(
             )
             new_is_knock_in = (ki_type == "Knock-In")
         with col8:
-            new_rebate = st.number_input(
-                "Rebate ($)", value=float(leg_state.get('rebate', 0.0)),
-                step=0.1, format="%.2f",
-                key=f"leg_{leg_index}_rebate_v{version}"
-            )
+            if new_is_knock_in:
+                new_rebate = 0.0
+                st.number_input(
+                    "Rebate ($)", value=0.0,
+                    step=0.1, format="%.2f",
+                    key=f"leg_{leg_index}_rebate_v{version}",
+                    disabled=True,
+                    help="Rebate only applies to knock-out options",
+                )
+            else:
+                new_rebate = st.number_input(
+                    "Rebate ($)", value=float(leg_state.get('rebate', 0.0)),
+                    step=0.1, format="%.2f",
+                    key=f"leg_{leg_index}_rebate_v{version}"
+                )
+
+        # Warn if barrier is on the wrong side of spot (immediate knock)
+        if new_is_up and new_barrier <= spot_price:
+            st.caption(f"Warning: Up-barrier ({new_barrier:.2f}) is at or below spot ({spot_price:.2f}) — option is already knocked.")
+        elif not new_is_up and new_barrier >= spot_price:
+            st.caption(f"Warning: Down-barrier ({new_barrier:.2f}) is at or above spot ({spot_price:.2f}) — option is already knocked.")
 
     elif inst_class == 'digital':
         new_payout = st.number_input(

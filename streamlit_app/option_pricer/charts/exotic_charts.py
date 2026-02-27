@@ -2,6 +2,7 @@
 Exotic Options Charts and Tab Orchestrator for Options Greeks Explorer.
 
 Provides Price comparison and Payoff diagram charts for the Exotic Options tab.
+Includes interactive DTE/IV slider controls matching the P&L Profile tab pattern.
 
 Author: Thomas Vaudescal
 """
@@ -13,18 +14,18 @@ import plotly.graph_objects as go
 
 from config.constants import (
     EXOTIC_TYPE_NAMES,
-    BARRIER_SUBTYPES,
     EXOTIC_DESCRIPTIONS,
-    DEFAULT_EXOTIC_DTE,
-    DEFAULT_DIGITAL_PAYOUT,
-    DEFAULT_BARRIER_UP_FACTOR,
-    DEFAULT_BARRIER_DOWN_FACTOR,
+    DEFAULT_DTE,
+    DEFAULT_IV,
+    DTE_RANGE,
+    IV_RANGE,
     SPOT_RANGE_FACTOR,
     SPOT_RANGE_POINTS,
 )
 from config.chart_theme import (
     CHART_COLORS,
     AXIS_DEFAULTS,
+    SLIDER_DEFAULTS,
     get_layout_config,
 )
 from services.exotic_pricing_adapter import (
@@ -53,7 +54,7 @@ def _add_spot_vline(fig: go.Figure, spot_price: float, row=None, col=None):
 
 
 # =============================================================================
-# PRICE COMPARISON CHART
+# PRICE COMPARISON CHART (static, no slider — kept for reference/fallback)
 # =============================================================================
 
 def create_exotic_price_comparison(
@@ -139,6 +140,199 @@ def create_exotic_price_comparison(
 
 
 # =============================================================================
+# PRICE COMPARISON WITH SLIDER (DTE or IV variation)
+# =============================================================================
+
+def create_exotic_price_comparison_with_slider(
+    all_exotic_data: list[dict],
+    all_vanilla_data: list[dict],
+    param_values: list[int],
+    spot_range: np.ndarray,
+    spot_price: float,
+    config: dict,
+    slider_type: str,
+) -> go.Figure:
+    """Exotic vs vanilla price comparison with Plotly slider for DTE or IV.
+
+    Parameters
+    ----------
+    all_exotic_data : list[dict]
+        Exotic pricing surfaces, one per param value. Each has "price" key.
+    all_vanilla_data : list[dict]
+        Vanilla pricing surfaces, one per param value. Each has "price" key.
+    param_values : list[int]
+        DTE values (e.g. [1, 4, 7, ...]) or IV values (e.g. [5, 7, 9, ...]).
+    spot_range : np.ndarray
+        Array of underlying prices for x-axis.
+    spot_price : float
+        Current spot price for reference line.
+    config : dict
+        Chart config with exotic_type, barrier, payout, etc.
+    slider_type : str
+        "DTE" or "IV".
+    """
+    fig = go.Figure()
+
+    N = len(param_values)
+    default_value = DEFAULT_DTE if slider_type == "DTE" else DEFAULT_IV
+
+    # Find closest default index
+    default_idx = 0
+    min_dist = abs(param_values[0] - default_value)
+    for i, v in enumerate(param_values):
+        if abs(v - default_value) < min_dist:
+            min_dist = abs(v - default_value)
+            default_idx = i
+
+    # Add traces: 2 per param value (exotic line + vanilla line)
+    for i, value in enumerate(param_values):
+        visible = (i == default_idx)
+
+        exotic_prices = all_exotic_data[i]["price"]
+        vanilla_prices = all_vanilla_data[i]["price"]
+
+        if slider_type == "DTE":
+            hover_exotic = (
+                '<b>Underlying:</b> $%{x:,.2f}<br>'
+                f'<b>DTE:</b> {value} days<br>'
+                '<b>Exotic Price:</b> $%{y:.2f}<br>'
+                '<extra></extra>'
+            )
+            hover_vanilla = (
+                '<b>Underlying:</b> $%{x:,.2f}<br>'
+                f'<b>DTE:</b> {value} days<br>'
+                '<b>Vanilla Price:</b> $%{y:.2f}<br>'
+                '<extra></extra>'
+            )
+        else:
+            hover_exotic = (
+                '<b>Underlying:</b> $%{x:,.2f}<br>'
+                f'<b>IV:</b> {value}%<br>'
+                '<b>Exotic Price:</b> $%{y:.2f}<br>'
+                '<extra></extra>'
+            )
+            hover_vanilla = (
+                '<b>Underlying:</b> $%{x:,.2f}<br>'
+                f'<b>IV:</b> {value}%<br>'
+                '<b>Vanilla Price:</b> $%{y:.2f}<br>'
+                '<extra></extra>'
+            )
+
+        # Trace 2*i: exotic price line
+        fig.add_trace(go.Scatter(
+            x=spot_range,
+            y=exotic_prices,
+            mode='lines',
+            name=config.get("exotic_label", "Exotic"),
+            visible=visible,
+            line=dict(color=CHART_COLORS["primary"], width=2.5),
+            hovertemplate=hover_exotic,
+            showlegend=(i == default_idx),
+        ))
+
+        # Trace 2*i+1: vanilla price line (dashed)
+        fig.add_trace(go.Scatter(
+            x=spot_range,
+            y=vanilla_prices,
+            mode='lines',
+            name="Vanilla",
+            visible=visible,
+            line=dict(color=CHART_COLORS["reference"], width=2, dash="dash"),
+            hovertemplate=hover_vanilla,
+            showlegend=(i == default_idx),
+        ))
+
+    # Build slider steps
+    steps = []
+    for i, value in enumerate(param_values):
+        vis = [False] * (N * 2)
+        vis[2 * i] = True
+        vis[2 * i + 1] = True
+
+        label = str(value) if slider_type == "DTE" else f"{value}%"
+        step = dict(
+            method="update",
+            args=[{"visible": vis}],
+            label=label,
+        )
+        steps.append(step)
+
+    prefix = "Days to Expiration: " if slider_type == "DTE" else "Implied Volatility: "
+    slider = SLIDER_DEFAULTS.copy()
+    slider.update({
+        'active': default_idx,
+        'currentvalue': {
+            **SLIDER_DEFAULTS['currentvalue'],
+            'prefix': prefix,
+        },
+        'steps': steps,
+    })
+
+    # Static elements: spot vline, barrier vline
+    fig.add_vline(
+        x=spot_price, line_dash="dot",
+        line_color=CHART_COLORS["accent"], line_width=1.5, opacity=0.8,
+    )
+    fig.add_annotation(
+        x=spot_price, y=1.02, xref="x", yref="paper",
+        text="Current Price", showarrow=False,
+        font=dict(size=10, color=CHART_COLORS["accent"], weight='bold'),
+        bgcolor="rgba(255,255,255,0.9)",
+        bordercolor=CHART_COLORS["accent"], borderwidth=1, borderpad=3,
+    )
+
+    if config.get("barrier"):
+        fig.add_vline(
+            x=config["barrier"],
+            line_dash="dash", line_color="#dc2626", line_width=2,
+            annotation_text=f"Barrier = {config['barrier']:.1f}",
+            annotation_position="top right",
+            annotation_font_color="#dc2626",
+        )
+
+    if config.get("payout") and config.get("discount_factor"):
+        pv = config["payout"] * config["discount_factor"]
+        fig.add_hline(
+            y=pv, line_dash="dot", line_color="#0d9488", line_width=1.5,
+            annotation_text=f"PV(Payout) = {pv:.2f}",
+            annotation_position="top right",
+            annotation_font_color="#0d9488",
+        )
+
+    # Layout
+    layout = get_layout_config(height=650)
+    layout.update({
+        'sliders': [slider],
+        'xaxis': {
+            **AXIS_DEFAULTS,
+            'title': {'text': 'Underlying Price', **AXIS_DEFAULTS['title']},
+            'tickprefix': '$',
+            'tickformat': ',.0f',
+        },
+        'yaxis': {
+            **AXIS_DEFAULTS,
+            'title': {'text': 'Option Price ($)', **AXIS_DEFAULTS['title']},
+            'tickprefix': '$',
+            'tickformat': ',.2f',
+        },
+        'margin': {'l': 70, 'r': 40, 't': 40, 'b': 100},
+        'hovermode': 'x unified',
+        'showlegend': True,
+        'legend': {
+            'orientation': 'h',
+            'yanchor': 'bottom',
+            'y': 1.02,
+            'xanchor': 'right',
+            'x': 1,
+            'font': {'size': 11},
+        },
+    })
+    fig.update_layout(**layout)
+
+    return fig
+
+
+# =============================================================================
 # PAYOFF DIAGRAM
 # =============================================================================
 
@@ -212,24 +406,24 @@ def create_exotic_payoff_diagram(
         vanilla_payoff = np.maximum(spot_range - strike, 0) if is_call else np.maximum(strike - spot_range, 0)
         fig.add_trace(go.Scatter(
             x=spot_range, y=vanilla_payoff,
-            name="Vanilla Payoff (terminal)", line=dict(color=CHART_COLORS["reference"], width=1.5, dash="dash"),
+            name="Vanilla Payoff (upper bound)", line=dict(color=CHART_COLORS["reference"], width=1.5, dash="dash"),
         ))
-        # Approximate: geometric average payoff shifted toward ATM
-        # Show narrower payoff to illustrate averaging effect
-        avg_shift = 0.5  # Geometric average is between spot and strike
+        # Geometric averaging reduces effective volatility by 1/sqrt(3),
+        # which compresses the payoff toward ATM by the same factor
+        compression = 1.0 / math.sqrt(3.0)
         if is_call:
-            avg_payoff = np.maximum(spot_range * avg_shift + spot_price * (1 - avg_shift) - strike, 0)
+            avg_payoff = np.maximum((spot_range - strike) * compression, 0)
         else:
-            avg_payoff = np.maximum(strike - (spot_range * avg_shift + spot_price * (1 - avg_shift)), 0)
+            avg_payoff = np.maximum((strike - spot_range) * compression, 0)
 
         fig.add_trace(go.Scatter(
             x=spot_range, y=avg_payoff,
-            name="Illustrative Average Payoff", line=dict(color=CHART_COLORS["primary"], width=2.5),
+            name="Illustrative Asian Payoff", line=dict(color=CHART_COLORS["primary"], width=2.5),
         ))
 
         fig.add_annotation(
             x=0.5, y=0.02, xref="paper", yref="paper",
-            text="Note: Actual payoff depends on the path of prices (geometric average)",
+            text="Note: Geometric averaging compresses payoff by 1/\u221A3. Actual payoff depends on price path.",
             showarrow=False, font=dict(size=10, color="#64748b"),
         )
 
@@ -241,39 +435,43 @@ def create_exotic_payoff_diagram(
         ))
 
         if exotic_type == "lookback_floating":
-            # Floating: call payoff = S_T - S_min (always >= vanilla call payoff since S_min <= K possible)
-            fig.add_annotation(
-                x=0.5, y=0.02, xref="paper", yref="paper",
-                text="Floating lookback payoff depends on running min/max (path-dependent)",
-                showarrow=False, font=dict(size=10, color="#64748b"),
-            )
-            # Illustrative: payoff as if S_min = 0.9*S_T (call) or S_max = 1.1*S_T (put)
+            # Floating: call payoff = S_T - S_min (always >= vanilla call payoff)
+            # Show vanilla payoff as lower bound and illustrative upper bound
             if is_call:
-                lb_payoff = np.maximum(spot_range - spot_range * 0.90, 0)
+                # Upper bound: S_min could be as low as 0.90*S_0
+                lb_upper = np.maximum(spot_range - spot_price * 0.90, 0)
             else:
-                lb_payoff = np.maximum(spot_range * 1.10 - spot_range, 0)
+                # Upper bound: S_max could be as high as 1.10*S_0
+                lb_upper = np.maximum(spot_price * 1.10 - spot_range, 0)
             fig.add_trace(go.Scatter(
-                x=spot_range, y=lb_payoff,
+                x=spot_range, y=lb_upper,
                 name="Illustrative Lookback Payoff", line=dict(color=CHART_COLORS["primary"], width=2.5),
             ))
-        else:
-            # Fixed: call payoff = max(M_max - K, 0)
             fig.add_annotation(
                 x=0.5, y=0.02, xref="paper", yref="paper",
-                text="Fixed lookback payoff: max(M_max - K, 0) for call, max(K - M_min, 0) for put",
+                text="Floating lookback payoff depends on running min/max (path-dependent). "
+                     "Vanilla payoff shown as lower bound.",
                 showarrow=False, font=dict(size=10, color="#64748b"),
             )
-            # Illustrative: as if M_max = max(S_T, 1.1*S_0)
+        else:
+            # Fixed: call payoff = max(M_max - K, 0), put = max(K - M_min, 0)
+            # Show vanilla payoff as lower bound + illustrative upper bound (10% path excursion)
             if is_call:
-                m_max = np.maximum(spot_range, spot_price * 1.1)
+                m_max = np.maximum(spot_range, spot_price * 1.10)
                 lb_payoff = np.maximum(m_max - strike, 0)
             else:
-                m_min = np.minimum(spot_range, spot_price * 0.9)
+                m_min = np.minimum(spot_range, spot_price * 0.90)
                 lb_payoff = np.maximum(strike - m_min, 0)
             fig.add_trace(go.Scatter(
                 x=spot_range, y=lb_payoff,
                 name="Illustrative Lookback Payoff", line=dict(color=CHART_COLORS["primary"], width=2.5),
             ))
+            fig.add_annotation(
+                x=0.5, y=0.02, xref="paper", yref="paper",
+                text="Fixed lookback payoff: max(M_max - K, 0) for call. "
+                     "Vanilla payoff shown as lower bound; upper curve assumes 10% path excursion.",
+                showarrow=False, font=dict(size=10, color="#64748b"),
+            )
 
     fig.add_vline(x=strike, line_dash="dot", line_color="#64748b", line_width=1,
                    annotation_text=f"K = {strike:.1f}")
@@ -286,97 +484,102 @@ def create_exotic_payoff_diagram(
 # MAIN TAB ORCHESTRATOR
 # =============================================================================
 
-def render_exotic_tab(spot_price: float, risk_free_rate: float):
-    """Main orchestrator for the Exotic Options tab."""
+def render_exotic_tab(spot_price: float, risk_free_rate: float, positions: list):
+    """Main orchestrator for the Exotic Options tab.
 
-    # ── Exotic type selector ──
-    exotic_type_keys = list(EXOTIC_TYPE_NAMES.keys())
-    exotic_type = st.selectbox(
-        "Exotic Option Type",
-        exotic_type_keys,
-        format_func=lambda k: EXOTIC_TYPE_NAMES[k],
-        key="exotic_type_selector",
-    )
+    Reads exotic legs from the portfolio positions configured in the sidebar.
+    Includes DTE/IV slider controls for interactive price comparison.
+    """
+    from components.metrics import render_chart_controls
+
+    # ── Filter exotic legs from positions ──
+    exotic_legs = [
+        (i, pos) for i, pos in enumerate(positions)
+        if pos.get('instrument_class', 'vanilla') != 'vanilla'
+    ]
+
+    if not exotic_legs:
+        st.info("No exotic legs in the portfolio. Add an exotic option from the sidebar to see analysis here.")
+        return
+
+    # ── Leg selector (only if multiple exotic legs) ──
+    if len(exotic_legs) == 1:
+        leg_idx, pos = exotic_legs[0]
+    else:
+        labels = [
+            f"Leg {idx + 1} — {EXOTIC_TYPE_NAMES.get(p['instrument_class'], p['instrument_class']).split('(')[0].strip()} "
+            f"{'Call' if p['option_type'] == 'call' else 'Put'} K={p['strike']}"
+            for idx, p in exotic_legs
+        ]
+        selected = st.selectbox(
+            "Select exotic leg to analyze",
+            range(len(exotic_legs)),
+            format_func=lambda i: labels[i],
+            key="exotic_leg_selector",
+        )
+        leg_idx, pos = exotic_legs[selected]
+
+    # ── Extract parameters from position ──
+    exotic_type = pos['instrument_class']
+    strike = pos['strike']
+    is_call = pos['option_type'] == 'call'
+    barrier = pos.get('barrier', 0.0)
+    is_up = pos.get('is_up', True)
+    is_knock_in = pos.get('is_knock_in', False)
+    rebate = pos.get('rebate', 0.0)
+    payout = pos.get('payout', 1.0)
 
     # Educational description
-    st.info(EXOTIC_DESCRIPTIONS[exotic_type])
+    if exotic_type in EXOTIC_DESCRIPTIONS:
+        st.info(EXOTIC_DESCRIPTIONS[exotic_type])
 
-    # ── Parameter controls ──
-    col1, col2 = st.columns(2)
+    # ── DTE/IV toggle controls ──
+    slider_type = render_chart_controls("exotic_slider", is_single_leg=False)
 
-    with col1:
-        strike = st.number_input("Strike Price", value=spot_price, min_value=1.0, step=1.0, key="exotic_strike")
-        dte = st.number_input("Days to Expiry", value=DEFAULT_EXOTIC_DTE, min_value=1, max_value=730, step=1, key="exotic_dte")
-        sigma_pct = st.slider("Volatility (%)", min_value=5, max_value=100, value=25, step=1, key="exotic_vol")
-        sigma = sigma_pct / 100.0
-
-    # Type-specific parameters
-    is_call = True
-    barrier = 0.0
-    is_knock_in = False
-    is_up = True
-    rebate = 0.0
-    payout = DEFAULT_DIGITAL_PAYOUT
-
-    with col2:
-        if exotic_type == "barrier":
-            barrier_subtype_key = st.selectbox(
-                "Barrier Type",
-                list(BARRIER_SUBTYPES.keys()),
-                format_func=lambda k: BARRIER_SUBTYPES[k]["label"],
-                key="barrier_subtype",
-            )
-            subtype = BARRIER_SUBTYPES[barrier_subtype_key]
-            is_call = subtype["is_call"]
-            is_up = subtype["is_up"]
-            is_knock_in = subtype["is_knock_in"]
-
-            default_barrier = spot_price * (DEFAULT_BARRIER_UP_FACTOR if is_up else DEFAULT_BARRIER_DOWN_FACTOR)
-            barrier = st.number_input("Barrier Level", value=default_barrier, min_value=1.0, step=1.0, key="barrier_level")
-            rebate = st.number_input("Rebate (knock-out only)", value=0.0, min_value=0.0, step=0.5, key="barrier_rebate")
-
-        elif exotic_type == "digital":
-            option_side = st.radio("Option Type", ["Call", "Put"], horizontal=True, key="digital_side")
-            is_call = option_side == "Call"
-            payout = st.number_input("Payout Amount", value=DEFAULT_DIGITAL_PAYOUT, min_value=0.01, step=0.1, key="digital_payout")
-
-        elif exotic_type == "asian":
-            option_side = st.radio("Option Type", ["Call", "Put"], horizontal=True, key="asian_side")
-            is_call = option_side == "Call"
-            st.caption("Geometric average — closed-form pricing (Kemna-Vorst 1990)")
-
-        elif exotic_type in ("lookback_floating", "lookback_fixed"):
-            option_side = st.radio("Option Type", ["Call", "Put"], horizontal=True, key="lookback_side")
-            is_call = option_side == "Call"
-            if exotic_type == "lookback_floating":
-                st.caption("Fresh option: M_min = M_max = Spot (Goldman-Sosin-Gatto 1979)")
-            else:
-                st.caption("Fresh option: M_min = M_max = Spot (Conze-Viswanathan 1991)")
-
-    # ── Compute surfaces ──
-    maturity = dte / 365.0
+    # ── Compute surfaces for all parameter values ──
     spot_range = np.linspace(
         spot_price * (1 - SPOT_RANGE_FACTOR),
         spot_price * (1 + SPOT_RANGE_FACTOR),
         SPOT_RANGE_POINTS,
     )
 
-    exotic_data = calculate_exotic_greeks_surface(
-        exotic_type, spot_range, strike, maturity, risk_free_rate, sigma, is_call,
-        barrier=barrier, is_knock_in=is_knock_in, is_up=is_up,
-        rebate=rebate, payout=payout,
-    )
+    if slider_type == "DTE":
+        param_values = DTE_RANGE
+        fixed_iv = DEFAULT_IV / 100.0
+    else:
+        param_values = IV_RANGE
+        fixed_iv = None  # will vary
 
-    # For lookback floating, strike is not used in vanilla comparison — use spot as strike
     vanilla_strike = strike if exotic_type != "lookback_floating" else spot_price
-    vanilla_data = calculate_vanilla_greeks_surface(
-        spot_range, vanilla_strike, maturity, risk_free_rate, sigma, is_call,
-    )
 
-    # Build config dict
+    all_exotic_data = []
+    all_vanilla_data = []
+
+    for value in param_values:
+        if slider_type == "DTE":
+            maturity = value / 365.0
+            sigma = fixed_iv
+        else:
+            maturity = DEFAULT_DTE / 365.0
+            sigma = value / 100.0
+
+        exotic_data = calculate_exotic_greeks_surface(
+            exotic_type, spot_range, strike, maturity, risk_free_rate, sigma, is_call,
+            barrier=barrier, is_knock_in=is_knock_in, is_up=is_up,
+            rebate=rebate, payout=payout,
+        )
+        vanilla_data = calculate_vanilla_greeks_surface(
+            spot_range, vanilla_strike, maturity, risk_free_rate, sigma, is_call,
+        )
+
+        all_exotic_data.append(exotic_data)
+        all_vanilla_data.append(vanilla_data)
+
+    # Build config dict (use default DTE for discount factor display)
+    default_maturity = DEFAULT_DTE / 365.0
     chart_config = {
         "exotic_type": exotic_type,
-        "exotic_label": EXOTIC_TYPE_NAMES[exotic_type],
+        "exotic_label": EXOTIC_TYPE_NAMES.get(exotic_type, exotic_type),
         "is_call": is_call,
         "strike": strike,
         "spot_range": spot_range,
@@ -384,14 +587,16 @@ def render_exotic_tab(spot_price: float, risk_free_rate: float):
         "is_up": is_up,
         "is_knock_in": is_knock_in,
         "payout": payout if exotic_type == "digital" else None,
-        "discount_factor": math.exp(-risk_free_rate * maturity) if exotic_type == "digital" else None,
+        "discount_factor": math.exp(-risk_free_rate * default_maturity) if exotic_type == "digital" else None,
     }
 
-    # ── Charts ──
-    # Price comparison
-    fig_price = create_exotic_price_comparison(exotic_data, vanilla_data, spot_range, spot_price, chart_config)
-    st.plotly_chart(fig_price, width="stretch")
+    # ── Price comparison chart with slider ──
+    fig_price = create_exotic_price_comparison_with_slider(
+        all_exotic_data, all_vanilla_data, param_values,
+        spot_range, spot_price, chart_config, slider_type,
+    )
+    st.plotly_chart(fig_price, width="stretch", config={'displayModeBar': False})
 
-    # Payoff diagram
+    # ── Payoff diagram (static, no slider) ──
     fig_payoff = create_exotic_payoff_diagram(spot_range, spot_price, chart_config)
     st.plotly_chart(fig_payoff, width="stretch")

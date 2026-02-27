@@ -180,7 +180,7 @@ def _add_vol_references(
         if lr_vol is not None:
             lr_pct = lr_vol * 100
             fig.add_hline(
-                y=lr_pct, line_dash="dot", line_color=_VOL_REF_LR, line_width=1,
+                y=lr_pct, line_dash="dot", line_color=_VOL_REF_LR, line_width=1.5,
                 annotation_text=f"LR = {lr_pct:.1f}%",
                 annotation_font_size=11, annotation_font_color=_VOL_REF_LR,
                 annotation_position="bottom left",
