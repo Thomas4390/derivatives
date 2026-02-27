@@ -39,8 +39,6 @@ _AXIS_STYLE = dict(
 def render_payoff_with_distribution(
     result: SimulationResult,
     pnl_values: np.ndarray,
-    payoff_curve: np.ndarray,
-    spot_range: np.ndarray,
     breakeven_prices: Optional[np.ndarray] = None,
     spot: float = 100.0,
     max_scatter: int = 5000,

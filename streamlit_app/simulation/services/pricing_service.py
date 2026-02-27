@@ -463,38 +463,3 @@ def get_available_pricing_methods(model_key: str) -> List[str]:
         return ["monte_carlo"]
 
 
-def compute_option_pnl(
-    price_paths: np.ndarray,
-    strike: float,
-    premium: float,
-    is_call: bool = True,
-    is_long: bool = True,
-    quantity: int = 1
-) -> np.ndarray:
-    """
-    Compute P&L distribution for an option position.
-
-    Args:
-        price_paths: Price paths (n_paths, n_steps+1)
-        strike: Option strike
-        premium: Option premium paid/received
-        is_call: True for call
-        is_long: True for long position
-        quantity: Number of contracts
-
-    Returns:
-        Array of terminal P&L values
-    """
-    terminal_prices = price_paths[:, -1]
-
-    if is_call:
-        payoff = np.maximum(terminal_prices - strike, 0)
-    else:
-        payoff = np.maximum(strike - terminal_prices, 0)
-
-    if is_long:
-        pnl = (payoff - premium) * quantity
-    else:
-        pnl = (premium - payoff) * quantity
-
-    return pnl

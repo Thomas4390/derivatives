@@ -16,7 +16,6 @@ sys.path.insert(0, str(app_dir))
 import streamlit as st
 import numpy as np
 from scipy.stats import norm
-
 from backend.portfolio.pnl import compute_payoff_curve, find_breakeven_points
 
 from config.styles import inject_styles, render_compact_header, footer_html, metric_card_html
@@ -130,7 +129,7 @@ with st.sidebar:
         spot_price=market_params.get("spot", 100.0),
         risk_free_rate=market_params.get("risk_free_rate", 0.05),
         time_to_expiry=market_params.get("time_horizon", 1.0),
-        volatility=market_params.get("sigma", 0.20),
+        volatility=get_initial_volatility(model_key, model_params),
         bs_price_function=_bs_price,
     )
     position_arrays = export_positions_for_pnl_engine(positions, stock_position)
@@ -286,8 +285,6 @@ if has_strategy:
         render_payoff_with_distribution(
             result=result,
             pnl_values=pnl_vals,
-            payoff_curve=payoff_curve,
-            spot_range=spot_range,
             breakeven_prices=breakevens,
             spot=sim_params.get("spot_price", sim_params.get("spot", 100.0)),
         )

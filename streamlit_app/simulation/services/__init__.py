@@ -29,28 +29,7 @@ from .pricing_service import (
     price_with_fft,
     price_multiple_strikes,
     get_available_pricing_methods,
-    compute_option_pnl,
     PricingComparison,
 )
 
-# Try to import old simulation_runner for backward compatibility
-try:
-    from .simulation_runner import (
-        run_price_simulation,
-        run_volatility_simulation,
-        calculate_pnl_from_paths,
-        run_terminal_only_simulation
-    )
-except ImportError:
-    # Old backend not available, provide stubs
-    def run_price_simulation(*args, **kwargs):
-        raise NotImplementedError("Use run_simulation from simulation_service instead")
-
-    def run_volatility_simulation(*args, **kwargs):
-        raise NotImplementedError("Use run_simulation from simulation_service instead")
-
-    def calculate_pnl_from_paths(*args, **kwargs):
-        raise NotImplementedError("Use compute_option_pnl from pricing_service instead")
-
-    def run_terminal_only_simulation(*args, **kwargs):
-        raise NotImplementedError("Use run_terminal_simulation from simulation_service instead")
+from .simulation_runner import calculate_pnl_from_paths
