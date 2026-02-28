@@ -28,7 +28,8 @@ from backend.core.result_types import (
     PricingResult, GreeksResult, PricingCapability, ExerciseStyle
 )
 from backend.instruments.options import (
-    BarrierOption, AsianOption, DigitalOption, LookbackOption
+    BarrierOption, AsianOption, DigitalOption, LookbackOption,
+    ChooserOption, AssetOrNothingOption, PowerOption, GapOption,
 )
 from backend.models.gbm import GBMModel
 
@@ -42,6 +43,10 @@ ASIAN_GEO: int = 1
 DIGITAL: int = 2
 LOOKBACK_FIXED: int = 3
 LOOKBACK_FLOATING: int = 4
+CHOOSER: int = 5
+ASSET_OR_NOTHING: int = 6
+POWER: int = 7
+GAP: int = 8
 
 
 # =============================================================================
@@ -512,10 +517,260 @@ def lookback_floating_price(S: float, M_min: float, M_max: float, T: float,
 
 
 @njit(fastmath=True, cache=True)
+def chooser_price(S: float, K: float, T: float, t_c: float, r: float, q: float,
+                  sigma: float) -> float:
+    """
+    Simple chooser option price (Rubinstein 1991).
+
+    V = BS_call(S, K, T) + BS_put(S, K*exp(-(r-q)*(T-t_c)), t_c)
+
+    Parameters
+    ----------
+    S : float
+        Spot price
+    K : float
+        Strike price
+    T : float
+        Time to expiry (final maturity)
+    t_c : float
+        Choice time
+    r : float
+        Risk-free rate
+    q : float
+        Continuous dividend yield
+    sigma : float
+        Volatility
+
+    Returns
+    -------
+    float
+        Option price
+    """
+    if T <= 0:
+        # At expiry, chooser = max(call, put) = max(max(S-K,0), max(K-S,0))
+        call_payoff = max(S - K, 0.0)
+        put_payoff = max(K - S, 0.0)
+        return max(call_payoff, put_payoff)
+
+    if sigma <= 0:
+        F = S * math.exp((r - q) * T)
+        df = math.exp(-r * T)
+        call_payoff = max(F - K, 0.0)
+        put_payoff = max(K - F, 0.0)
+        return max(call_payoff, put_payoff) * df
+
+    # Rubinstein decomposition
+    call_part = _bs_vanilla_price(S, K, T, r, q, sigma, True)
+    K_adj = K * math.exp(-(r - q) * (T - t_c))
+    put_part = _bs_vanilla_price(S, K_adj, t_c, r, q, sigma, False)
+
+    return call_part + put_part
+
+
+@njit(fastmath=True, cache=True)
+def asset_or_nothing_price(S: float, K: float, T: float, r: float, q: float,
+                           sigma: float, is_call: bool) -> float:
+    """
+    Asset-or-nothing option price.
+
+    Call: S * exp(-qT) * N(d1)
+    Put:  S * exp(-qT) * N(-d1)
+
+    Parameters
+    ----------
+    S : float
+        Spot price
+    K : float
+        Strike price
+    T : float
+        Time to expiry
+    r : float
+        Risk-free rate
+    q : float
+        Continuous dividend yield
+    sigma : float
+        Volatility
+    is_call : bool
+        True for call, False for put
+
+    Returns
+    -------
+    float
+        Option price
+    """
+    if T <= 0:
+        if is_call:
+            return S if S > K else 0.0
+        else:
+            return S if S < K else 0.0
+
+    if sigma <= 0:
+        F = S * math.exp((r - q) * T)
+        qd = math.exp(-q * T)
+        if is_call:
+            return (S * qd) if F > K else 0.0
+        else:
+            return (S * qd) if F < K else 0.0
+
+    sqrt_T = math.sqrt(T)
+    d1 = (math.log(S / K) + (r - q + 0.5 * sigma * sigma) * T) / (sigma * sqrt_T)
+    qd = math.exp(-q * T)
+
+    if is_call:
+        return S * qd * norm_cdf(d1)
+    else:
+        return S * qd * norm_cdf(-d1)
+
+
+@njit(fastmath=True, cache=True)
+def power_option_price(S: float, K: float, T: float, r: float, q: float,
+                       sigma: float, is_call: bool, n: float) -> float:
+    """
+    Power option price.
+
+    Option on S^n: payoff = max(S_T^n - K, 0) for calls.
+    mu_adj = n*(r-q) + n*(n-1)*sigma^2/2
+    sigma_adj = n * sigma
+
+    Parameters
+    ----------
+    S : float
+        Spot price
+    K : float
+        Strike price
+    T : float
+        Time to expiry
+    r : float
+        Risk-free rate
+    q : float
+        Continuous dividend yield
+    sigma : float
+        Volatility
+    is_call : bool
+        True for call, False for put
+    n : float
+        Power exponent
+
+    Returns
+    -------
+    float
+        Option price
+    """
+    if T <= 0:
+        S_n = S ** n
+        if is_call:
+            return max(S_n - K, 0.0)
+        else:
+            return max(K - S_n, 0.0)
+
+    S_n = S ** n
+    sigma_adj = n * sigma
+
+    if sigma <= 0 or sigma_adj <= 0:
+        mu_adj = n * (r - q)
+        F_n = S_n * math.exp(mu_adj * T)
+        df = math.exp(-r * T)
+        if is_call:
+            return max(F_n - K, 0.0) * df
+        else:
+            return max(K - F_n, 0.0) * df
+
+    mu_adj = n * (r - q) + 0.5 * n * (n - 1.0) * sigma * sigma
+
+    sqrt_T = math.sqrt(T)
+    d1 = (math.log(S_n / K) + (mu_adj + 0.5 * sigma_adj * sigma_adj) * T) / (sigma_adj * sqrt_T)
+    d2 = d1 - sigma_adj * sqrt_T
+
+    df = math.exp(-r * T)
+
+    if is_call:
+        price = S_n * math.exp((mu_adj - r) * T) * norm_cdf(d1) - K * df * norm_cdf(d2)
+    else:
+        price = K * df * norm_cdf(-d2) - S_n * math.exp((mu_adj - r) * T) * norm_cdf(-d1)
+
+    return max(price, 0.0)
+
+
+@njit(fastmath=True, cache=True)
+def gap_option_price(S: float, K1: float, K2: float, T: float, r: float, q: float,
+                     sigma: float, is_call: bool) -> float:
+    """
+    Gap option price.
+
+    K1 = payment strike, K2 = trigger strike.
+    Call: (S_T - K1) if S_T > K2, else 0.
+    Put:  (K1 - S_T) if S_T < K2, else 0.
+
+    d1 = [ln(S/K2) + (r-q+0.5*sigma^2)*T] / (sigma*sqrt(T))
+    d2 = d1 - sigma*sqrt(T)
+    Call = S*exp(-qT)*N(d1) - K1*exp(-rT)*N(d2)
+
+    Note: Gap option value can be negative (when K1 > K2).
+
+    Parameters
+    ----------
+    S : float
+        Spot price
+    K1 : float
+        Payment strike
+    K2 : float
+        Trigger strike
+    T : float
+        Time to expiry
+    r : float
+        Risk-free rate
+    q : float
+        Continuous dividend yield
+    sigma : float
+        Volatility
+    is_call : bool
+        True for call, False for put
+
+    Returns
+    -------
+    float
+        Option price (can be negative)
+    """
+    if T <= 0:
+        if is_call:
+            return (S - K1) if S > K2 else 0.0
+        else:
+            return (K1 - S) if S < K2 else 0.0
+
+    if sigma <= 0:
+        F = S * math.exp((r - q) * T)
+        qd = math.exp(-q * T)
+        df = math.exp(-r * T)
+        if is_call:
+            return (S * qd - K1 * df) if F > K2 else 0.0
+        else:
+            return (K1 * df - S * qd) if F < K2 else 0.0
+
+    sqrt_T = math.sqrt(T)
+    d1 = (math.log(S / K2) + (r - q + 0.5 * sigma * sigma) * T) / (sigma * sqrt_T)
+    d2 = d1 - sigma * sqrt_T
+
+    qd = math.exp(-q * T)
+    df = math.exp(-r * T)
+
+    if is_call:
+        return S * qd * norm_cdf(d1) - K1 * df * norm_cdf(d2)
+    else:
+        return K1 * df * norm_cdf(-d2) - S * qd * norm_cdf(-d1)
+
+
+@njit(fastmath=True, cache=True)
 def _exotic_price(option_type: int, S: float, K: float, T: float, r: float, q: float,
                   sigma: float, is_call: bool, H: float, M_min: float, M_max: float,
-                  is_knock_in: bool, is_up: bool, rebate: float, payout: float) -> float:
-    """Dispatch to the correct exotic pricing kernel by option type."""
+                  is_knock_in: bool, is_up: bool, rebate: float, payout: float,
+                  extra1: float = 0.0) -> float:
+    """Dispatch to the correct exotic pricing kernel by option type.
+
+    extra1 encodes type-specific parameters:
+        CHOOSER: t_c (choice time)
+        POWER: n (power exponent)
+        GAP: K2 (trigger strike)
+    """
     if option_type == BARRIER:
         return barrier_option_price(S, K, H, T, r, q, sigma, is_call, is_knock_in, is_up, rebate)
     elif option_type == ASIAN_GEO:
@@ -524,22 +779,33 @@ def _exotic_price(option_type: int, S: float, K: float, T: float, r: float, q: f
         return digital_price(S, K, T, r, q, sigma, is_call, payout)
     elif option_type == LOOKBACK_FIXED:
         return lookback_fixed_price(S, K, M_min, M_max, T, r, q, sigma, is_call)
-    else:
+    elif option_type == LOOKBACK_FLOATING:
         return lookback_floating_price(S, M_min, M_max, T, r, q, sigma, is_call)
+    elif option_type == CHOOSER:
+        return chooser_price(S, K, T, extra1, r, q, sigma)
+    elif option_type == ASSET_OR_NOTHING:
+        return asset_or_nothing_price(S, K, T, r, q, sigma, is_call)
+    elif option_type == POWER:
+        return power_option_price(S, K, T, r, q, sigma, is_call, extra1)
+    elif option_type == GAP:
+        return gap_option_price(S, K, extra1, T, r, q, sigma, is_call)
+    else:
+        return 0.0
 
 
 @njit(fastmath=True, cache=True)
 def exotic_calculate_greeks(option_type: int, S: float, K: float, T: float, r: float,
                             q: float, sigma: float, is_call: bool, H: float,
                             M_min: float, M_max: float, is_knock_in: bool, is_up: bool,
-                            rebate: float, payout: float) -> tuple:
+                            rebate: float, payout: float,
+                            extra1: float = 0.0) -> tuple:
     """
     Calculate option Greeks using finite differences for all exotic types.
 
     Parameters
     ----------
     option_type : int
-        BARRIER, ASIAN_GEO, DIGITAL, LOOKBACK_FIXED, or LOOKBACK_FLOATING
+        Option type constant (BARRIER, ASIAN_GEO, DIGITAL, etc.)
     S, K, T, r, q, sigma : float
         Standard option parameters (q = continuous dividend yield)
     is_call : bool
@@ -552,6 +818,8 @@ def exotic_calculate_greeks(option_type: int, S: float, K: float, T: float, r: f
         Barrier type flags
     rebate, payout : float
         Rebate (barrier) or payout (digital)
+    extra1 : float
+        Type-specific parameter (t_c for chooser, n for power, K2 for gap)
 
     Returns
     -------
@@ -566,36 +834,36 @@ def exotic_calculate_greeks(option_type: int, S: float, K: float, T: float, r: f
 
     # Central price
     price = _exotic_price(option_type, S, K, T, r, q, sigma, is_call,
-                          H, M_min, M_max, is_knock_in, is_up, rebate, payout)
+                          H, M_min, M_max, is_knock_in, is_up, rebate, payout, extra1)
 
     # Delta & Gamma (central differences on S)
     p_up = _exotic_price(option_type, S + dS, K, T, r, q, sigma, is_call,
-                         H, M_min, M_max, is_knock_in, is_up, rebate, payout)
+                         H, M_min, M_max, is_knock_in, is_up, rebate, payout, extra1)
     p_dn = _exotic_price(option_type, S - dS, K, T, r, q, sigma, is_call,
-                         H, M_min, M_max, is_knock_in, is_up, rebate, payout)
+                         H, M_min, M_max, is_knock_in, is_up, rebate, payout, extra1)
     delta = (p_up - p_dn) / (2.0 * dS)
     gamma = (p_up - 2.0 * price + p_dn) / (dS * dS)
 
     # Vega (central difference on sigma)
     p_vol_up = _exotic_price(option_type, S, K, T, r, q, sigma + dV, is_call,
-                             H, M_min, M_max, is_knock_in, is_up, rebate, payout)
+                             H, M_min, M_max, is_knock_in, is_up, rebate, payout, extra1)
     p_vol_dn = _exotic_price(option_type, S, K, T, r, q, sigma - dV, is_call,
-                             H, M_min, M_max, is_knock_in, is_up, rebate, payout)
+                             H, M_min, M_max, is_knock_in, is_up, rebate, payout, extra1)
     vega = (p_vol_up - p_vol_dn) / (2.0 * dV) / 100.0
 
     # Theta (forward difference on T)
     if T > dT:
         p_t_dn = _exotic_price(option_type, S, K, T - dT, r, q, sigma, is_call,
-                               H, M_min, M_max, is_knock_in, is_up, rebate, payout)
+                               H, M_min, M_max, is_knock_in, is_up, rebate, payout, extra1)
         theta = (p_t_dn - price) / dT
     else:
         theta = 0.0
 
     # Rho (central difference on r)
     p_r_up = _exotic_price(option_type, S, K, T, r + dR, q, sigma, is_call,
-                           H, M_min, M_max, is_knock_in, is_up, rebate, payout)
+                           H, M_min, M_max, is_knock_in, is_up, rebate, payout, extra1)
     p_r_dn = _exotic_price(option_type, S, K, T, r - dR, q, sigma, is_call,
-                           H, M_min, M_max, is_knock_in, is_up, rebate, payout)
+                           H, M_min, M_max, is_knock_in, is_up, rebate, payout, extra1)
     rho = (p_r_up - p_r_dn) / (2.0 * dR) / 100.0
 
     return price, delta, gamma, vega, theta, rho
@@ -615,6 +883,10 @@ class ExoticAnalyticEngine(PricingEngine):
     - Asian Geometric Options via Kemna-Vorst 1990
     - Digital/Binary Options (cash-or-nothing)
     - Lookback Options (floating and fixed strike)
+    - Chooser Options via Rubinstein 1991
+    - Asset-or-Nothing Options
+    - Power Options
+    - Gap Options
 
     All kernels are Numba-compiled for performance.
 
@@ -658,6 +930,14 @@ class ExoticAnalyticEngine(PricingEngine):
             return True
         if isinstance(instrument, AsianOption):
             return instrument.average_type == "geometric"
+        if isinstance(instrument, ChooserOption):
+            return True
+        if isinstance(instrument, AssetOrNothingOption):
+            return True
+        if isinstance(instrument, PowerOption):
+            return True
+        if isinstance(instrument, GapOption):
+            return True
 
         return False
 
@@ -728,6 +1008,29 @@ class ExoticAnalyticEngine(PricingEngine):
                     S=S, M_min=S, M_max=S, T=T, r=r, q=q, sigma=sigma,
                     is_call=instrument.is_call,
                 )
+        elif isinstance(instrument, ChooserOption):
+            p = chooser_price(
+                S=S, K=instrument.strike, T=T,
+                t_c=instrument.choice_time,
+                r=r, q=q, sigma=sigma,
+            )
+        elif isinstance(instrument, AssetOrNothingOption):
+            p = asset_or_nothing_price(
+                S=S, K=instrument.strike, T=T, r=r, q=q, sigma=sigma,
+                is_call=instrument.is_call,
+            )
+        elif isinstance(instrument, PowerOption):
+            p = power_option_price(
+                S=S, K=instrument.strike, T=T, r=r, q=q, sigma=sigma,
+                is_call=instrument.is_call,
+                n=instrument.power,
+            )
+        elif isinstance(instrument, GapOption):
+            p = gap_option_price(
+                S=S, K1=instrument.strike, K2=instrument.trigger, T=T,
+                r=r, q=q, sigma=sigma,
+                is_call=instrument.is_call,
+            )
         else:
             raise ValueError(f"Unsupported instrument: {type(instrument).__name__}")
 
@@ -778,10 +1081,12 @@ class ExoticAnalyticEngine(PricingEngine):
         H: float
         M_min: float
         M_max: float
+        is_call_flag: bool
         is_knock_in: bool
         is_up: bool
         rebate_val: float
         payout_val: float
+        extra1_val: float = 0.0
 
         if isinstance(instrument, BarrierOption):
             opt_type = BARRIER
@@ -789,6 +1094,7 @@ class ExoticAnalyticEngine(PricingEngine):
             H = instrument.barrier
             M_min = 0.0
             M_max = 0.0
+            is_call_flag = instrument.is_call
             is_knock_in = instrument.is_knock_in
             is_up = instrument.is_up
             rebate_val = instrument.rebate
@@ -799,6 +1105,7 @@ class ExoticAnalyticEngine(PricingEngine):
             H = 0.0
             M_min = 0.0
             M_max = 0.0
+            is_call_flag = instrument.is_call
             is_knock_in = False
             is_up = True
             rebate_val = 0.0
@@ -809,6 +1116,7 @@ class ExoticAnalyticEngine(PricingEngine):
             H = 0.0
             M_min = 0.0
             M_max = 0.0
+            is_call_flag = instrument.is_call
             is_knock_in = False
             is_up = True
             rebate_val = 0.0
@@ -823,20 +1131,69 @@ class ExoticAnalyticEngine(PricingEngine):
             H = 0.0
             M_min = S
             M_max = S
+            is_call_flag = instrument.is_call
             is_knock_in = False
             is_up = True
             rebate_val = 0.0
             payout_val = 1.0
+        elif isinstance(instrument, ChooserOption):
+            opt_type = CHOOSER
+            K = instrument.strike
+            H = 0.0
+            M_min = 0.0
+            M_max = 0.0
+            is_call_flag = True  # not used by chooser kernel
+            is_knock_in = False
+            is_up = True
+            rebate_val = 0.0
+            payout_val = 1.0
+            extra1_val = instrument.choice_time
+        elif isinstance(instrument, AssetOrNothingOption):
+            opt_type = ASSET_OR_NOTHING
+            K = instrument.strike
+            H = 0.0
+            M_min = 0.0
+            M_max = 0.0
+            is_call_flag = instrument.is_call
+            is_knock_in = False
+            is_up = True
+            rebate_val = 0.0
+            payout_val = 1.0
+        elif isinstance(instrument, PowerOption):
+            opt_type = POWER
+            K = instrument.strike
+            H = 0.0
+            M_min = 0.0
+            M_max = 0.0
+            is_call_flag = instrument.is_call
+            is_knock_in = False
+            is_up = True
+            rebate_val = 0.0
+            payout_val = 1.0
+            extra1_val = instrument.power
+        elif isinstance(instrument, GapOption):
+            opt_type = GAP
+            K = instrument.strike
+            H = 0.0
+            M_min = 0.0
+            M_max = 0.0
+            is_call_flag = instrument.is_call
+            is_knock_in = False
+            is_up = True
+            rebate_val = 0.0
+            payout_val = 1.0
+            extra1_val = instrument.trigger
         else:
             raise ValueError(f"Unsupported instrument: {type(instrument).__name__}")
 
         price, delta, gamma, vega, theta, rho = exotic_calculate_greeks(
             option_type=opt_type,
             S=S, K=K, T=T, r=r, q=q, sigma=sigma,
-            is_call=instrument.is_call,
+            is_call=is_call_flag,
             H=H, M_min=M_min, M_max=M_max,
             is_knock_in=is_knock_in, is_up=is_up,
             rebate=rebate_val, payout=payout_val,
+            extra1=extra1_val,
         )
 
         return GreeksResult(

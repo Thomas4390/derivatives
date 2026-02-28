@@ -566,6 +566,440 @@ class BarrierOption(Instrument):
                      self._is_up, self._is_knock_in, self._rebate, self._exercise))
 
 
+class ChooserOption(Instrument):
+    """
+    Simple chooser option (Rubinstein 1991).
+
+    At choice time t_c, the holder chooses max(Call, Put).
+    Uses the identity: V = BS_call(S, K, T) + BS_put(S, K*exp(-(r-q)*(T-t_c)), t_c)
+
+    Immutable after construction.
+
+    Parameters
+    ----------
+    strike : float
+        Strike price (must be positive)
+    maturity : float
+        Time to expiration in years (must be positive)
+    choice_time : float
+        Time at which the holder chooses call or put (must be 0 < choice_time <= maturity)
+    exercise : ExerciseStyle
+        Exercise style (default EUROPEAN)
+
+    Examples
+    --------
+    chooser = ChooserOption(strike=100, maturity=1.0, choice_time=0.5)
+    """
+
+    __slots__ = ('_strike', '_maturity', '_choice_time', '_exercise', '_payoff')
+
+    def __init__(
+        self,
+        strike: float,
+        maturity: float,
+        choice_time: float,
+        exercise: ExerciseStyle = ExerciseStyle.EUROPEAN,
+    ):
+        if strike <= 0:
+            raise ValueError(f"Strike must be positive, got {strike}")
+        if maturity <= 0:
+            raise ValueError(f"Maturity must be positive, got {maturity}")
+        if choice_time <= 0 or choice_time > maturity:
+            raise ValueError(
+                f"Choice time must be in (0, maturity], got {choice_time} "
+                f"with maturity={maturity}"
+            )
+
+        object.__setattr__(self, '_strike', strike)
+        object.__setattr__(self, '_maturity', maturity)
+        object.__setattr__(self, '_choice_time', choice_time)
+        object.__setattr__(self, '_exercise', exercise)
+        object.__setattr__(self, '_payoff', None)  # analytical only
+
+    def __setattr__(self, name, value):
+        raise AttributeError("ChooserOption is immutable")
+
+    def __delattr__(self, name):
+        raise AttributeError("ChooserOption is immutable")
+
+    @property
+    def strike(self) -> float:
+        """Strike price."""
+        return self._strike
+
+    @property
+    def maturity(self) -> float:
+        """Time to expiration in years."""
+        return self._maturity
+
+    @property
+    def choice_time(self) -> float:
+        """Time at which the holder chooses call or put."""
+        return self._choice_time
+
+    @property
+    def payoff(self):
+        """The payoff function (None — analytical only)."""
+        return self._payoff
+
+    @property
+    def exercise_style(self) -> ExerciseStyle:
+        """Exercise style (Instrument interface)."""
+        return self._exercise
+
+    @property
+    def option_type(self) -> str:
+        """String representation of option type."""
+        return "chooser"
+
+    def __repr__(self) -> str:
+        return (
+            f"ChooserOption(K={self._strike}, T={self._maturity}, "
+            f"t_c={self._choice_time})"
+        )
+
+    def __eq__(self, other) -> bool:
+        if not isinstance(other, ChooserOption):
+            return NotImplemented
+        return (
+            self._strike == other._strike and
+            self._maturity == other._maturity and
+            self._choice_time == other._choice_time and
+            self._exercise == other._exercise
+        )
+
+    def __hash__(self) -> int:
+        return hash((self._strike, self._maturity, self._choice_time, self._exercise))
+
+
+class AssetOrNothingOption(Instrument):
+    """
+    Asset-or-nothing option.
+
+    Pays S_T if the option expires ITM (vs cash-or-nothing which pays a fixed amount).
+    Call: S_T if S_T > K, else 0. Put: S_T if S_T < K, else 0.
+
+    Immutable after construction.
+
+    Parameters
+    ----------
+    strike : float
+        Strike price (must be positive)
+    maturity : float
+        Time to expiration in years (must be positive)
+    is_call : bool
+        True for call, False for put
+    exercise : ExerciseStyle
+        Exercise style (default EUROPEAN)
+
+    Examples
+    --------
+    aon_call = AssetOrNothingOption(strike=100, maturity=0.5, is_call=True)
+    """
+
+    __slots__ = ('_strike', '_maturity', '_is_call', '_exercise', '_payoff')
+
+    def __init__(
+        self,
+        strike: float,
+        maturity: float,
+        is_call: bool,
+        exercise: ExerciseStyle = ExerciseStyle.EUROPEAN,
+    ):
+        if strike <= 0:
+            raise ValueError(f"Strike must be positive, got {strike}")
+        if maturity <= 0:
+            raise ValueError(f"Maturity must be positive, got {maturity}")
+
+        object.__setattr__(self, '_strike', strike)
+        object.__setattr__(self, '_maturity', maturity)
+        object.__setattr__(self, '_is_call', is_call)
+        object.__setattr__(self, '_exercise', exercise)
+        object.__setattr__(self, '_payoff', None)  # analytical only
+
+    def __setattr__(self, name, value):
+        raise AttributeError("AssetOrNothingOption is immutable")
+
+    def __delattr__(self, name):
+        raise AttributeError("AssetOrNothingOption is immutable")
+
+    @property
+    def strike(self) -> float:
+        """Strike price."""
+        return self._strike
+
+    @property
+    def maturity(self) -> float:
+        """Time to expiration in years."""
+        return self._maturity
+
+    @property
+    def is_call(self) -> bool:
+        """True for call, False for put."""
+        return self._is_call
+
+    @property
+    def payoff(self):
+        """The payoff function (None — analytical only)."""
+        return self._payoff
+
+    @property
+    def exercise_style(self) -> ExerciseStyle:
+        """Exercise style (Instrument interface)."""
+        return self._exercise
+
+    @property
+    def option_type(self) -> str:
+        """String representation of option type."""
+        return "asset_or_nothing_call" if self._is_call else "asset_or_nothing_put"
+
+    def __repr__(self) -> str:
+        opt_type = "Call" if self._is_call else "Put"
+        return f"AssetOrNothingOption({opt_type}, K={self._strike}, T={self._maturity})"
+
+    def __eq__(self, other) -> bool:
+        if not isinstance(other, AssetOrNothingOption):
+            return NotImplemented
+        return (
+            self._strike == other._strike and
+            self._maturity == other._maturity and
+            self._is_call == other._is_call and
+            self._exercise == other._exercise
+        )
+
+    def __hash__(self) -> int:
+        return hash((self._strike, self._maturity, self._is_call, self._exercise))
+
+
+class PowerOption(Instrument):
+    """
+    Power option.
+
+    Option on S^n with payoff max(S_T^n - K, 0) for calls.
+    Uses adjusted drift and volatility for pricing.
+
+    Immutable after construction.
+
+    Parameters
+    ----------
+    strike : float
+        Strike price (must be positive)
+    maturity : float
+        Time to expiration in years (must be positive)
+    is_call : bool
+        True for call, False for put
+    power : float
+        Power exponent n (must be positive)
+    exercise : ExerciseStyle
+        Exercise style (default EUROPEAN)
+
+    Examples
+    --------
+    power_call = PowerOption(strike=10000, maturity=0.5, is_call=True, power=2)
+    """
+
+    __slots__ = ('_strike', '_maturity', '_is_call', '_power', '_exercise', '_payoff')
+
+    def __init__(
+        self,
+        strike: float,
+        maturity: float,
+        is_call: bool,
+        power: float,
+        exercise: ExerciseStyle = ExerciseStyle.EUROPEAN,
+    ):
+        if strike <= 0:
+            raise ValueError(f"Strike must be positive, got {strike}")
+        if maturity <= 0:
+            raise ValueError(f"Maturity must be positive, got {maturity}")
+        if power <= 0:
+            raise ValueError(f"Power must be positive, got {power}")
+
+        object.__setattr__(self, '_strike', strike)
+        object.__setattr__(self, '_maturity', maturity)
+        object.__setattr__(self, '_is_call', is_call)
+        object.__setattr__(self, '_power', power)
+        object.__setattr__(self, '_exercise', exercise)
+        object.__setattr__(self, '_payoff', None)  # analytical only
+
+    def __setattr__(self, name, value):
+        raise AttributeError("PowerOption is immutable")
+
+    def __delattr__(self, name):
+        raise AttributeError("PowerOption is immutable")
+
+    @property
+    def strike(self) -> float:
+        """Strike price."""
+        return self._strike
+
+    @property
+    def maturity(self) -> float:
+        """Time to expiration in years."""
+        return self._maturity
+
+    @property
+    def is_call(self) -> bool:
+        """True for call, False for put."""
+        return self._is_call
+
+    @property
+    def power(self) -> float:
+        """Power exponent n."""
+        return self._power
+
+    @property
+    def payoff(self):
+        """The payoff function (None — analytical only)."""
+        return self._payoff
+
+    @property
+    def exercise_style(self) -> ExerciseStyle:
+        """Exercise style (Instrument interface)."""
+        return self._exercise
+
+    @property
+    def option_type(self) -> str:
+        """String representation of option type."""
+        return "power_call" if self._is_call else "power_put"
+
+    def __repr__(self) -> str:
+        opt_type = "Call" if self._is_call else "Put"
+        return (
+            f"PowerOption({opt_type}, K={self._strike}, n={self._power}, "
+            f"T={self._maturity})"
+        )
+
+    def __eq__(self, other) -> bool:
+        if not isinstance(other, PowerOption):
+            return NotImplemented
+        return (
+            self._strike == other._strike and
+            self._maturity == other._maturity and
+            self._is_call == other._is_call and
+            self._power == other._power and
+            self._exercise == other._exercise
+        )
+
+    def __hash__(self) -> int:
+        return hash((self._strike, self._maturity, self._is_call, self._power, self._exercise))
+
+
+class GapOption(Instrument):
+    """
+    Gap option.
+
+    Has separate trigger strike (K2) and payment strike (K1).
+    Call payoff: (S_T - K1) if S_T > K2, else 0.
+    Note: payoff can be negative when K1 > K2 and K2 < S_T < K1.
+
+    Immutable after construction.
+
+    Parameters
+    ----------
+    strike : float
+        Payment strike K1 (must be positive)
+    trigger : float
+        Trigger strike K2 (must be positive)
+    maturity : float
+        Time to expiration in years (must be positive)
+    is_call : bool
+        True for call, False for put
+    exercise : ExerciseStyle
+        Exercise style (default EUROPEAN)
+
+    Examples
+    --------
+    gap_call = GapOption(strike=105, trigger=100, maturity=0.5, is_call=True)
+    """
+
+    __slots__ = ('_strike', '_trigger', '_maturity', '_is_call', '_exercise', '_payoff')
+
+    def __init__(
+        self,
+        strike: float,
+        trigger: float,
+        maturity: float,
+        is_call: bool,
+        exercise: ExerciseStyle = ExerciseStyle.EUROPEAN,
+    ):
+        if strike <= 0:
+            raise ValueError(f"Strike must be positive, got {strike}")
+        if trigger <= 0:
+            raise ValueError(f"Trigger must be positive, got {trigger}")
+        if maturity <= 0:
+            raise ValueError(f"Maturity must be positive, got {maturity}")
+
+        object.__setattr__(self, '_strike', strike)
+        object.__setattr__(self, '_trigger', trigger)
+        object.__setattr__(self, '_maturity', maturity)
+        object.__setattr__(self, '_is_call', is_call)
+        object.__setattr__(self, '_exercise', exercise)
+        object.__setattr__(self, '_payoff', None)  # analytical only
+
+    def __setattr__(self, name, value):
+        raise AttributeError("GapOption is immutable")
+
+    def __delattr__(self, name):
+        raise AttributeError("GapOption is immutable")
+
+    @property
+    def strike(self) -> float:
+        """Payment strike K1."""
+        return self._strike
+
+    @property
+    def trigger(self) -> float:
+        """Trigger strike K2."""
+        return self._trigger
+
+    @property
+    def maturity(self) -> float:
+        """Time to expiration in years."""
+        return self._maturity
+
+    @property
+    def is_call(self) -> bool:
+        """True for call, False for put."""
+        return self._is_call
+
+    @property
+    def payoff(self):
+        """The payoff function (None — analytical only)."""
+        return self._payoff
+
+    @property
+    def exercise_style(self) -> ExerciseStyle:
+        """Exercise style (Instrument interface)."""
+        return self._exercise
+
+    @property
+    def option_type(self) -> str:
+        """String representation of option type."""
+        return "gap_call" if self._is_call else "gap_put"
+
+    def __repr__(self) -> str:
+        opt_type = "Call" if self._is_call else "Put"
+        return (
+            f"GapOption({opt_type}, K1={self._strike}, K2={self._trigger}, "
+            f"T={self._maturity})"
+        )
+
+    def __eq__(self, other) -> bool:
+        if not isinstance(other, GapOption):
+            return NotImplemented
+        return (
+            self._strike == other._strike and
+            self._trigger == other._trigger and
+            self._maturity == other._maturity and
+            self._is_call == other._is_call and
+            self._exercise == other._exercise
+        )
+
+    def __hash__(self) -> int:
+        return hash((self._strike, self._trigger, self._maturity, self._is_call, self._exercise))
+
+
 class LookbackOption(Instrument):
     """
     Lookback option (floating or fixed strike).
@@ -866,6 +1300,41 @@ def LookbackFixedCall(strike: float, maturity: float) -> LookbackOption:
 def LookbackFixedPut(strike: float, maturity: float) -> LookbackOption:
     """Create a fixed-strike lookback put option."""
     return LookbackOption(maturity=maturity, is_call=False, strike=strike, lookback_type="fixed")
+
+
+def Chooser(strike: float, maturity: float, choice_time: float) -> ChooserOption:
+    """Create a chooser option."""
+    return ChooserOption(strike=strike, maturity=maturity, choice_time=choice_time)
+
+
+def AssetOrNothingCall(strike: float, maturity: float) -> AssetOrNothingOption:
+    """Create an asset-or-nothing call option."""
+    return AssetOrNothingOption(strike=strike, maturity=maturity, is_call=True)
+
+
+def AssetOrNothingPut(strike: float, maturity: float) -> AssetOrNothingOption:
+    """Create an asset-or-nothing put option."""
+    return AssetOrNothingOption(strike=strike, maturity=maturity, is_call=False)
+
+
+def PowerCall(strike: float, maturity: float, power: float) -> PowerOption:
+    """Create a power call option."""
+    return PowerOption(strike=strike, maturity=maturity, is_call=True, power=power)
+
+
+def PowerPut(strike: float, maturity: float, power: float) -> PowerOption:
+    """Create a power put option."""
+    return PowerOption(strike=strike, maturity=maturity, is_call=False, power=power)
+
+
+def GapCall(strike: float, trigger: float, maturity: float) -> GapOption:
+    """Create a gap call option."""
+    return GapOption(strike=strike, trigger=trigger, maturity=maturity, is_call=True)
+
+
+def GapPut(strike: float, trigger: float, maturity: float) -> GapOption:
+    """Create a gap put option."""
+    return GapOption(strike=strike, trigger=trigger, maturity=maturity, is_call=False)
 
 
 if __name__ == "__main__":

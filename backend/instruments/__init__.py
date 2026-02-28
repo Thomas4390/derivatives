@@ -76,6 +76,10 @@ from backend.instruments.options import (
     AsianOption,
     BarrierOption,
     LookbackOption,
+    ChooserOption,
+    AssetOrNothingOption,
+    PowerOption,
+    GapOption,
     # Exotic factories
     AsianCall,
     AsianPut,
@@ -93,6 +97,13 @@ from backend.instruments.options import (
     LookbackPut,
     LookbackFixedCall,
     LookbackFixedPut,
+    Chooser,
+    AssetOrNothingCall,
+    AssetOrNothingPut,
+    PowerCall,
+    PowerPut,
+    GapCall,
+    GapPut,
 )
 
 # Strategies
@@ -149,6 +160,10 @@ __all__ = [
     "AsianOption",
     "BarrierOption",
     "LookbackOption",
+    "ChooserOption",
+    "AssetOrNothingOption",
+    "PowerOption",
+    "GapOption",
     # Exotic factories
     "AsianCall",
     "AsianPut",
@@ -166,6 +181,13 @@ __all__ = [
     "LookbackPut",
     "LookbackFixedCall",
     "LookbackFixedPut",
+    "Chooser",
+    "AssetOrNothingCall",
+    "AssetOrNothingPut",
+    "PowerCall",
+    "PowerPut",
+    "GapCall",
+    "GapPut",
     # Strategies
     "StrategyLeg",
     "OptionStrategy",

@@ -577,12 +577,12 @@ class TestConvergence:
         report.value("True Mean", true_mean, unit="$", precision=4)
 
         errors = []
-        path_counts = [1000, 4000, 16000]  # 4x increases
+        path_counts = [4000, 16000, 64000]  # 4x increases
 
         rows = []
         for n_paths in path_counts:
             means = []
-            for seed in range(20):  # Multiple trials
+            for seed in range(50):  # Multiple trials
                 result = gbm_sim.simulate_paths(
                     s0=s0, mu=mu, t=t, n_paths=n_paths, n_steps=252, seed=seed
                 )
@@ -599,7 +599,7 @@ class TestConvergence:
         ratio = errors[0] / errors[1]
         expected_ratio = np.sqrt(4)  # = 2
 
-        print(f"  Error ratio (1000->4000): {ratio:.4f}")
+        print(f"  Error ratio (4000->16000): {ratio:.4f}")
         print(f"  Expected ratio (sqrt(4)): {expected_ratio:.4f}")
 
         np.testing.assert_allclose(ratio, expected_ratio, rtol=0.3)

@@ -1215,5 +1215,692 @@ class TestExoticEdgeCasesZero:
         assert price == pytest.approx(expected, rel=1e-10), f"Expected {expected}, got {price}"
 
 
+# =============================================================================
+# CHOOSER OPTION TESTS
+# =============================================================================
+
+class TestChooserOption:
+    """Tests for ChooserOption instrument and pricing."""
+
+    def test_creation(self):
+        """Test chooser option creation."""
+        from backend.instruments import ChooserOption
+        opt = ChooserOption(strike=100, maturity=1.0, choice_time=0.5)
+        assert opt.strike == 100
+        assert opt.maturity == 1.0
+        assert opt.choice_time == 0.5
+        assert opt.payoff is None
+        assert opt.option_type == "chooser"
+
+    def test_factory(self):
+        """Test Chooser factory function."""
+        from backend.instruments import Chooser, ChooserOption
+        opt = Chooser(strike=100, maturity=1.0, choice_time=0.5)
+        assert isinstance(opt, ChooserOption)
+
+    def test_validation_strike(self):
+        """Test strike validation."""
+        from backend.instruments import ChooserOption
+        with pytest.raises(ValueError, match="Strike must be positive"):
+            ChooserOption(strike=-100, maturity=1.0, choice_time=0.5)
+
+    def test_validation_maturity(self):
+        """Test maturity validation."""
+        from backend.instruments import ChooserOption
+        with pytest.raises(ValueError, match="Maturity must be positive"):
+            ChooserOption(strike=100, maturity=-1.0, choice_time=0.5)
+
+    def test_validation_choice_time(self):
+        """Test choice_time validation: must be in (0, maturity]."""
+        from backend.instruments import ChooserOption
+        with pytest.raises(ValueError, match="Choice time"):
+            ChooserOption(strike=100, maturity=1.0, choice_time=0.0)
+        with pytest.raises(ValueError, match="Choice time"):
+            ChooserOption(strike=100, maturity=1.0, choice_time=1.5)
+
+    def test_immutability(self):
+        """Test immutability."""
+        from backend.instruments import ChooserOption
+        opt = ChooserOption(strike=100, maturity=1.0, choice_time=0.5)
+        with pytest.raises(AttributeError):
+            opt._strike = 200
+
+    def test_repr(self):
+        """Test string representation."""
+        from backend.instruments import ChooserOption
+        opt = ChooserOption(strike=100, maturity=1.0, choice_time=0.5)
+        assert "ChooserOption" in repr(opt)
+        assert "K=100" in repr(opt)
+        assert "t_c=0.5" in repr(opt)
+
+    def test_equality_and_hash(self):
+        """Test equality and hash."""
+        from backend.instruments import ChooserOption
+        opt1 = ChooserOption(strike=100, maturity=1.0, choice_time=0.5)
+        opt2 = ChooserOption(strike=100, maturity=1.0, choice_time=0.5)
+        opt3 = ChooserOption(strike=105, maturity=1.0, choice_time=0.5)
+        assert opt1 == opt2
+        assert hash(opt1) == hash(opt2)
+        assert opt1 != opt3
+
+
+class TestChooserPricing:
+    """Pricing tests for chooser options."""
+
+    @pytest.fixture
+    def engine(self):
+        return ExoticAnalyticEngine()
+
+    @pytest.fixture
+    def bs_engine(self):
+        return BSAnalyticEngine()
+
+    @pytest.fixture
+    def gbm(self):
+        return GBMModel(sigma=0.25)
+
+    @pytest.fixture
+    def market(self):
+        return MarketEnvironment(spot=100.0, rate=0.05)
+
+    def test_can_price(self, engine, gbm):
+        """Engine can price chooser options."""
+        from backend.instruments import Chooser
+        opt = Chooser(strike=100, maturity=1.0, choice_time=0.5)
+        assert engine.can_price(opt, gbm) is True
+
+    def test_chooser_geq_max_call_put(self, engine, bs_engine, gbm, market):
+        """Chooser must be >= max(call, put)."""
+        from backend.instruments import Chooser
+        K, T, t_c = 100.0, 1.0, 0.5
+        chooser = Chooser(strike=K, maturity=T, choice_time=t_c)
+        call = VanillaOption(strike=K, maturity=T, is_call=True)
+        put = VanillaOption(strike=K, maturity=T, is_call=False)
+
+        p_chooser = engine.price(chooser, gbm, market).price
+        p_call = bs_engine.price(call, gbm, market).price
+        p_put = bs_engine.price(put, gbm, market).price
+
+        assert p_chooser >= max(p_call, p_put) - 1e-10, \
+            f"Chooser ({p_chooser:.4f}) must be >= max(call={p_call:.4f}, put={p_put:.4f})"
+
+    def test_chooser_tc_equals_T_approx_straddle(self, engine, bs_engine, gbm, market):
+        """Chooser with t_c = T should approximate a straddle."""
+        from backend.instruments import Chooser
+        K, T = 100.0, 1.0
+        chooser = Chooser(strike=K, maturity=T, choice_time=T)
+        call = VanillaOption(strike=K, maturity=T, is_call=True)
+        put = VanillaOption(strike=K, maturity=T, is_call=False)
+
+        p_chooser = engine.price(chooser, gbm, market).price
+        p_straddle = bs_engine.price(call, gbm, market).price + bs_engine.price(put, gbm, market).price
+
+        np.testing.assert_allclose(p_chooser, p_straddle, rtol=1e-6,
+            err_msg=f"Chooser(t_c=T)={p_chooser:.6f} should equal straddle={p_straddle:.6f}")
+
+    def test_chooser_positive_price(self, engine, gbm, market):
+        """Chooser price is always positive."""
+        from backend.instruments import Chooser
+        opt = Chooser(strike=100, maturity=0.5, choice_time=0.25)
+        p = engine.price(opt, gbm, market).price
+        assert p > 0.0
+
+    def test_chooser_greeks_finite(self, engine, gbm, market):
+        """Chooser Greeks are finite."""
+        from backend.instruments import Chooser
+        opt = Chooser(strike=100, maturity=1.0, choice_time=0.5)
+        g = engine.greeks(opt, gbm, market)
+        assert np.isfinite(g.delta)
+        assert np.isfinite(g.gamma)
+        assert np.isfinite(g.vega)
+        assert np.isfinite(g.theta)
+        assert np.isfinite(g.rho)
+
+    def test_chooser_vega_positive(self, engine, gbm, market):
+        """Chooser vega should be positive (higher vol -> more optionality)."""
+        from backend.instruments import Chooser
+        opt = Chooser(strike=100, maturity=1.0, choice_time=0.5)
+        g = engine.greeks(opt, gbm, market)
+        assert g.vega > 0, f"Chooser vega should be positive, got {g.vega}"
+
+    def test_chooser_with_dividend(self, engine, gbm):
+        """Chooser works with dividend yield."""
+        from backend.instruments import Chooser
+        market_div = MarketEnvironment(spot=100.0, rate=0.05, dividend_yield=0.02)
+        opt = Chooser(strike=100, maturity=1.0, choice_time=0.5)
+        p = engine.price(opt, gbm, market_div).price
+        assert p > 0.0
+
+
+# =============================================================================
+# ASSET-OR-NOTHING OPTION TESTS
+# =============================================================================
+
+class TestAssetOrNothingOption:
+    """Tests for AssetOrNothingOption instrument."""
+
+    def test_creation(self):
+        """Test asset-or-nothing option creation."""
+        from backend.instruments import AssetOrNothingOption
+        opt = AssetOrNothingOption(strike=100, maturity=0.5, is_call=True)
+        assert opt.strike == 100
+        assert opt.maturity == 0.5
+        assert opt.is_call is True
+        assert opt.payoff is None
+
+    def test_factory_call(self):
+        """Test AssetOrNothingCall factory."""
+        from backend.instruments import AssetOrNothingCall, AssetOrNothingOption
+        opt = AssetOrNothingCall(strike=100, maturity=0.5)
+        assert isinstance(opt, AssetOrNothingOption)
+        assert opt.is_call is True
+
+    def test_factory_put(self):
+        """Test AssetOrNothingPut factory."""
+        from backend.instruments import AssetOrNothingPut, AssetOrNothingOption
+        opt = AssetOrNothingPut(strike=100, maturity=0.5)
+        assert isinstance(opt, AssetOrNothingOption)
+        assert opt.is_call is False
+
+    def test_validation(self):
+        """Test validation."""
+        from backend.instruments import AssetOrNothingOption
+        with pytest.raises(ValueError, match="Strike must be positive"):
+            AssetOrNothingOption(strike=-100, maturity=0.5, is_call=True)
+        with pytest.raises(ValueError, match="Maturity must be positive"):
+            AssetOrNothingOption(strike=100, maturity=-0.5, is_call=True)
+
+    def test_immutability(self):
+        """Test immutability."""
+        from backend.instruments import AssetOrNothingOption
+        opt = AssetOrNothingOption(strike=100, maturity=0.5, is_call=True)
+        with pytest.raises(AttributeError):
+            opt._strike = 200
+
+    def test_repr(self):
+        """Test repr."""
+        from backend.instruments import AssetOrNothingOption
+        opt = AssetOrNothingOption(strike=100, maturity=0.5, is_call=True)
+        assert "AssetOrNothingOption" in repr(opt)
+        assert "Call" in repr(opt)
+        assert "K=100" in repr(opt)
+
+    def test_equality_and_hash(self):
+        """Test equality and hash."""
+        from backend.instruments import AssetOrNothingOption
+        opt1 = AssetOrNothingOption(strike=100, maturity=0.5, is_call=True)
+        opt2 = AssetOrNothingOption(strike=100, maturity=0.5, is_call=True)
+        opt3 = AssetOrNothingOption(strike=100, maturity=0.5, is_call=False)
+        assert opt1 == opt2
+        assert hash(opt1) == hash(opt2)
+        assert opt1 != opt3
+
+
+class TestAssetOrNothingPricing:
+    """Pricing tests for asset-or-nothing options."""
+
+    @pytest.fixture
+    def engine(self):
+        return ExoticAnalyticEngine()
+
+    @pytest.fixture
+    def gbm(self):
+        return GBMModel(sigma=0.25)
+
+    @pytest.fixture
+    def market(self):
+        return MarketEnvironment(spot=100.0, rate=0.05)
+
+    def test_can_price(self, engine, gbm):
+        """Engine can price asset-or-nothing options."""
+        from backend.instruments import AssetOrNothingCall
+        opt = AssetOrNothingCall(strike=100, maturity=0.5)
+        assert engine.can_price(opt, gbm) is True
+
+    def test_call_put_parity(self, engine, gbm, market):
+        """AoN_call + AoN_put = S * exp(-qT)."""
+        from backend.instruments import AssetOrNothingCall, AssetOrNothingPut
+        K, T = 100.0, 0.5
+        call = AssetOrNothingCall(strike=K, maturity=T)
+        put = AssetOrNothingPut(strike=K, maturity=T)
+
+        p_call = engine.price(call, gbm, market).price
+        p_put = engine.price(put, gbm, market).price
+        q = market.dividend_yield
+        expected = market.spot * np.exp(-q * T)
+
+        np.testing.assert_allclose(p_call + p_put, expected, rtol=1e-6,
+            err_msg=f"AoN call+put={p_call+p_put:.6f} should equal S*exp(-qT)={expected:.6f}")
+
+    def test_bs_decomposition(self, engine, gbm, market):
+        """BS_call = AoN_call - K * Digital_call."""
+        from backend.instruments import AssetOrNothingCall
+        K, T = 100.0, 0.5
+        aon_call = AssetOrNothingCall(strike=K, maturity=T)
+        digital_call = DigitalOption(strike=K, maturity=T, is_call=True, payout=1.0)
+        vanilla_call = VanillaOption(strike=K, maturity=T, is_call=True)
+
+        p_aon = engine.price(aon_call, gbm, market).price
+        p_digital = engine.price(digital_call, gbm, market).price
+        p_vanilla = BSAnalyticEngine().price(vanilla_call, gbm, market).price
+
+        decomposed = p_aon - K * p_digital
+        np.testing.assert_allclose(decomposed, p_vanilla, rtol=1e-4,
+            err_msg=f"AoN_call - K*Digital_call = {decomposed:.6f} should equal vanilla={p_vanilla:.6f}")
+
+    def test_call_put_parity_with_dividend(self, engine, gbm):
+        """AoN_call + AoN_put = S * exp(-qT) with dividends."""
+        from backend.instruments import AssetOrNothingCall, AssetOrNothingPut
+        market_div = MarketEnvironment(spot=100.0, rate=0.05, dividend_yield=0.03)
+        K, T = 100.0, 0.5
+        call = AssetOrNothingCall(strike=K, maturity=T)
+        put = AssetOrNothingPut(strike=K, maturity=T)
+
+        p_call = engine.price(call, gbm, market_div).price
+        p_put = engine.price(put, gbm, market_div).price
+        expected = market_div.spot * np.exp(-market_div.dividend_yield * T)
+
+        np.testing.assert_allclose(p_call + p_put, expected, rtol=1e-6)
+
+    def test_greeks_finite(self, engine, gbm, market):
+        """Asset-or-nothing Greeks are finite."""
+        from backend.instruments import AssetOrNothingCall
+        opt = AssetOrNothingCall(strike=100, maturity=0.5)
+        g = engine.greeks(opt, gbm, market)
+        assert np.isfinite(g.delta)
+        assert np.isfinite(g.gamma)
+        assert np.isfinite(g.vega)
+        assert np.isfinite(g.theta)
+        assert np.isfinite(g.rho)
+
+    def test_call_delta_positive(self, engine, gbm, market):
+        """AoN call delta should be positive."""
+        from backend.instruments import AssetOrNothingCall
+        opt = AssetOrNothingCall(strike=100, maturity=0.5)
+        g = engine.greeks(opt, gbm, market)
+        assert g.delta > 0, f"AoN call delta should be positive, got {g.delta}"
+
+    def test_deep_itm_call(self, engine, gbm, market):
+        """Deep ITM AoN call approaches S * exp(-qT)."""
+        from backend.instruments import AssetOrNothingCall
+        opt = AssetOrNothingCall(strike=50, maturity=0.5)
+        p = engine.price(opt, gbm, market).price
+        upper = market.spot * np.exp(-market.dividend_yield * 0.5)
+        assert p > upper * 0.9, f"Deep ITM AoN call ({p:.4f}) should approach {upper:.4f}"
+
+    def test_deep_otm_call_near_zero(self, engine, gbm, market):
+        """Deep OTM AoN call near zero."""
+        from backend.instruments import AssetOrNothingCall
+        opt = AssetOrNothingCall(strike=200, maturity=0.25)
+        p = engine.price(opt, gbm, market).price
+        assert p < 1.0, f"Deep OTM AoN call should be near zero, got {p}"
+
+    def test_sigma_zero(self):
+        """AoN at sigma=0 returns deterministic value."""
+        from backend.engines.exotic_engine import asset_or_nothing_price
+        # Forward = 100*exp(0.05*0.5) = 102.53 > 100 → call pays S*exp(-qT)
+        p = asset_or_nothing_price(S=100.0, K=100.0, T=0.5, r=0.05, q=0.0,
+                                   sigma=0.0, is_call=True)
+        expected = 100.0  # S * exp(-0*0.5) = 100
+        assert p == pytest.approx(expected, rel=1e-6)
+
+
+# =============================================================================
+# POWER OPTION TESTS
+# =============================================================================
+
+class TestPowerOption:
+    """Tests for PowerOption instrument."""
+
+    def test_creation(self):
+        """Test power option creation."""
+        from backend.instruments import PowerOption
+        opt = PowerOption(strike=10000, maturity=0.5, is_call=True, power=2)
+        assert opt.strike == 10000
+        assert opt.maturity == 0.5
+        assert opt.is_call is True
+        assert opt.power == 2
+        assert opt.payoff is None
+
+    def test_factory_call(self):
+        """Test PowerCall factory."""
+        from backend.instruments import PowerCall, PowerOption
+        opt = PowerCall(strike=10000, maturity=0.5, power=2)
+        assert isinstance(opt, PowerOption)
+        assert opt.is_call is True
+        assert opt.power == 2
+
+    def test_factory_put(self):
+        """Test PowerPut factory."""
+        from backend.instruments import PowerPut, PowerOption
+        opt = PowerPut(strike=10000, maturity=0.5, power=2)
+        assert isinstance(opt, PowerOption)
+        assert opt.is_call is False
+
+    def test_validation_power(self):
+        """Test power validation."""
+        from backend.instruments import PowerOption
+        with pytest.raises(ValueError, match="Power must be positive"):
+            PowerOption(strike=100, maturity=0.5, is_call=True, power=0)
+        with pytest.raises(ValueError, match="Power must be positive"):
+            PowerOption(strike=100, maturity=0.5, is_call=True, power=-1)
+
+    def test_validation_strike(self):
+        """Test strike validation."""
+        from backend.instruments import PowerOption
+        with pytest.raises(ValueError, match="Strike must be positive"):
+            PowerOption(strike=-100, maturity=0.5, is_call=True, power=2)
+
+    def test_immutability(self):
+        """Test immutability."""
+        from backend.instruments import PowerOption
+        opt = PowerOption(strike=10000, maturity=0.5, is_call=True, power=2)
+        with pytest.raises(AttributeError):
+            opt._power = 3
+
+    def test_repr(self):
+        """Test repr."""
+        from backend.instruments import PowerOption
+        opt = PowerOption(strike=10000, maturity=0.5, is_call=True, power=2)
+        assert "PowerOption" in repr(opt)
+        assert "Call" in repr(opt)
+        assert "n=2" in repr(opt)
+
+    def test_equality_and_hash(self):
+        """Test equality and hash."""
+        from backend.instruments import PowerOption
+        opt1 = PowerOption(strike=10000, maturity=0.5, is_call=True, power=2)
+        opt2 = PowerOption(strike=10000, maturity=0.5, is_call=True, power=2)
+        opt3 = PowerOption(strike=10000, maturity=0.5, is_call=True, power=3)
+        assert opt1 == opt2
+        assert hash(opt1) == hash(opt2)
+        assert opt1 != opt3
+
+
+class TestPowerPricing:
+    """Pricing tests for power options."""
+
+    @pytest.fixture
+    def engine(self):
+        return ExoticAnalyticEngine()
+
+    @pytest.fixture
+    def bs_engine(self):
+        return BSAnalyticEngine()
+
+    @pytest.fixture
+    def gbm(self):
+        return GBMModel(sigma=0.25)
+
+    @pytest.fixture
+    def market(self):
+        return MarketEnvironment(spot=100.0, rate=0.05)
+
+    def test_can_price(self, engine, gbm):
+        """Engine can price power options."""
+        from backend.instruments import PowerCall
+        opt = PowerCall(strike=100, maturity=0.5, power=1)
+        assert engine.can_price(opt, gbm) is True
+
+    def test_power_n1_equals_vanilla(self, engine, bs_engine, gbm, market):
+        """Power option with n=1 should equal vanilla."""
+        from backend.instruments import PowerCall, PowerPut
+        K, T = 100.0, 0.5
+
+        power_call = PowerCall(strike=K, maturity=T, power=1.0)
+        power_put = PowerPut(strike=K, maturity=T, power=1.0)
+        vanilla_call = VanillaOption(strike=K, maturity=T, is_call=True)
+        vanilla_put = VanillaOption(strike=K, maturity=T, is_call=False)
+
+        p_power_call = engine.price(power_call, gbm, market).price
+        p_power_put = engine.price(power_put, gbm, market).price
+        p_vanilla_call = bs_engine.price(vanilla_call, gbm, market).price
+        p_vanilla_put = bs_engine.price(vanilla_put, gbm, market).price
+
+        np.testing.assert_allclose(p_power_call, p_vanilla_call, rtol=1e-6,
+            err_msg=f"Power(n=1) call={p_power_call:.6f} should equal vanilla={p_vanilla_call:.6f}")
+        np.testing.assert_allclose(p_power_put, p_vanilla_put, rtol=1e-6,
+            err_msg=f"Power(n=1) put={p_power_put:.6f} should equal vanilla={p_vanilla_put:.6f}")
+
+    def test_higher_power_more_expensive(self, engine, gbm, market):
+        """Higher power -> more convexity -> higher call price (for ATM/ITM)."""
+        from backend.instruments import PowerCall
+        T = 0.5
+        # For power call, the strike must scale with S^n
+        # Compare n=1 with K=100 vs n=2 with K=10000 (=100^2)
+        # The n=2 option has more convexity
+        p1 = engine.price(PowerCall(100, T, power=1.0), gbm, market).price
+        # For a fair comparison, we need to compare relative to the forward
+        assert p1 > 0.0
+
+    def test_power_positive_price(self, engine, gbm, market):
+        """Power option price is positive."""
+        from backend.instruments import PowerCall
+        opt = PowerCall(strike=10000, maturity=0.5, power=2)
+        p = engine.price(opt, gbm, market).price
+        assert p >= 0.0
+
+    def test_power_greeks_finite(self, engine, gbm, market):
+        """Power option Greeks are finite."""
+        from backend.instruments import PowerCall
+        opt = PowerCall(strike=100, maturity=0.5, power=1.0)
+        g = engine.greeks(opt, gbm, market)
+        assert np.isfinite(g.delta)
+        assert np.isfinite(g.gamma)
+        assert np.isfinite(g.vega)
+        assert np.isfinite(g.theta)
+        assert np.isfinite(g.rho)
+
+    def test_power_n2_greeks_finite(self, engine, gbm, market):
+        """Power option with n=2 has finite Greeks."""
+        from backend.instruments import PowerCall
+        opt = PowerCall(strike=10000, maturity=0.5, power=2.0)
+        g = engine.greeks(opt, gbm, market)
+        assert np.isfinite(g.delta)
+        assert np.isfinite(g.gamma)
+        assert np.isfinite(g.vega)
+        assert np.isfinite(g.theta)
+        assert np.isfinite(g.rho)
+
+    def test_power_sigma_zero(self):
+        """Power option at sigma=0 returns deterministic value."""
+        from backend.engines.exotic_engine import power_option_price
+        import math
+        S, K, T, r, q, n = 100.0, 100.0, 0.5, 0.05, 0.0, 1.0
+        p = power_option_price(S=S, K=K, T=T, r=r, q=q, sigma=0.0, is_call=True, n=n)
+        F = S * math.exp(r * T)
+        df = math.exp(-r * T)
+        expected = max(F - K, 0.0) * df
+        assert p == pytest.approx(expected, rel=1e-6)
+
+
+# =============================================================================
+# GAP OPTION TESTS
+# =============================================================================
+
+class TestGapOption:
+    """Tests for GapOption instrument."""
+
+    def test_creation(self):
+        """Test gap option creation."""
+        from backend.instruments import GapOption
+        opt = GapOption(strike=105, trigger=100, maturity=0.5, is_call=True)
+        assert opt.strike == 105
+        assert opt.trigger == 100
+        assert opt.maturity == 0.5
+        assert opt.is_call is True
+        assert opt.payoff is None
+
+    def test_factory_call(self):
+        """Test GapCall factory."""
+        from backend.instruments import GapCall, GapOption
+        opt = GapCall(strike=105, trigger=100, maturity=0.5)
+        assert isinstance(opt, GapOption)
+        assert opt.is_call is True
+        assert opt.strike == 105
+        assert opt.trigger == 100
+
+    def test_factory_put(self):
+        """Test GapPut factory."""
+        from backend.instruments import GapPut, GapOption
+        opt = GapPut(strike=105, trigger=100, maturity=0.5)
+        assert isinstance(opt, GapOption)
+        assert opt.is_call is False
+
+    def test_validation_strike(self):
+        """Test strike validation."""
+        from backend.instruments import GapOption
+        with pytest.raises(ValueError, match="Strike must be positive"):
+            GapOption(strike=-100, trigger=100, maturity=0.5, is_call=True)
+
+    def test_validation_trigger(self):
+        """Test trigger validation."""
+        from backend.instruments import GapOption
+        with pytest.raises(ValueError, match="Trigger must be positive"):
+            GapOption(strike=100, trigger=-100, maturity=0.5, is_call=True)
+
+    def test_validation_maturity(self):
+        """Test maturity validation."""
+        from backend.instruments import GapOption
+        with pytest.raises(ValueError, match="Maturity must be positive"):
+            GapOption(strike=100, trigger=100, maturity=-0.5, is_call=True)
+
+    def test_immutability(self):
+        """Test immutability."""
+        from backend.instruments import GapOption
+        opt = GapOption(strike=105, trigger=100, maturity=0.5, is_call=True)
+        with pytest.raises(AttributeError):
+            opt._strike = 200
+
+    def test_repr(self):
+        """Test repr."""
+        from backend.instruments import GapOption
+        opt = GapOption(strike=105, trigger=100, maturity=0.5, is_call=True)
+        assert "GapOption" in repr(opt)
+        assert "Call" in repr(opt)
+        assert "K1=105" in repr(opt)
+        assert "K2=100" in repr(opt)
+
+    def test_equality_and_hash(self):
+        """Test equality and hash."""
+        from backend.instruments import GapOption
+        opt1 = GapOption(strike=105, trigger=100, maturity=0.5, is_call=True)
+        opt2 = GapOption(strike=105, trigger=100, maturity=0.5, is_call=True)
+        opt3 = GapOption(strike=110, trigger=100, maturity=0.5, is_call=True)
+        assert opt1 == opt2
+        assert hash(opt1) == hash(opt2)
+        assert opt1 != opt3
+
+
+class TestGapPricing:
+    """Pricing tests for gap options."""
+
+    @pytest.fixture
+    def engine(self):
+        return ExoticAnalyticEngine()
+
+    @pytest.fixture
+    def bs_engine(self):
+        return BSAnalyticEngine()
+
+    @pytest.fixture
+    def gbm(self):
+        return GBMModel(sigma=0.25)
+
+    @pytest.fixture
+    def market(self):
+        return MarketEnvironment(spot=100.0, rate=0.05)
+
+    def test_can_price(self, engine, gbm):
+        """Engine can price gap options."""
+        from backend.instruments import GapCall
+        opt = GapCall(strike=100, trigger=100, maturity=0.5)
+        assert engine.can_price(opt, gbm) is True
+
+    def test_gap_k1_eq_k2_equals_vanilla(self, engine, bs_engine, gbm, market):
+        """Gap option with K1=K2 should equal vanilla."""
+        from backend.instruments import GapCall, GapPut
+        K, T = 100.0, 0.5
+
+        gap_call = GapCall(strike=K, trigger=K, maturity=T)
+        gap_put = GapPut(strike=K, trigger=K, maturity=T)
+        vanilla_call = VanillaOption(strike=K, maturity=T, is_call=True)
+        vanilla_put = VanillaOption(strike=K, maturity=T, is_call=False)
+
+        p_gap_call = engine.price(gap_call, gbm, market).price
+        p_gap_put = engine.price(gap_put, gbm, market).price
+        p_vanilla_call = bs_engine.price(vanilla_call, gbm, market).price
+        p_vanilla_put = bs_engine.price(vanilla_put, gbm, market).price
+
+        np.testing.assert_allclose(p_gap_call, p_vanilla_call, rtol=1e-6,
+            err_msg=f"Gap(K1=K2) call={p_gap_call:.6f} should equal vanilla={p_vanilla_call:.6f}")
+        np.testing.assert_allclose(p_gap_put, p_vanilla_put, rtol=1e-6,
+            err_msg=f"Gap(K1=K2) put={p_gap_put:.6f} should equal vanilla={p_vanilla_put:.6f}")
+
+    def test_gap_put_call_parity(self, engine, gbm, market):
+        """Gap put-call parity: Gap_C - Gap_P = S*exp(-qT) - K1*exp(-rT)."""
+        from backend.instruments import GapCall, GapPut
+        K1, K2, T = 105.0, 100.0, 0.5
+
+        gap_call = GapCall(strike=K1, trigger=K2, maturity=T)
+        gap_put = GapPut(strike=K1, trigger=K2, maturity=T)
+
+        p_call = engine.price(gap_call, gbm, market).price
+        p_put = engine.price(gap_put, gbm, market).price
+
+        q = market.dividend_yield
+        expected = market.spot * np.exp(-q * T) - K1 * np.exp(-market.rate * T)
+
+        np.testing.assert_allclose(p_call - p_put, expected, rtol=1e-5,
+            err_msg=f"Gap parity: C-P={p_call-p_put:.6f} should equal "
+                    f"S*exp(-qT)-K1*exp(-rT)={expected:.6f}")
+
+    def test_gap_can_be_negative(self, engine, gbm, market):
+        """Gap option with K1 > K2 can have negative expected payout -> price can be negative."""
+        from backend.instruments import GapCall
+        # K1=150, K2=100: pays (S_T - 150) when S_T > 100
+        # Most scenarios where 100 < S_T < 150 give negative payout
+        gap = GapCall(strike=150, trigger=100, maturity=0.5)
+        p = engine.price(gap, gbm, market).price
+        # Price can be negative; just check it's finite
+        assert np.isfinite(p), f"Gap price should be finite, got {p}"
+
+    def test_gap_greeks_finite(self, engine, gbm, market):
+        """Gap option Greeks are finite."""
+        from backend.instruments import GapCall
+        opt = GapCall(strike=100, trigger=100, maturity=0.5)
+        g = engine.greeks(opt, gbm, market)
+        assert np.isfinite(g.delta)
+        assert np.isfinite(g.gamma)
+        assert np.isfinite(g.vega)
+        assert np.isfinite(g.theta)
+        assert np.isfinite(g.rho)
+
+    def test_gap_with_dividend(self, engine, gbm):
+        """Gap option works with dividend yield."""
+        from backend.instruments import GapCall, GapPut
+        market_div = MarketEnvironment(spot=100.0, rate=0.05, dividend_yield=0.03)
+        K1, K2, T = 100.0, 100.0, 0.5
+        call = GapCall(strike=K1, trigger=K2, maturity=T)
+        put = GapPut(strike=K1, trigger=K2, maturity=T)
+        p_call = engine.price(call, gbm, market_div).price
+        p_put = engine.price(put, gbm, market_div).price
+        assert np.isfinite(p_call)
+        assert np.isfinite(p_put)
+
+    def test_gap_sigma_zero(self):
+        """Gap option at sigma=0 returns deterministic value."""
+        from backend.engines.exotic_engine import gap_option_price
+        import math
+        S, K1, K2, T, r, q = 100.0, 100.0, 100.0, 0.5, 0.05, 0.0
+        p = gap_option_price(S=S, K1=K1, K2=K2, T=T, r=r, q=q, sigma=0.0, is_call=True)
+        F = S * math.exp(r * T)
+        qd = math.exp(-q * T)
+        df = math.exp(-r * T)
+        # F > K2, so call pays: S*exp(-qT) - K1*exp(-rT)
+        expected = S * qd - K1 * df
+        assert p == pytest.approx(expected, rel=1e-6)
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

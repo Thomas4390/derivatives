@@ -908,6 +908,10 @@ class ExoticAnalyticEngine(PricingEngine):
 | `AsianOption` (geometric only) | Kemna-Vorst 1990 reduced volatility | Kemna-Vorst 1990 |
 | `DigitalOption` | Cash-or-nothing closed form | Black-Scholes |
 | `LookbackOption` | Floating & fixed strike | Conze-Viswanathan 1991 |
+| `ChooserOption` | Simple chooser (choose call or put at t_c) | Rubinstein 1991 |
+| `AssetOrNothingOption` | Pays S_T if ITM | Black-Scholes |
+| `PowerOption` | Option on S^n with adjusted drift/vol | Esser 2003 |
+| `GapOption` | Separate trigger (K2) and payment (K1) strikes | Black-Scholes |
 
 > **Note**: `ExoticAnalyticEngine` is not registered in `EngineRegistry`. Instantiate it directly.
 
@@ -916,6 +920,12 @@ class ExoticAnalyticEngine(PricingEngine):
 **Key parity relationships** (useful for validation):
 - Knock-in + knock-out = vanilla: `barrier_in + barrier_out == vanilla_price`
 - Digital parity: `digital_call + digital_put = exp(-r*T)`
+- Asset-or-nothing parity: `AoN_call + AoN_put = S * exp(-q*T)`
+- BS decomposition: `BS_call = AoN_call - K * Digital_call`
+- Chooser at t_c=T equals straddle (call + put)
+- Gap with K1=K2 equals vanilla
+- Gap put-call parity: `Gap_C - Gap_P = S*exp(-q*T) - K1*exp(-r*T)`
+- Power with n=1 equals vanilla
 
 ### Example: Exotic Engine
 
@@ -1194,6 +1204,13 @@ The instruments module defines tradeable contracts.
 | `LookbackPut(maturity)` | Floating lookback put (payoff: `S_max - S_T`) |
 | `LookbackFixedCall(strike, maturity)` | Fixed strike lookback call (payoff: `max(S_max - K, 0)`) |
 | `LookbackFixedPut(strike, maturity)` | Fixed strike lookback put (payoff: `max(K - S_min, 0)`) |
+| `Chooser(strike, maturity, choice_time)` | Chooser option (choose call or put at t_c) |
+| `AssetOrNothingCall(strike, maturity)` | Asset-or-nothing call (pays S_T if S_T > K) |
+| `AssetOrNothingPut(strike, maturity)` | Asset-or-nothing put (pays S_T if S_T < K) |
+| `PowerCall(strike, maturity, power)` | Power call (payoff: `max(S^n - K, 0)`) |
+| `PowerPut(strike, maturity, power)` | Power put (payoff: `max(K - S^n, 0)`) |
+| `GapCall(strike, trigger, maturity)` | Gap call (pays S_T - K1 when S_T > K2) |
+| `GapPut(strike, trigger, maturity)` | Gap put (pays K1 - S_T when S_T < K2) |
 
 ### Payoffs
 
