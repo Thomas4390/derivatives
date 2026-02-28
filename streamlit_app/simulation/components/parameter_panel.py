@@ -590,7 +590,7 @@ def render_simulation_settings(key_prefix: str = "sim") -> dict[str, Any]:
 
 def render_option_parameters(key_prefix: str = "option") -> dict[str, Any]:
     """
-    Render option parameters for pricing comparison with option_pricer style.
+    Render option parameters for pricing comparison with options_greeks style.
 
     Returns:
         Dictionary of option parameters
@@ -606,7 +606,7 @@ def render_option_parameters(key_prefix: str = "option") -> dict[str, Any]:
     type_badge_color = "#047857" if is_call_display else "#b91c1c"
     type_label = "CALL" if is_call_display else "PUT"
 
-    # Styled header like option_pricer
+    # Styled header like options_greeks
     st.markdown(f"""
     <div style="background: {bg_gradient}; border: 1px solid {border_color}40; border-left: 4px solid {border_color}; border-radius: 8px; padding: 0.75rem; margin-bottom: 0.625rem;">
         <div style="display: flex; justify-content: space-between; align-items: center;">

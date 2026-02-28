@@ -32,8 +32,8 @@ pip install -r requirements.txt
 
 Each application can be launched independently:
 ```bash
-# Option Pricer
-streamlit run streamlit_apps/option_pricer/app.py
+# Options & Greeks
+streamlit run streamlit_app/options_greeks/app.py
 
 # Volatility Surface
 streamlit run streamlit_apps/volatility_surface/app.py

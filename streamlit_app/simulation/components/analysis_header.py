@@ -13,7 +13,7 @@ from config.styles import stale_results_warning_html, strategy_collapsed_html
 from services.state_manager import are_results_stale
 
 # Import strategy display names
-from streamlit_app.option_pricer.config.constants import STRATEGY_DISPLAY_NAMES
+from streamlit_app.options_greeks.config.constants import STRATEGY_DISPLAY_NAMES
 
 
 def render_analysis_header(
@@ -120,7 +120,7 @@ def render_strategy_summary_compact(
         return
 
     # Calculate net cost
-    from streamlit_app.option_pricer.config.constants import CONTRACT_MULTIPLIER
+    from streamlit_app.options_greeks.config.constants import CONTRACT_MULTIPLIER
     total_net_cost = 0.0
 
     # Stock cost

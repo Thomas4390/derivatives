@@ -1,33 +1,33 @@
 """
 Strategy Builder for Monte Carlo P&L Simulation.
 
-Provides the same strategy builder interface as option_pricer,
+Provides the same strategy builder interface as options_greeks,
 with editable legs and full customization support.
 """
 
 import importlib.util
 from dataclasses import dataclass
 
-# Import strategy definitions from option_pricer using importlib
+# Import strategy definitions from options_greeks using importlib
 from pathlib import Path
 
 import numpy as np
 import streamlit as st
 
-# Import option_pricer constants explicitly from file path
-_option_pricer_path = Path(__file__).parent.parent.parent / "option_pricer"
-_constants_path = _option_pricer_path / "config" / "constants.py"
+# Import options_greeks constants explicitly from file path
+_options_greeks_path = Path(__file__).parent.parent.parent / "options_greeks"
+_constants_path = _options_greeks_path / "config" / "constants.py"
 
-# Load option_pricer constants module with explicit path
-_spec = importlib.util.spec_from_file_location("option_pricer_constants", _constants_path)
-_option_pricer_constants = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(_option_pricer_constants)
+# Load options_greeks constants module with explicit path
+_spec = importlib.util.spec_from_file_location("options_greeks_constants", _constants_path)
+_options_greeks_constants = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_options_greeks_constants)
 
-STRATEGY_LEGS = _option_pricer_constants.STRATEGY_LEGS
-STRATEGY_DISPLAY_NAMES = _option_pricer_constants.STRATEGY_DISPLAY_NAMES
-STRATEGIES_WITH_STOCK = _option_pricer_constants.STRATEGIES_WITH_STOCK
-STRATEGY_STOCK_POSITION = _option_pricer_constants.STRATEGY_STOCK_POSITION
-CONTRACT_MULTIPLIER = _option_pricer_constants.CONTRACT_MULTIPLIER
+STRATEGY_LEGS = _options_greeks_constants.STRATEGY_LEGS
+STRATEGY_DISPLAY_NAMES = _options_greeks_constants.STRATEGY_DISPLAY_NAMES
+STRATEGIES_WITH_STOCK = _options_greeks_constants.STRATEGIES_WITH_STOCK
+STRATEGY_STOCK_POSITION = _options_greeks_constants.STRATEGY_STOCK_POSITION
+CONTRACT_MULTIPLIER = _options_greeks_constants.CONTRACT_MULTIPLIER
 
 
 # =============================================================================
@@ -65,9 +65,9 @@ def render_strategy_builder(
 ) -> tuple[list[SimulationOptionPosition], SimulationStockPosition | None]:
     """
     Render the strategy builder component for P&L simulation.
-    Matches the option_pricer interface with editable legs.
+    Matches the options_greeks interface with editable legs.
     """
-    # Strategy groups for dropdown with emojis (matching option_pricer exactly)
+    # Strategy groups for dropdown with emojis (matching options_greeks exactly)
     strategy_groups = {
         "── Custom ──": None,
         "custom": "🎨  Custom Strategy",
