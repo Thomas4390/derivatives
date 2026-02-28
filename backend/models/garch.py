@@ -17,16 +17,16 @@ Created: 2025
 
 from abc import abstractmethod
 from dataclasses import dataclass
-from typing import List, Dict, Any
+from typing import Any
+
 import numpy as np
 
 from backend.core.interfaces import Model
 from backend.core.result_types import PricingCapability
-from backend.simulation.models.garch import GARCHSimulator
-from backend.simulation.models.ngarch import NGARCHSimulator
-from backend.simulation.models.gjr_garch import GJRGARCHSimulator
 from backend.engines.monte_carlo.garch_pricer import GARCHMCPricer, GARCHType
-
+from backend.simulation.models.garch import GARCHSimulator
+from backend.simulation.models.gjr_garch import GJRGARCHSimulator
+from backend.simulation.models.ngarch import NGARCHSimulator
 
 # =============================================================================
 # BASE GARCH MODEL
@@ -75,7 +75,7 @@ class BaseGARCHModel(Model):
             raise ValueError(f"beta must be non-negative, got {self.beta}")
 
     @property
-    def supported_engines(self) -> List[PricingCapability]:
+    def supported_engines(self) -> list[PricingCapability]:
         """GARCH models only support Monte Carlo pricing."""
         return [PricingCapability.MONTE_CARLO]
 
@@ -147,7 +147,7 @@ class GARCHModel(BaseGARCHModel):
         """Human-readable model name."""
         return "GARCH(1,1)"
 
-    def get_parameters(self) -> Dict[str, Any]:
+    def get_parameters(self) -> dict[str, Any]:
         """Return model parameters as dictionary."""
         return {
             "sigma0": self.sigma0,
@@ -258,7 +258,7 @@ class NGARCHModel(BaseGARCHModel):
         """Human-readable model name."""
         return "NGARCH (Nonlinear Asymmetric)"
 
-    def get_parameters(self) -> Dict[str, Any]:
+    def get_parameters(self) -> dict[str, Any]:
         """Return model parameters as dictionary."""
         return {
             "sigma0": self.sigma0,
@@ -358,7 +358,7 @@ class GJRGARCHModel(BaseGARCHModel):
         """Human-readable model name."""
         return "GJR-GARCH"
 
-    def get_parameters(self) -> Dict[str, Any]:
+    def get_parameters(self) -> dict[str, Any]:
         """Return model parameters as dictionary."""
         return {
             "sigma0": self.sigma0,

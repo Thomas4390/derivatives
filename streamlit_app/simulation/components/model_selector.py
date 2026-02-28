@@ -7,24 +7,24 @@ Provides:
 - Condition warnings
 """
 
-import streamlit as st
-from typing import Optional, Callable
+from collections.abc import Callable
 
+import streamlit as st
 from config.model_registry import (
-    MODEL_REGISTRY,
     MODEL_DISPLAY_ORDER,
+    MODEL_REGISTRY,
     get_model,
 )
 from utils.model_helpers import (
+    get_feature_badges,
     get_model_icon,
     get_volatility_type,
-    get_feature_badges,
 )
 
 
 def render_model_selector(
     key: str = "model_selector",
-    on_change: Optional[Callable] = None
+    on_change: Callable | None = None
 ) -> str:
     """
     Render model selection interface.

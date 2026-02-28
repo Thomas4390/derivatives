@@ -8,31 +8,30 @@ Author: Thomas Vaudescal
 """
 
 import math
-import numpy as np
-import streamlit as st
-import plotly.graph_objects as go
 
+import numpy as np
+import plotly.graph_objects as go
+import streamlit as st
+from config.chart_theme import (
+    AXIS_DEFAULTS,
+    CHART_COLORS,
+    SLIDER_DEFAULTS,
+    get_layout_config,
+)
 from config.constants import (
-    EXOTIC_TYPE_NAMES,
-    EXOTIC_DESCRIPTIONS,
     DEFAULT_DTE,
     DEFAULT_IV,
     DTE_RANGE,
+    EXOTIC_DESCRIPTIONS,
+    EXOTIC_TYPE_NAMES,
     IV_RANGE,
     SPOT_RANGE_FACTOR,
     SPOT_RANGE_POINTS,
-)
-from config.chart_theme import (
-    CHART_COLORS,
-    AXIS_DEFAULTS,
-    SLIDER_DEFAULTS,
-    get_layout_config,
 )
 from services.exotic_pricing_adapter import (
     calculate_exotic_greeks_surface,
     calculate_vanilla_greeks_surface,
 )
-
 
 # =============================================================================
 # CHART HELPER

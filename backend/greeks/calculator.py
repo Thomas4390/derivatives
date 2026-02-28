@@ -11,15 +11,15 @@ Author: Thomas
 Created: 2025
 """
 
-from typing import NamedTuple, Union
+from typing import NamedTuple
+
 import numpy as np
 
-from backend.core.interfaces import Model, PricingEngine, Instrument
+from backend.core.interfaces import Instrument, Model, PricingEngine
 from backend.core.market import MarketEnvironment
 from backend.core.result_types import GreeksResult
-from backend.utils.math import DAYS_PER_YEAR
 from backend.greeks._instrument_utils import create_decayed_instrument
-
+from backend.utils.math import DAYS_PER_YEAR
 
 # Valid Greek names for validation
 VALID_GREEKS = frozenset({
@@ -105,7 +105,7 @@ class GreeksCalculator:
         model: Model,
         market: MarketEnvironment,
         include_higher_order: bool = True
-    ) -> Union[GreeksResult, AllGreeksResult]:
+    ) -> GreeksResult | AllGreeksResult:
         """
         Calculate Greeks for an instrument.
 
@@ -133,14 +133,13 @@ class GreeksCalculator:
                 engine, instrument, model, market, include_higher_order
             )
         # Check if we can use analytic BS Greeks
-        elif self.prefer_analytic and self._can_use_analytic(engine, instrument, model):
+        if self.prefer_analytic and self._can_use_analytic(engine, instrument, model):
             return self._analytic_greeks(
                 instrument, model, market, include_higher_order
             )
-        else:
-            return self._numerical_greeks(
-                engine, instrument, model, market, include_higher_order
-            )
+        return self._numerical_greeks(
+            engine, instrument, model, market, include_higher_order
+        )
 
     def _can_use_engine_greeks(self, engine: PricingEngine, instrument: Instrument, model: Model) -> bool:
         """Check if the engine provides its own Greeks method for this instrument."""
@@ -154,8 +153,8 @@ class GreeksCalculator:
     def _can_use_analytic(self, engine: PricingEngine, instrument: Instrument, model: Model) -> bool:
         """Check if analytic BS Greeks are available."""
         from backend.engines import BSAnalyticEngine
-        from backend.models.gbm import GBMModel
         from backend.instruments.options import VanillaOption
+        from backend.models.gbm import GBMModel
 
         return (
             isinstance(engine, BSAnalyticEngine) and
@@ -170,7 +169,7 @@ class GreeksCalculator:
         model: Model,
         market: MarketEnvironment,
         include_higher_order: bool
-    ) -> Union[GreeksResult, AllGreeksResult]:
+    ) -> GreeksResult | AllGreeksResult:
         """
         Calculate Greeks using the engine's own greeks() method.
 
@@ -200,8 +199,7 @@ class GreeksCalculator:
                 color=higher_order['color'],
                 ultima=higher_order['ultima'],
             )
-        else:
-            return first_order
+        return first_order
 
     def _analytic_greeks(
         self,
@@ -209,7 +207,7 @@ class GreeksCalculator:
         model: Model,
         market: MarketEnvironment,
         include_higher_order: bool
-    ) -> Union[GreeksResult, AllGreeksResult]:
+    ) -> GreeksResult | AllGreeksResult:
         """Calculate analytic Black-Scholes Greeks."""
         from backend.greeks.analytic import bs_all_greeks
 
@@ -250,14 +248,13 @@ class GreeksCalculator:
                 color=greeks[12],
                 ultima=greeks[13]
             )
-        else:
-            return GreeksResult(
-                delta=greeks[1],
-                gamma=greeks[2],
-                vega=greeks[3],
-                theta=greeks[4],
-                rho=greeks[5]
-            )
+        return GreeksResult(
+            delta=greeks[1],
+            gamma=greeks[2],
+            vega=greeks[3],
+            theta=greeks[4],
+            rho=greeks[5]
+        )
 
     def _numerical_greeks(
         self,
@@ -266,9 +263,9 @@ class GreeksCalculator:
         model: Model,
         market: MarketEnvironment,
         include_higher_order: bool
-    ) -> Union[GreeksResult, AllGreeksResult]:
+    ) -> GreeksResult | AllGreeksResult:
         """Calculate numerical Greeks via finite differences."""
-        from backend.greeks.numerical import ModelNumericalGreeks, GreeksBumpConfig
+        from backend.greeks.numerical import GreeksBumpConfig, ModelNumericalGreeks
 
         config = GreeksBumpConfig(
             spot_bump=self.spot_bump,
@@ -307,14 +304,13 @@ class GreeksCalculator:
                 color=higher_order['color'],
                 ultima=higher_order['ultima']
             )
-        else:
-            return GreeksResult(
-                delta=num_greeks.delta,
-                gamma=num_greeks.gamma,
-                vega=num_greeks.vega,
-                theta=num_greeks.theta,
-                rho=num_greeks.rho
-            )
+        return GreeksResult(
+            delta=num_greeks.delta,
+            gamma=num_greeks.gamma,
+            vega=num_greeks.vega,
+            theta=num_greeks.theta,
+            rho=num_greeks.rho
+        )
 
     def _numerical_higher_order_greeks(
         self,
@@ -571,7 +567,7 @@ def calculate_greeks(
     model: Model,
     market: MarketEnvironment,
     include_higher_order: bool = False
-) -> Union[GreeksResult, AllGreeksResult]:
+) -> GreeksResult | AllGreeksResult:
     """
     Calculate Greeks for an instrument.
 
@@ -608,10 +604,10 @@ if __name__ == "__main__":
     print("Greeks Calculator Smoke Test")
     print("=" * 50)
 
+    from backend.core.market import MarketEnvironment
+    from backend.engines import BSAnalyticEngine
     from backend.instruments.options import VanillaOption
     from backend.models.gbm import GBMModel
-    from backend.engines import BSAnalyticEngine
-    from backend.core.market import MarketEnvironment
 
     # Create components
     option = VanillaOption(strike=100.0, maturity=0.25, is_call=True)

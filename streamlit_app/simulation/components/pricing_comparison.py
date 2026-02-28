@@ -7,10 +7,9 @@ Provides:
 - Convergence visualization
 """
 
-import streamlit as st
-import numpy as np
-from typing import Optional
 
+import numpy as np
+import streamlit as st
 from services.pricing_service import (
     PricingComparison,
     get_available_pricing_methods,
@@ -231,8 +230,8 @@ def render_strike_comparison(
     strikes: np.ndarray,
     mc_prices: np.ndarray,
     mc_errors: np.ndarray,
-    analytical_prices: Optional[np.ndarray] = None,
-    fft_prices: Optional[np.ndarray] = None,
+    analytical_prices: np.ndarray | None = None,
+    fft_prices: np.ndarray | None = None,
     spot: float = 100.0
 ):
     """

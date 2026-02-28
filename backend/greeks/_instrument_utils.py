@@ -5,12 +5,11 @@ Provides helpers to create modified copies of immutable instruments
 (e.g., with bumped maturity for theta/charm/color/veta calculations).
 """
 
-from typing import Optional
 
 from backend.core.interfaces import Instrument
 
 
-def create_decayed_instrument(instrument: Instrument, new_maturity: float) -> Optional[Instrument]:
+def create_decayed_instrument(instrument: Instrument, new_maturity: float) -> Instrument | None:
     """
     Create a copy of the instrument with a different maturity.
 
@@ -30,7 +29,11 @@ def create_decayed_instrument(instrument: Instrument, new_maturity: float) -> Op
         New instrument with modified maturity, or None if unsupported
     """
     from backend.instruments.options import (
-        VanillaOption, BarrierOption, AsianOption, DigitalOption, LookbackOption
+        AsianOption,
+        BarrierOption,
+        DigitalOption,
+        LookbackOption,
+        VanillaOption,
     )
 
     if isinstance(instrument, BarrierOption):
@@ -44,7 +47,7 @@ def create_decayed_instrument(instrument: Instrument, new_maturity: float) -> Op
             rebate=instrument.rebate,
             exercise=instrument.exercise_style,
         )
-    elif isinstance(instrument, AsianOption):
+    if isinstance(instrument, AsianOption):
         return AsianOption(
             strike=instrument.strike,
             maturity=new_maturity,
@@ -52,7 +55,7 @@ def create_decayed_instrument(instrument: Instrument, new_maturity: float) -> Op
             average_type=instrument.average_type,
             exercise=instrument.exercise_style,
         )
-    elif isinstance(instrument, DigitalOption):
+    if isinstance(instrument, DigitalOption):
         return DigitalOption(
             strike=instrument.strike,
             maturity=new_maturity,
@@ -60,7 +63,7 @@ def create_decayed_instrument(instrument: Instrument, new_maturity: float) -> Op
             payout=instrument.payout,
             exercise=instrument.exercise_style,
         )
-    elif isinstance(instrument, LookbackOption):
+    if isinstance(instrument, LookbackOption):
         return LookbackOption(
             maturity=new_maturity,
             is_call=instrument.is_call,
@@ -68,12 +71,11 @@ def create_decayed_instrument(instrument: Instrument, new_maturity: float) -> Op
             lookback_type=instrument.lookback_type,
             exercise=instrument.exercise_style,
         )
-    elif isinstance(instrument, VanillaOption):
+    if isinstance(instrument, VanillaOption):
         return VanillaOption(
             strike=instrument.strike,
             maturity=new_maturity,
             is_call=instrument.is_call,
             exercise=instrument.exercise_style,
         )
-    else:
-        return None
+    return None

@@ -13,25 +13,23 @@ Author: Thomas
 Created: 2025
 """
 
-from typing import List, Optional, Union, Tuple
+
 import numpy as np
 
 from backend.core.interfaces import Model, PricingEngine
 from backend.core.market import MarketEnvironment
 from backend.core.result_types import GreeksResult
 
-from backend.portfolio.positions import PortfolioPosition, StockPosition
-
 # Import Numba-optimized functions from portfolio.pnl
 from backend.portfolio.pnl import (
+    RiskMetrics,
     calculate_portfolio_pnl_vectorized,
     calculate_portfolio_pnl_with_stock,
     compute_payoff_curve,
-    find_breakeven_points,
     compute_risk_metrics,
-    RiskMetrics,
+    find_breakeven_points,
 )
-
+from backend.portfolio.positions import PortfolioPosition, StockPosition
 
 # =============================================================================
 # OPTIONS PORTFOLIO CLASS
@@ -53,7 +51,7 @@ class OptionsPortfolio:
         - Others: FFTEngine
     """
 
-    def __init__(self, model: Model, engine: Optional[PricingEngine] = None):
+    def __init__(self, model: Model, engine: PricingEngine | None = None):
         """
         Initialize portfolio.
 
@@ -66,26 +64,25 @@ class OptionsPortfolio:
         """
         self._model = model
         self._engine = engine or self._auto_select_engine(model)
-        self._positions: List[PortfolioPosition] = []
-        self._stock: Optional[StockPosition] = None
+        self._positions: list[PortfolioPosition] = []
+        self._stock: StockPosition | None = None
 
     @staticmethod
     def _auto_select_engine(model: Model) -> PricingEngine:
         """Auto-select appropriate engine for the model."""
-        from backend.models.gbm import GBMModel
         from backend.engines import BSAnalyticEngine, FFTEngine
+        from backend.models.gbm import GBMModel
 
         if isinstance(model, GBMModel):
             return BSAnalyticEngine()
-        else:
-            # FFT works with any model that has characteristic function
-            return FFTEngine()
+        # FFT works with any model that has characteristic function
+        return FFTEngine()
 
     # =========================================================================
     # Position Management
     # =========================================================================
 
-    def add(self, position: Union[PortfolioPosition, StockPosition]) -> 'OptionsPortfolio':
+    def add(self, position: PortfolioPosition | StockPosition) -> 'OptionsPortfolio':
         """
         Add a position to the portfolio.
 
@@ -134,7 +131,7 @@ class OptionsPortfolio:
         """
         return self._positions.pop(index)
 
-    def clear_stock(self) -> Optional[StockPosition]:
+    def clear_stock(self) -> StockPosition | None:
         """
         Remove and return stock position.
 
@@ -148,12 +145,12 @@ class OptionsPortfolio:
         return stock
 
     @property
-    def positions(self) -> List[PortfolioPosition]:
+    def positions(self) -> list[PortfolioPosition]:
         """Option positions (read-only copy)."""
         return list(self._positions)
 
     @property
-    def stock(self) -> Optional[StockPosition]:
+    def stock(self) -> StockPosition | None:
         """Stock position if any."""
         return self._stock
 
@@ -207,7 +204,7 @@ class OptionsPortfolio:
 
         return total
 
-    def pnl_at_expiry(self, spot: Union[float, np.ndarray]) -> Union[float, np.ndarray]:
+    def pnl_at_expiry(self, spot: float | np.ndarray) -> float | np.ndarray:
         """
         Calculate P&L at expiry (no model needed).
 
@@ -236,7 +233,7 @@ class OptionsPortfolio:
     # Numba-Optimized P&L Calculation
     # =========================================================================
 
-    def _positions_to_arrays(self) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    def _positions_to_arrays(self) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """
         Convert portfolio positions to numpy arrays for Numba functions.
 
@@ -297,12 +294,11 @@ class OptionsPortfolio:
                 stock_entry_price=self._stock.entry_price,
                 multiplier=multiplier
             )
-        else:
-            return calculate_portfolio_pnl_vectorized(
-                spot,
-                strikes, option_types, position_types, quantities, premiums,
-                multiplier=multiplier
-            )
+        return calculate_portfolio_pnl_vectorized(
+            spot,
+            strikes, option_types, position_types, quantities, premiums,
+            multiplier=multiplier
+        )
 
     def payoff_curve(
         self,
@@ -458,6 +454,7 @@ class OptionsPortfolio:
         all model types (GBM, Merton, Heston, Bates, GARCH).
         """
         import warnings
+
         from backend.models.vol_bump import create_vol_bumped_pair
 
         model_up, model_down = create_vol_bumped_pair(self._model, h)
@@ -591,10 +588,10 @@ class OptionsPortfolio:
 # =============================================================================
 
 if __name__ == "__main__":
+    from backend.core.market import MarketEnvironment
     from backend.models.gbm import GBMModel
     from backend.models.heston import HestonModel
-    from backend.core.market import MarketEnvironment
-    from backend.portfolio.positions import long_call, short_call, long_stock
+    from backend.portfolio.positions import long_call, long_stock, short_call
 
     print("=" * 50)
     print("Portfolio Module Smoke Test")

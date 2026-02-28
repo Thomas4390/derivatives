@@ -14,10 +14,10 @@ Author: Thomas
 Created: 2025
 """
 
-import numpy as np
-from numba import njit
 import math
 
+import numpy as np
+from numba import njit
 
 # =============================================================================
 # Generic SDE Schemes

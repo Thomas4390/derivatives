@@ -6,9 +6,9 @@ Renders parameter controls in the main content area (not sidebar) using a unique
 Parameter labels use compact centered HTML with serif italic font and proper subscripts.
 """
 
-import streamlit as st
-from typing import Dict, Any
+from typing import Any
 
+import streamlit as st
 from config.model_registry import get_model, get_parameter_defaults
 from utils.model_helpers import check_feller_condition
 
@@ -35,7 +35,7 @@ def _label(html: str) -> None:
 
 # ── Main entry point ──────────────────────────────────────────────────────
 
-def render_explorer_params(model_key: str) -> Dict[str, Any]:
+def render_explorer_params(model_key: str) -> dict[str, Any]:
     """
     Render compact inline parameter controls for the Path Explorer tab.
 
@@ -50,7 +50,7 @@ def render_explorer_params(model_key: str) -> Dict[str, Any]:
     """
     kp = "explorer_"
     defaults = get_parameter_defaults(model_key)
-    params: Dict[str, Any] = {}
+    params: dict[str, Any] = {}
 
     # ── Row 1: Market & Simulation ──────────────────────────────────────
     c1, c2, c3, c4, c5 = st.columns(5)
@@ -156,7 +156,7 @@ def render_explorer_params(model_key: str) -> Dict[str, Any]:
 # ── Private renderers ──────────────────────────────────────────────────────
 
 
-def _render_gbm(params: Dict, defaults: Dict, kp: str) -> None:
+def _render_gbm(params: dict, defaults: dict, kp: str) -> None:
     c = st.columns(1)[0]
     with c:
         _label("&sigma;")
@@ -168,7 +168,7 @@ def _render_gbm(params: Dict, defaults: Dict, kp: str) -> None:
         )
 
 
-def _render_heston(params: Dict, defaults: Dict, kp: str) -> None:
+def _render_heston(params: dict, defaults: dict, kp: str) -> None:
     c1, c2, c3, c4, c5 = st.columns(5)
 
     with c1:
@@ -220,7 +220,7 @@ def _render_heston(params: Dict, defaults: Dict, kp: str) -> None:
         st.caption(f"\u26a0\ufe0f Feller violated: 2\u03ba\u03b8 = {lhs:.4f} \u2264 {rhs:.4f} = \u03be\u00b2")
 
 
-def _render_merton(params: Dict, defaults: Dict, kp: str) -> None:
+def _render_merton(params: dict, defaults: dict, kp: str) -> None:
     c1, c2, c3, c4 = st.columns(4)
 
     with c1:
@@ -257,7 +257,7 @@ def _render_merton(params: Dict, defaults: Dict, kp: str) -> None:
         )
 
 
-def _render_jump(params: Dict, defaults: Dict, kp: str) -> None:
+def _render_jump(params: dict, defaults: dict, kp: str) -> None:
     """Jump parameters row for Bates (Heston sliders already rendered)."""
     c1, c2, c3 = st.columns(3)
 
@@ -287,7 +287,7 @@ def _render_jump(params: Dict, defaults: Dict, kp: str) -> None:
         )
 
 
-def _render_garch(params: Dict, defaults: Dict, kp: str) -> None:
+def _render_garch(params: dict, defaults: dict, kp: str) -> None:
     c1, c2, c3, c4 = st.columns(4)
 
     with c1:
@@ -332,7 +332,7 @@ def _render_garch(params: Dict, defaults: Dict, kp: str) -> None:
         st.caption(f"Persistence \u03b1+\u03b2 = {persistence:.3f} \u00b7 Long-run vol \u2248 {lr_vol:.1f}%")
 
 
-def _render_custom(params: Dict, defaults: Dict, kp: str, model_key: str) -> None:
+def _render_custom(params: dict, defaults: dict, kp: str, model_key: str) -> None:
     """Render custom model parameters dynamically from ModelSpec."""
     try:
         model_spec = get_model(model_key)

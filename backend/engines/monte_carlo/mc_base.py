@@ -12,10 +12,12 @@ Author: Thomas
 Created: 2025
 """
 
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import NamedTuple
+
 import numpy as np
 from numba import njit
-from typing import Callable, Tuple, Optional, NamedTuple
-from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
@@ -37,7 +39,7 @@ class MCConfig:
     n_paths: int = 100_000
     n_steps: int = 252
     antithetic: bool = True
-    seed: Optional[int] = None
+    seed: int | None = None
 
     def __post_init__(self):
         if self.n_paths <= 0:
@@ -55,7 +57,7 @@ class MCResult(NamedTuple):
 
 # Type alias for terminal price simulator
 # Takes (s0, t, r, n_paths, n_steps, seed) and returns terminal prices array
-TerminalSimulator = Callable[[float, float, float, int, int, Optional[int]], np.ndarray]
+TerminalSimulator = Callable[[float, float, float, int, int, int | None], np.ndarray]
 
 
 @njit(fastmath=True, cache=True)
@@ -81,7 +83,7 @@ def _compute_payoffs(
 def _compute_price_and_se(
     payoffs: np.ndarray,
     discount: float
-) -> Tuple[float, float]:
+) -> tuple[float, float]:
     """Compute discounted price and standard error."""
     n = len(payoffs)
 
@@ -149,9 +151,9 @@ class GenericMCEngine:
         t: float,
         r: float,
         is_call: bool = True,
-        n_paths: Optional[int] = None,
-        n_steps: Optional[int] = None,
-        seed: Optional[int] = None
+        n_paths: int | None = None,
+        n_steps: int | None = None,
+        seed: int | None = None
     ) -> MCResult:
         """
         Price a European option using Monte Carlo simulation.
@@ -213,10 +215,10 @@ class GenericMCEngine:
         t: float,
         r: float,
         is_call: bool = True,
-        n_paths: Optional[int] = None,
-        n_steps: Optional[int] = None,
-        seed: Optional[int] = None
-    ) -> Tuple[np.ndarray, np.ndarray]:
+        n_paths: int | None = None,
+        n_steps: int | None = None,
+        seed: int | None = None
+    ) -> tuple[np.ndarray, np.ndarray]:
         """
         Price multiple strikes efficiently with a single simulation.
 
@@ -281,10 +283,10 @@ class GenericMCEngine:
         maturities: np.ndarray,
         r: float,
         is_call: bool = True,
-        n_paths: Optional[int] = None,
+        n_paths: int | None = None,
         n_steps_per_year: int = 252,
-        seed: Optional[int] = None
-    ) -> Tuple[np.ndarray, np.ndarray]:
+        seed: int | None = None
+    ) -> tuple[np.ndarray, np.ndarray]:
         """
         Price options across a strike-maturity surface.
 
@@ -354,7 +356,7 @@ def mc_price(
     is_call: bool = True,
     n_paths: int = 100_000,
     n_steps: int = 252,
-    seed: Optional[int] = None
+    seed: int | None = None
 ) -> MCResult:
     """
     Quick Monte Carlo pricing with default configuration.

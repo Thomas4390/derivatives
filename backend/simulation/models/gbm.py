@@ -16,14 +16,14 @@ Author: Thomas
 Created: 2025
 """
 
+import time
 import warnings
+from typing import Any
+
 import numpy as np
 from numba import njit, prange
-import time
-from typing import Optional, Dict, Any
 
 from backend.simulation.base import BaseSimulator, SimulationResult
-
 
 # =============================================================================
 # Numba-Optimized Kernels
@@ -175,7 +175,7 @@ class GBMSimulator(BaseSimulator):
             raise ValueError(f"Volatility sigma must be positive, got {value}")
         self._sigma = value
 
-    def get_parameters(self) -> Dict[str, Any]:
+    def get_parameters(self) -> dict[str, Any]:
         """Returns model parameters."""
         return {
             "sigma": self._sigma,
@@ -189,7 +189,7 @@ class GBMSimulator(BaseSimulator):
         t: float,
         n_paths: int,
         n_steps: int,
-        seed: Optional[int] = None
+        seed: int | None = None
     ) -> SimulationResult:
         """
         Simulate full GBM price paths.
@@ -257,7 +257,7 @@ class GBMSimulator(BaseSimulator):
         t: float,
         n_paths: int,
         n_steps: int,
-        seed: Optional[int] = None
+        seed: int | None = None
     ) -> np.ndarray:
         """
         Simulate only terminal values S(T).
@@ -316,7 +316,7 @@ def simulate_gbm(
     t: float,
     n_paths: int = 100000,
     n_steps: int = 252,
-    seed: Optional[int] = None,
+    seed: int | None = None,
     antithetic: bool = True,
     terminal_only: bool = False
 ):
@@ -353,8 +353,7 @@ def simulate_gbm(
 
     if terminal_only:
         return simulator.simulate_terminal(s0, mu, t, n_paths, n_steps, seed)
-    else:
-        return simulator.simulate_paths(s0, mu, t, n_paths, n_steps, seed)
+    return simulator.simulate_paths(s0, mu, t, n_paths, n_steps, seed)
 
 
 # =============================================================================

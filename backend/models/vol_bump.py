@@ -14,13 +14,13 @@ Author: Thomas
 Created: 2025
 """
 
-from typing import Optional, Tuple
+
 import numpy as np
 
 from backend.core.interfaces import Model
 
 
-def create_vol_bumped_model(model: Model, vol_bump: float) -> Optional[Model]:
+def create_vol_bumped_model(model: Model, vol_bump: float) -> Model | None:
     """
     Create a model with bumped volatility, preserving all other parameters.
 
@@ -40,11 +40,11 @@ def create_vol_bumped_model(model: Model, vol_bump: float) -> Optional[Model]:
     Model or None
         New model with bumped volatility, or None if model type is unknown
     """
-    from backend.models.gbm import GBMModel
-    from backend.models.merton import MertonModel
-    from backend.models.heston import HestonModel
     from backend.models.bates import BatesModel
-    from backend.models.garch import GARCHModel, NGARCHModel, GJRGARCHModel
+    from backend.models.garch import GARCHModel, GJRGARCHModel, NGARCHModel
+    from backend.models.gbm import GBMModel
+    from backend.models.heston import HestonModel
+    from backend.models.merton import MertonModel
 
     params = model.get_parameters()
 
@@ -52,7 +52,7 @@ def create_vol_bumped_model(model: Model, vol_bump: float) -> Optional[Model]:
         new_sigma = max(params['sigma'] + vol_bump, 1e-8)
         return GBMModel(sigma=new_sigma)
 
-    elif isinstance(model, MertonModel):
+    if isinstance(model, MertonModel):
         new_sigma = max(params['sigma'] + vol_bump, 1e-8)
         return MertonModel(
             sigma=new_sigma,
@@ -61,7 +61,7 @@ def create_vol_bumped_model(model: Model, vol_bump: float) -> Optional[Model]:
             sigma_j=params['sigma_j']
         )
 
-    elif isinstance(model, BatesModel):
+    if isinstance(model, BatesModel):
         # Bump in vol space: new_vol = sqrt(v0) + h, then v0_new = new_vol^2
         new_vol = max(np.sqrt(params['v0']) + vol_bump, 0.0)
         new_v0 = max(new_vol ** 2, 1e-8)
@@ -76,7 +76,7 @@ def create_vol_bumped_model(model: Model, vol_bump: float) -> Optional[Model]:
             sigma_j=params['sigma_j']
         )
 
-    elif isinstance(model, HestonModel):
+    if isinstance(model, HestonModel):
         new_vol = max(np.sqrt(params['v0']) + vol_bump, 0.0)
         new_v0 = max(new_vol ** 2, 1e-8)
         return HestonModel(
@@ -87,7 +87,7 @@ def create_vol_bumped_model(model: Model, vol_bump: float) -> Optional[Model]:
             rho=params['rho']
         )
 
-    elif isinstance(model, (GARCHModel, NGARCHModel, GJRGARCHModel)):
+    if isinstance(model, (GARCHModel, NGARCHModel, GJRGARCHModel)):
         new_sigma0 = max(params['sigma0'] + vol_bump, 1e-8)
         p = dict(params)
         p['sigma0'] = new_sigma0
@@ -98,7 +98,7 @@ def create_vol_bumped_model(model: Model, vol_bump: float) -> Optional[Model]:
 
 def create_vol_bumped_pair(
     model: Model, vol_bump: float
-) -> Tuple[Optional[Model], Optional[Model]]:
+) -> tuple[Model | None, Model | None]:
     """
     Create a pair of models bumped up and down by vol_bump.
 

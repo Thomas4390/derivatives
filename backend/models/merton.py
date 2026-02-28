@@ -19,10 +19,10 @@ Author: Thomas
 Created: 2025
 """
 
-from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List, Dict, Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
+
 import numpy as np
 
 if TYPE_CHECKING:
@@ -31,10 +31,9 @@ if TYPE_CHECKING:
 from backend.core.interfaces import Model
 from backend.core.result_types import PricingCapability
 from backend.models.characteristic_functions.merton_cf import (
-    merton_characteristic_function,
     merton_cf_vectorized,
+    merton_characteristic_function,
 )
-
 
 # =============================================================================
 # MERTON MODEL
@@ -105,14 +104,14 @@ class MertonModel(Model):
         return "Merton Jump-Diffusion"
 
     @property
-    def supported_engines(self) -> List[PricingCapability]:
+    def supported_engines(self) -> list[PricingCapability]:
         """Which pricing methods this model supports."""
         return [
             PricingCapability.FFT,
             PricingCapability.MONTE_CARLO,
         ]
 
-    def get_parameters(self) -> Dict[str, Any]:
+    def get_parameters(self) -> dict[str, Any]:
         """Return model parameters as dictionary."""
         return {
             "sigma": self.sigma,

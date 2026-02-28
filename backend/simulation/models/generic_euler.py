@@ -16,8 +16,9 @@ Created: 2025
 """
 
 import time
+from typing import Any
+
 import numpy as np
-from typing import Optional, Dict, Any
 
 from backend.simulation.base import BaseSimulator, SimulationResult
 
@@ -50,7 +51,7 @@ class GenericEulerSimulator(BaseSimulator):
             and hasattr(model, 'variance_diffusion') and callable(getattr(model, 'variance_diffusion', None))
         )
 
-    def get_parameters(self) -> Dict[str, Any]:
+    def get_parameters(self) -> dict[str, Any]:
         return self._model.get_parameters()
 
     def _get_initial_variance(self, params: dict) -> float:
@@ -70,7 +71,7 @@ class GenericEulerSimulator(BaseSimulator):
         t: float,
         n_paths: int,
         n_steps: int,
-        seed: Optional[int] = None,
+        seed: int | None = None,
     ) -> SimulationResult:
         self.validate_inputs(s0, mu, t, n_paths, n_steps)
 
@@ -170,7 +171,7 @@ class GenericEulerSimulator(BaseSimulator):
         t: float,
         n_paths: int,
         n_steps: int,
-        seed: Optional[int] = None,
+        seed: int | None = None,
     ) -> np.ndarray:
         self.validate_inputs(s0, mu, t, n_paths, n_steps)
 

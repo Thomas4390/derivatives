@@ -40,19 +40,19 @@ Author: Thomas
 Created: 2025
 """
 
-import numpy as np
 from typing import NamedTuple
+
+import numpy as np
 
 # Import from single source of truth
 from backend.utils.math import (
     DAYS_PER_YEAR,
+    bs_delta as _bs_delta,
+    bs_gamma as _bs_gamma,
     bs_greeks as _bs_greeks,
     bs_second_order_greeks as _bs_second_order_greeks,
     bs_third_order_greeks as _bs_third_order_greeks,
-    bs_delta as _bs_delta,
-    bs_gamma as _bs_gamma,
 )
-
 
 # =============================================================================
 # Constants

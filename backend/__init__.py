@@ -24,182 +24,28 @@ Version: 5.0.0
 # Portfolio Management (NEW Architecture)
 # =============================================================================
 
-from backend.portfolio import (
-    # Main portfolio class
-    OptionsPortfolio,
-    # Position classes
-    PortfolioPosition,
-    StockPosition,
-    # Factory functions
-    long_call,
-    short_call,
-    long_put,
-    short_put,
-    long_stock,
-    short_stock,
-    # Greeks (from core)
-    GreeksResult,
-    # Breakeven
-    BreakevenResult,
-    BreakevenCalculator,
-    find_breakevens,
-    find_breakevens_from_portfolio,
+# =============================================================================
+# New Architecture - Core
+# =============================================================================
+from backend.core import (
+    ExerciseStyle,
+    # Interfaces
+    Instrument,
+    # Market
+    MarketEnvironment,
+    Model,
+    Payoff,
+    PricingEngine,
+    # Result types
+    PricingResult,
 )
 
-# =============================================================================
-# Utilities
-# =============================================================================
-
-from backend.utils import (
-    norm_cdf,
-    norm_pdf,
-    norm_cdf_vec,
-    norm_pdf_vec,
-    d1_d2,
-)
-
-# =============================================================================
-# GARCH Pricer (Standalone, uses LRNVR)
-# =============================================================================
-
-from backend.engines.monte_carlo.garch_pricer import (
-    GARCHMCPricer,
-    GARCHType,
-    GARCHPricingResult,
-)
-
-# =============================================================================
-# Low-level Engines (for advanced use)
-# =============================================================================
-
-from backend.engines.fourier.carr_madan import (
-    CarrMadanFFTEngine,
-    FFTConfig,
-)
-
-from backend.engines.monte_carlo.mc_base import (
-    GenericMCEngine,
-    MCConfig,
-    MCResult,
-)
-
-# =============================================================================
-# Simulation
-# =============================================================================
-
-from backend.simulation import (
-    # Base
-    BaseSimulator,
-    SimulationResult,
-    # Enums
-    ModelType,
-    DiscretizationScheme,
-    Measure,
-    # Simulators
-    GBMSimulator,
-    HestonSimulator,
-    MertonSimulator,
-    BatesSimulator,
-    GARCHSimulator,
-    NGARCHSimulator,
-    GJRGARCHSimulator,
-    # Factory
-    create_simulator,
-    # P&L engine
-    RiskMetrics,
-    compute_risk_metrics,
-)
-
-# =============================================================================
-# Unified Models
-# =============================================================================
-
-from backend.models import (
-    # Base
-    PricingCapability,
-    registry,
-    # Models
-    GBMModel,
-    HestonModel,
-    MertonModel,
-    BatesModel,
-    GARCHModel,
-    NGARCHModel,
-    GJRGARCHModel,
-    # GARCH params (aliases for backward compatibility)
-    GARCHParams,
-    NGARCHParams,
-    GJRGARCHParams,
-)
 # BaseModel is an alias for Model from core.interfaces
 from backend.core.interfaces import Model as BaseModel
 
 # =============================================================================
-# New Architecture - Core
-# =============================================================================
-
-from backend.core import (
-    # Interfaces
-    Instrument,
-    Model,
-    PricingEngine,
-    Payoff,
-    # Market
-    MarketEnvironment,
-    # Result types
-    PricingResult,
-    ExerciseStyle,
-)
-
-# =============================================================================
-# New Architecture - Instruments
-# =============================================================================
-
-from backend.instruments import (
-    # Options
-    VanillaOption,
-    EuropeanCall,
-    EuropeanPut,
-    AmericanCall,
-    AmericanPut,
-    # Exotic options
-    BarrierOption,
-    AsianOption,
-    DigitalOption,
-    LookbackOption,
-    # Exotic factories
-    AsianCall,
-    AsianPut,
-    AsianGeometricCall,
-    AsianGeometricPut,
-    BarrierUpOutCall,
-    BarrierUpInCall,
-    BarrierDownOutCall,
-    BarrierDownInCall,
-    BarrierUpOutPut,
-    BarrierUpInPut,
-    BarrierDownOutPut,
-    BarrierDownInPut,
-    LookbackCall,
-    LookbackPut,
-    LookbackFixedCall,
-    LookbackFixedPut,
-    # Payoffs
-    VanillaCallPayoff,
-    VanillaPutPayoff,
-    CompositePayoff,
-    # Strategies
-    OptionStrategy,
-    IronCondor,
-    Straddle,
-    Butterfly,
-    StrategyLeg,
-)
-
-# =============================================================================
 # New Architecture - Engines
 # =============================================================================
-
 from backend.engines import (
     BSAnalyticEngine,
     ExoticAnalyticEngine,
@@ -208,19 +54,163 @@ from backend.engines import (
 )
 
 # =============================================================================
+# Low-level Engines (for advanced use)
+# =============================================================================
+from backend.engines.fourier.carr_madan import (
+    CarrMadanFFTEngine,
+    FFTConfig,
+)
+
+# =============================================================================
+# GARCH Pricer (Standalone, uses LRNVR)
+# =============================================================================
+from backend.engines.monte_carlo.garch_pricer import (
+    GARCHMCPricer,
+    GARCHPricingResult,
+    GARCHType,
+)
+from backend.engines.monte_carlo.mc_base import (
+    GenericMCEngine,
+    MCConfig,
+    MCResult,
+)
+
+# =============================================================================
 # Greeks Calculation
 # =============================================================================
-
 from backend.greeks import (
     GreeksCalculator,
-    calculate_greeks,
+    bs_all_greeks,
     # Analytic Greeks
     bs_greeks_first_order,
     bs_greeks_second_order,
     bs_greeks_third_order,
-    bs_all_greeks,
+    calculate_greeks,
     # Numerical Greeks
     finite_difference_greeks,
+)
+
+# =============================================================================
+# New Architecture - Instruments
+# =============================================================================
+from backend.instruments import (
+    AmericanCall,
+    AmericanPut,
+    # Exotic factories
+    AsianCall,
+    AsianGeometricCall,
+    AsianGeometricPut,
+    AsianOption,
+    AsianPut,
+    BarrierDownInCall,
+    BarrierDownInPut,
+    BarrierDownOutCall,
+    BarrierDownOutPut,
+    # Exotic options
+    BarrierOption,
+    BarrierUpInCall,
+    BarrierUpInPut,
+    BarrierUpOutCall,
+    BarrierUpOutPut,
+    Butterfly,
+    CompositePayoff,
+    DigitalOption,
+    EuropeanCall,
+    EuropeanPut,
+    IronCondor,
+    LookbackCall,
+    LookbackFixedCall,
+    LookbackFixedPut,
+    LookbackOption,
+    LookbackPut,
+    # Strategies
+    OptionStrategy,
+    Straddle,
+    StrategyLeg,
+    # Payoffs
+    VanillaCallPayoff,
+    # Options
+    VanillaOption,
+    VanillaPutPayoff,
+)
+
+# =============================================================================
+# Unified Models
+# =============================================================================
+from backend.models import (
+    BatesModel,
+    GARCHModel,
+    # GARCH params (aliases for backward compatibility)
+    GARCHParams,
+    # Models
+    GBMModel,
+    GJRGARCHModel,
+    GJRGARCHParams,
+    HestonModel,
+    MertonModel,
+    NGARCHModel,
+    NGARCHParams,
+    # Base
+    PricingCapability,
+    registry,
+)
+from backend.portfolio import (
+    BreakevenCalculator,
+    # Breakeven
+    BreakevenResult,
+    # Greeks (from core)
+    GreeksResult,
+    # Main portfolio class
+    OptionsPortfolio,
+    # Position classes
+    PortfolioPosition,
+    StockPosition,
+    find_breakevens,
+    find_breakevens_from_portfolio,
+    # Factory functions
+    long_call,
+    long_put,
+    long_stock,
+    short_call,
+    short_put,
+    short_stock,
+)
+
+# =============================================================================
+# Simulation
+# =============================================================================
+from backend.simulation import (
+    # Base
+    BaseSimulator,
+    BatesSimulator,
+    DiscretizationScheme,
+    GARCHSimulator,
+    # Simulators
+    GBMSimulator,
+    GJRGARCHSimulator,
+    HestonSimulator,
+    Measure,
+    MertonSimulator,
+    # Enums
+    ModelType,
+    NGARCHSimulator,
+    # P&L engine
+    RiskMetrics,
+    SimulationResult,
+    compute_risk_metrics,
+    # Factory
+    create_simulator,
+)
+
+# =============================================================================
+# Utilities
+# =============================================================================
+from backend.utils import (
+    d1_d2,
+    norm_cdf,
+    norm_cdf_vec,
+    norm_pdf,
+    norm_pdf_vec,
 )
 
 # =============================================================================

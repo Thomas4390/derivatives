@@ -18,23 +18,30 @@ Functions available:
 Author: Thomas Vaudescal
 """
 
-import numpy as np
 import json
 from dataclasses import dataclass
-from typing import Optional
+
+import numpy as np
 
 # Import Numba-optimized functions for performance
 from backend.engines.vectorized_bs import (
     calculate_all_greeks as _calculate_all_greeks_numba,
 )
 from backend.portfolio.greeks_surfaces import (
-    portfolio_greeks_surface_dte as calculate_portfolio_greeks_3d_dte_vectorized,
-    portfolio_greeks_surface_iv as calculate_portfolio_greeks_3d_iv_vectorized,
-    single_option_greeks_surface_strike as calculate_greeks_3d_strike_vectorized,
-    calculate_portfolio_pnl_at_expiry_arrays as _calculate_pnl_numba,
     calculate_pnl_curve,
 )
-
+from backend.portfolio.greeks_surfaces import (
+    calculate_portfolio_pnl_at_expiry_arrays as _calculate_pnl_numba,
+)
+from backend.portfolio.greeks_surfaces import (
+    portfolio_greeks_surface_dte as calculate_portfolio_greeks_3d_dte_vectorized,
+)
+from backend.portfolio.greeks_surfaces import (
+    portfolio_greeks_surface_iv as calculate_portfolio_greeks_3d_iv_vectorized,
+)
+from backend.portfolio.greeks_surfaces import (
+    single_option_greeks_surface_strike as calculate_greeks_3d_strike_vectorized,
+)
 
 # =============================================================================
 # RESULT TYPES
@@ -166,7 +173,7 @@ def find_breakeven_points(
     min_spot: float,
     max_spot: float,
     n_points: int
-) -> Optional[BreakevenResult]:
+) -> BreakevenResult | None:
     """
     Find breakeven points and max profit/loss for a portfolio.
 

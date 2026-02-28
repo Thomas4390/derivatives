@@ -18,16 +18,16 @@ Created: 2025
 """
 
 from dataclasses import dataclass
-from typing import List, Dict, Any
+from typing import Any
+
 import numpy as np
 
 from backend.core.interfaces import Model
 from backend.core.result_types import PricingCapability
 from backend.models.characteristic_functions.heston_cf import (
-    heston_characteristic_function,
     heston_cf_vectorized,
+    heston_characteristic_function,
 )
-
 
 # =============================================================================
 # HESTON MODEL
@@ -105,14 +105,14 @@ class HestonModel(Model):
         return "Heston Stochastic Volatility"
 
     @property
-    def supported_engines(self) -> List[PricingCapability]:
+    def supported_engines(self) -> list[PricingCapability]:
         """Which pricing methods this model supports."""
         return [
             PricingCapability.FFT,
             PricingCapability.MONTE_CARLO,
         ]
 
-    def get_parameters(self) -> Dict[str, Any]:
+    def get_parameters(self) -> dict[str, Any]:
         """Return model parameters as dictionary."""
         return {
             "v0": self.v0,

@@ -6,18 +6,19 @@ Two-panel Plotly subplot:
   Bottom: Volatility path sigma(t) - stochastic or flat depending on model
 """
 
+from typing import Any
+
 import numpy as np
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 import streamlit as st
-from typing import Dict, Any
+from plotly.subplots import make_subplots
+from services.simulation_service import (
+    compute_long_run_volatility,
+    get_initial_volatility,
+    get_model_characteristics,
+)
 
 from backend.simulation.base import SimulationResult
-from services.simulation_service import (
-    get_model_characteristics,
-    get_initial_volatility,
-    compute_long_run_volatility,
-)
 
 # ── Theme (matches simulation_paths.py) ────────────────────────────────────
 _PAPER_BG = "#0e1117"
@@ -39,7 +40,7 @@ _VOL_REF_LR = "#a078ff"     # bright purple — long-run vol
 def render_path_explorer_chart(
     result: SimulationResult,
     model_key: str,
-    params: Dict[str, Any],
+    params: dict[str, Any],
 ) -> None:
     """Render single-path price + volatility chart with adaptive axes."""
     chars = get_model_characteristics(model_key)
@@ -140,7 +141,7 @@ def render_path_explorer_chart(
 def _add_vol_references(
     fig: go.Figure,
     model_key: str,
-    params: Dict[str, Any],
+    params: dict[str, Any],
 ) -> None:
     """Add initial-vol and long-run-vol dashed reference lines to the vol panel."""
     model_lower = model_key.lower()

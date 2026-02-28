@@ -7,26 +7,27 @@ Provides:
 - Model information summary
 """
 
-import streamlit as st
-import numpy as np
-from typing import Dict, Any, Optional
+from typing import Any
 
-from backend.simulation.base import SimulationResult
+import numpy as np
+import streamlit as st
+from services.simulation_service import (
+    compute_long_run_volatility,
+    get_initial_volatility,
+    get_model_characteristics,
+)
 from utils.model_helpers import (
     get_model_icon,
     get_volatility_type,
 )
-from services.simulation_service import (
-    get_model_characteristics,
-    compute_long_run_volatility,
-    get_initial_volatility,
-)
+
+from backend.simulation.base import SimulationResult
 
 
 def render_results_summary(
     result: SimulationResult,
     model_key: str,
-    params: Dict[str, Any]
+    params: dict[str, Any]
 ):
     """
     Render comprehensive results summary.
@@ -50,7 +51,7 @@ def render_results_summary(
 def _render_key_metrics(
     result: SimulationResult,
     model_key: str,
-    params: Dict[str, Any]
+    params: dict[str, Any]
 ):
     """Render key simulation metrics."""
     col1, col2, col3, col4 = st.columns(4)
@@ -161,7 +162,7 @@ def _render_distribution_stats(result: SimulationResult):
 def _render_volatility_info(
     result: SimulationResult,
     model_key: str,
-    params: Dict[str, Any]
+    params: dict[str, Any]
 ):
     """Render volatility-specific information."""
     characteristics = get_model_characteristics(model_key)
@@ -205,8 +206,8 @@ def _render_volatility_info(
 
 def render_simulation_info(
     model_key: str,
-    params: Dict[str, Any],
-    execution_time: Optional[float] = None
+    params: dict[str, Any],
+    execution_time: float | None = None
 ):
     """
     Render simulation configuration info.
@@ -294,7 +295,7 @@ def render_paths_summary(result: SimulationResult, n_display: int = 5):
         st.dataframe(pd.DataFrame(worst_data), width="stretch", hide_index=True)
 
 
-def render_model_equations(model_key: str, params: Dict[str, Any]):
+def render_model_equations(model_key: str, params: dict[str, Any]):
     """Render model equations with LaTeX."""
     from config.model_registry import get_model
     from utils.model_helpers import get_model_equations

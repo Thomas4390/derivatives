@@ -9,27 +9,27 @@ Uses dict-based positions for simplicity.
 import streamlit as st
 from config.constants import (
     CONTRACT_MULTIPLIER,
-    DEFAULT_SPOT_PRICE,
-    DEFAULT_RISK_FREE_RATE,
+    DEFAULT_BARRIER_UP_FACTOR,
+    DEFAULT_DIGITAL_PAYOUT,
     DEFAULT_DTE,
     DEFAULT_IV,
+    DEFAULT_RISK_FREE_RATE,
+    DEFAULT_SPOT_PRICE,
+    EXOTIC_TYPE_NAMES,
+    INSTRUMENT_CLASSES,
+    STRATEGIES_WITH_STOCK,
     STRATEGY_DISPLAY_NAMES,
     STRATEGY_LEGS,
-    STRATEGIES_WITH_STOCK,
     STRATEGY_STOCK_POSITION,
-    INSTRUMENT_CLASSES,
-    EXOTIC_TYPE_NAMES,
-    DEFAULT_DIGITAL_PAYOUT,
-    DEFAULT_BARRIER_UP_FACTOR,
 )
 from config.styles import (
+    exotic_position_item_html,
     net_position_card_html,
     position_item_html,
-    exotic_position_item_html,
-    stock_position_html
+    stock_position_html,
 )
-from services.pricing_adapter import calculate_option_premium
 from services.exotic_pricing_adapter import calculate_exotic_premium
+from services.pricing_adapter import calculate_option_premium
 from services.state_manager import create_option_position, create_stock_position
 
 

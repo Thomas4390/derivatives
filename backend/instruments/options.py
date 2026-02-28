@@ -13,18 +13,17 @@ Created: 2025
 from backend.core.interfaces import Instrument, Payoff
 from backend.core.result_types import ExerciseStyle
 from backend.instruments.payoffs import (
-    VanillaCallPayoff,
-    VanillaPutPayoff,
-    DigitalCallPayoff,
-    DigitalPutPayoff,
     AsianCallPayoff,
     AsianPutPayoff,
-    BarrierUpOutCallPayoff,
     BarrierDownOutPutPayoff,
+    BarrierUpOutCallPayoff,
+    DigitalCallPayoff,
+    DigitalPutPayoff,
     LookbackFloatingCallPayoff,
     LookbackFloatingPutPayoff,
+    VanillaCallPayoff,
+    VanillaPutPayoff,
 )
-
 
 # =============================================================================
 # VANILLA OPTIONS

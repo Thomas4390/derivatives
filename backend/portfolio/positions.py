@@ -16,11 +16,10 @@ Created: 2025
 """
 
 from dataclasses import dataclass
-from typing import Union
+
 import numpy as np
 
 from backend.instruments.options import VanillaOption
-
 
 # =============================================================================
 # POSITION CLASSES
@@ -86,7 +85,7 @@ class PortfolioPosition:
         """True if put option."""
         return not self.instrument.is_call
 
-    def payoff_at_expiry(self, spot: Union[float, np.ndarray]) -> Union[float, np.ndarray]:
+    def payoff_at_expiry(self, spot: float | np.ndarray) -> float | np.ndarray:
         """
         Calculate P&L at expiry.
 
@@ -168,7 +167,7 @@ class StockPosition:
         """Stock delta = quantity."""
         return float(self.quantity)
 
-    def pnl(self, spot: Union[float, np.ndarray]) -> Union[float, np.ndarray]:
+    def pnl(self, spot: float | np.ndarray) -> float | np.ndarray:
         """
         P&L at given spot price(s).
 

@@ -4,23 +4,24 @@ Portfolio calculation services for Options Greeks Explorer.
 This module provides functions for calculating portfolio metrics, P&L, and Greeks.
 """
 
-from __future__ import annotations
 
-from typing import TYPE_CHECKING
-import streamlit as st
-import numpy as np
 import json
 from functools import lru_cache
+from typing import TYPE_CHECKING
+
+import numpy as np
+import streamlit as st
 
 if TYPE_CHECKING:
     from .pricing_adapter import BreakevenResult
 from config.constants import (
     CONTRACT_MULTIPLIER,
     GREEK_NAMES,
-    STRIKE_RANGE_FACTORS,
     SPOT_RANGE_FACTOR,
-    SPOT_RANGE_POINTS
+    SPOT_RANGE_POINTS,
+    STRIKE_RANGE_FACTORS,
 )
+
 from .risk_analyzer import check_unlimited_risk
 
 

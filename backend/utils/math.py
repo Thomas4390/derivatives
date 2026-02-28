@@ -19,10 +19,9 @@ Created: 2025
 """
 
 import math
+
 import numpy as np
 from numba import njit, prange
-from typing import Tuple
-
 
 # =============================================================================
 # Constants
@@ -129,17 +128,16 @@ def norm_inv_cdf(p: float) -> float:
         q = math.sqrt(-2.0 * math.log(p))
         return (((((c1*q + c2)*q + c3)*q + c4)*q + c5)*q + c6) / \
                ((((d1*q + d2)*q + d3)*q + d4)*q + 1.0)
-    elif p <= p_high:
+    if p <= p_high:
         # Central region
         q = p - 0.5
         r = q * q
         return (((((a1*r + a2)*r + a3)*r + a4)*r + a5)*r + a6) * q / \
                (((((b1*r + b2)*r + b3)*r + b4)*r + b5)*r + 1.0)
-    else:
-        # Upper tail
-        q = math.sqrt(-2.0 * math.log(1.0 - p))
-        return -(((((c1*q + c2)*q + c3)*q + c4)*q + c5)*q + c6) / \
-                ((((d1*q + d2)*q + d3)*q + d4)*q + 1.0)
+    # Upper tail
+    q = math.sqrt(-2.0 * math.log(1.0 - p))
+    return -(((((c1*q + c2)*q + c3)*q + c4)*q + c5)*q + c6) / \
+            ((((d1*q + d2)*q + d3)*q + d4)*q + 1.0)
 
 
 # =============================================================================
@@ -176,7 +174,7 @@ def d1_d2(
     risk_free_rate: float,
     volatility: float,
     dividend_yield: float = 0.0
-) -> Tuple[float, float]:
+) -> tuple[float, float]:
     """
     Calculate d1 and d2 parameters for Black-Scholes model.
 
@@ -217,10 +215,9 @@ def d1_d2(
         forward = spot * math.exp((risk_free_rate - dividend_yield) * time_to_expiry)
         if forward > strike:
             return 1e10, 1e10  # Deep ITM
-        elif forward < strike:
+        if forward < strike:
             return -1e10, -1e10  # Deep OTM
-        else:
-            return 0.0, 0.0  # ATM
+        return 0.0, 0.0  # ATM
 
     sqrt_t = math.sqrt(time_to_expiry)
     d1 = (
@@ -275,8 +272,7 @@ def bs_price(
         # At expiry - intrinsic value
         if is_call:
             return max(spot - strike, 0.0)
-        else:
-            return max(strike - spot, 0.0)
+        return max(strike - spot, 0.0)
 
     d1, d2 = d1_d2(spot, strike, time_to_expiry, rate, volatility, dividend_yield)
 
@@ -322,16 +318,14 @@ def bs_delta(
     if time_to_expiry <= 0 or volatility <= 0:
         if is_call:
             return 1.0 if spot > strike else 0.0
-        else:
-            return -1.0 if spot < strike else 0.0
+        return -1.0 if spot < strike else 0.0
 
     d1, _ = d1_d2(spot, strike, time_to_expiry, rate, volatility, dividend_yield)
     forward_discount = math.exp(-dividend_yield * time_to_expiry)
 
     if is_call:
         return forward_discount * norm_cdf(d1)
-    else:
-        return forward_discount * (norm_cdf(d1) - 1.0)
+    return forward_discount * (norm_cdf(d1) - 1.0)
 
 
 @njit(fastmath=True, cache=True)
@@ -482,7 +476,7 @@ def bs_greeks(
     volatility: float,
     is_call: bool,
     dividend_yield: float = 0.0
-) -> Tuple[float, float, float, float, float, float]:
+) -> tuple[float, float, float, float, float, float]:
     """
     Calculate all first-order Black-Scholes Greeks in one call.
 
@@ -576,7 +570,7 @@ def bs_second_order_greeks(
     r: float,
     sigma: float,
     dividend_yield: float = 0.0
-) -> Tuple[float, float, float, float]:
+) -> tuple[float, float, float, float]:
     """
     Calculate second-order Greeks for Black-Scholes.
 
@@ -644,7 +638,7 @@ def bs_third_order_greeks(
     r: float,
     sigma: float,
     dividend_yield: float = 0.0
-) -> Tuple[float, float, float, float]:
+) -> tuple[float, float, float, float]:
     """
     Calculate third-order Greeks for Black-Scholes.
 

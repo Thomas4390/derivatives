@@ -13,7 +13,6 @@ Created: 2025
 import numpy as np
 from numba import njit, prange
 
-
 # =============================================================================
 # Vanilla Option Payoffs
 # =============================================================================
@@ -342,8 +341,7 @@ def asian_arithmetic_payoff(
     avg = np.mean(path)
     if is_call:
         return max(avg - strike, 0.0)
-    else:
-        return max(strike - avg, 0.0)
+    return max(strike - avg, 0.0)
 
 
 @njit(fastmath=True, cache=True)
@@ -372,8 +370,7 @@ def lookback_floating_payoff(
     terminal = path[-1]
     if is_call:
         return terminal - np.min(path)
-    else:
-        return np.max(path) - terminal
+    return np.max(path) - terminal
 
 
 @njit(fastmath=True, cache=True)

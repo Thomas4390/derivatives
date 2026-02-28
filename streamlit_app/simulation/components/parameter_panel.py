@@ -8,20 +8,20 @@ Provides:
 - Condition validation warnings
 """
 
-import streamlit as st
-from typing import Dict, Any
+from typing import Any
 
+import streamlit as st
 from config.model_registry import (
     get_model,
     get_parameter_defaults,
 )
 from utils.model_helpers import (
-    check_garch_stationarity,
     check_feller_condition,
+    check_garch_stationarity,
 )
 
 
-def render_market_parameters(key_prefix: str = "market") -> Dict[str, float]:
+def render_market_parameters(key_prefix: str = "market") -> dict[str, float]:
     """
     Render market parameters section.
 
@@ -92,7 +92,7 @@ def render_market_parameters(key_prefix: str = "market") -> Dict[str, float]:
 def render_model_parameters(
     model_key: str,
     key_prefix: str = "model"
-) -> Dict[str, float]:
+) -> dict[str, float]:
     """
     Render model-specific parameters.
 
@@ -147,7 +147,7 @@ def render_model_parameters(
     return params
 
 
-def _render_gbm_params(defaults: Dict, key_prefix: str) -> Dict[str, float]:
+def _render_gbm_params(defaults: dict, key_prefix: str) -> dict[str, float]:
     """Render GBM parameters."""
     params = {}
 
@@ -169,7 +169,7 @@ def _render_gbm_params(defaults: Dict, key_prefix: str) -> Dict[str, float]:
     return params
 
 
-def _render_heston_params(defaults: Dict, key_prefix: str) -> Dict[str, float]:
+def _render_heston_params(defaults: dict, key_prefix: str) -> dict[str, float]:
     """Render Heston parameters."""
     params = {}
 
@@ -251,7 +251,7 @@ def _render_heston_params(defaults: Dict, key_prefix: str) -> Dict[str, float]:
     return params
 
 
-def _render_merton_params(defaults: Dict, key_prefix: str) -> Dict[str, float]:
+def _render_merton_params(defaults: dict, key_prefix: str) -> dict[str, float]:
     """Render Merton parameters."""
     params = {}
 
@@ -313,7 +313,7 @@ def _render_merton_params(defaults: Dict, key_prefix: str) -> Dict[str, float]:
     return params
 
 
-def _render_bates_params(defaults: Dict, key_prefix: str) -> Dict[str, float]:
+def _render_bates_params(defaults: dict, key_prefix: str) -> dict[str, float]:
     """Render Bates parameters (Heston + Merton jumps)."""
     params = {}
 
@@ -367,7 +367,7 @@ def _render_bates_params(defaults: Dict, key_prefix: str) -> Dict[str, float]:
     return params
 
 
-def _render_garch_params(defaults: Dict, key_prefix: str) -> Dict[str, float]:
+def _render_garch_params(defaults: dict, key_prefix: str) -> dict[str, float]:
     """Render GARCH parameters.
 
     Theoretical constraints:
@@ -434,7 +434,7 @@ def _render_garch_params(defaults: Dict, key_prefix: str) -> Dict[str, float]:
     return params
 
 
-def _render_ngarch_params(defaults: Dict, key_prefix: str) -> Dict[str, float]:
+def _render_ngarch_params(defaults: dict, key_prefix: str) -> dict[str, float]:
     """Render NGARCH parameters."""
     params = _render_garch_params(defaults, key_prefix)
 
@@ -454,7 +454,7 @@ def _render_ngarch_params(defaults: Dict, key_prefix: str) -> Dict[str, float]:
     return params
 
 
-def _render_gjr_garch_params(defaults: Dict, key_prefix: str) -> Dict[str, float]:
+def _render_gjr_garch_params(defaults: dict, key_prefix: str) -> dict[str, float]:
     """Render GJR-GARCH parameters."""
     params = _render_garch_params(defaults, key_prefix)
 
@@ -474,7 +474,7 @@ def _render_gjr_garch_params(defaults: Dict, key_prefix: str) -> Dict[str, float
     return params
 
 
-def _render_dynamic_params(model_key: str, defaults: Dict, key_prefix: str) -> Dict[str, float]:
+def _render_dynamic_params(model_key: str, defaults: dict, key_prefix: str) -> dict[str, float]:
     """Render parameters dynamically from ModelSpec (used for custom models)."""
     params = {}
     model = get_model(model_key)
@@ -495,7 +495,7 @@ def _render_dynamic_params(model_key: str, defaults: Dict, key_prefix: str) -> D
     return params
 
 
-def _render_feller_warning(params: Dict[str, float]):
+def _render_feller_warning(params: dict[str, float]):
     """Render Feller condition warning."""
     satisfied, lhs, rhs = check_feller_condition(params)
 
@@ -508,7 +508,7 @@ def _render_feller_warning(params: Dict[str, float]):
         )
 
 
-def _render_stationarity_warning(model_key: str, params: Dict[str, float]):
+def _render_stationarity_warning(model_key: str, params: dict[str, float]):
     """Render stationarity condition warning with long-run volatility."""
     stationary, persistence = check_garch_stationarity(model_key, params)
 
@@ -537,7 +537,7 @@ def _render_stationarity_warning(model_key: str, params: Dict[str, float]):
         )
 
 
-def render_simulation_settings(key_prefix: str = "sim") -> Dict[str, Any]:
+def render_simulation_settings(key_prefix: str = "sim") -> dict[str, Any]:
     """
     Render simulation settings section.
 
@@ -588,7 +588,7 @@ def render_simulation_settings(key_prefix: str = "sim") -> Dict[str, Any]:
     return settings
 
 
-def render_option_parameters(key_prefix: str = "option") -> Dict[str, Any]:
+def render_option_parameters(key_prefix: str = "option") -> dict[str, Any]:
     """
     Render option parameters for pricing comparison with option_pricer style.
 
@@ -650,7 +650,7 @@ def render_option_parameters(key_prefix: str = "option") -> Dict[str, Any]:
 def render_parameter_panel(
     model_key: str,
     key_prefix: str = "param"
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Render complete parameter panel for a model.
 

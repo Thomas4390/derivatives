@@ -4,31 +4,28 @@ Sidebar component for Monte Carlo Simulation Explorer.
 Provides model selection and parameter configuration interface.
 """
 
-import streamlit as st
-from typing import Dict, Any
+from typing import Any
 
+import streamlit as st
 from config.constants import (
-    PRICE_MODELS,
-    VOLATILITY_MODELS,
-    MODEL_DESCRIPTIONS,
-    STATIONARITY_CONDITIONS,
-    DEFAULT_SPOT_PRICE,
-    DEFAULT_RISK_FREE_RATE,
-    DEFAULT_VOLATILITY,
-    DEFAULT_TIME_HORIZON,
+    DEFAULT_EXPECTED_RETURN,
     DEFAULT_NUM_PATHS,
     DEFAULT_NUM_STEPS,
-    DEFAULT_EXPECTED_RETURN
+    DEFAULT_RISK_FREE_RATE,
+    DEFAULT_SPOT_PRICE,
+    DEFAULT_TIME_HORIZON,
+    DEFAULT_VOLATILITY,
+    MODEL_DESCRIPTIONS,
+    PRICE_MODELS,
+    STATIONARITY_CONDITIONS,
+    VOLATILITY_MODELS,
 )
 
 # Import Black-Scholes for premium calculation
-from backend.option_pricing.options_calculator import (
-    black_scholes_call_price,
-    black_scholes_put_price
-)
+from backend.utils.math import bs_price as _bs_price
 
 
-def render_sidebar() -> Dict[str, Any]:
+def render_sidebar() -> dict[str, Any]:
     """
     Render the sidebar with model selection and parameters.
 
@@ -280,7 +277,7 @@ def render_sidebar() -> Dict[str, Any]:
         return params
 
 
-def _render_price_model_params(model: str, base_volatility: float) -> Dict[str, Any]:
+def _render_price_model_params(model: str, base_volatility: float) -> dict[str, Any]:
     """Render parameters specific to price models."""
     params = {}
 
@@ -529,7 +526,7 @@ def _render_price_model_params(model: str, base_volatility: float) -> Dict[str, 
     return params
 
 
-def _render_volatility_model_params(model: str, base_volatility: float) -> Dict[str, Any]:
+def _render_volatility_model_params(model: str, base_volatility: float) -> dict[str, Any]:
     """Render parameters specific to volatility models."""
     params = {}
 
@@ -641,11 +638,11 @@ def _render_option_pnl_params(
     risk_free_rate: float,
     time_horizon: float,
     volatility: float
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Render parameters specific to Option P&L simulation."""
     from components.strategy_builder import (
+        export_positions_for_pnl_engine,
         render_strategy_builder,
-        export_positions_for_pnl_engine
     )
 
     params = {}
@@ -675,10 +672,7 @@ def _render_option_pnl_params(
 
     def bs_price(s, k, r, t, sigma, opt_type):
         """Black-Scholes pricing wrapper."""
-        if opt_type == 'call':
-            return black_scholes_call_price(s, k, t, r, sigma)
-        else:
-            return black_scholes_put_price(s, k, t, r, sigma)
+        return _bs_price(s, k, t, r, sigma, is_call=(opt_type == 'call'))
 
     positions, stock_position = render_strategy_builder(
         spot_price=spot_price,

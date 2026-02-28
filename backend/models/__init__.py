@@ -29,42 +29,40 @@ Version: 3.0.0
 # =============================================================================
 
 # Core model classes (new architecture)
-from backend.models.gbm import GBMModel
-from backend.models.heston import HestonModel
-from backend.models.merton import MertonModel
+# PricingCapability is canonical in backend.core.result_types
+from backend.core.result_types import PricingCapability
+
+# =============================================================================
+# Base Classes and Registry
+# =============================================================================
+from backend.models.base import Measure
 from backend.models.bates import BatesModel
+
+# Characteristic functions (Numba-optimized)
+from backend.models.characteristic_functions import (
+    bates_cf_vectorized,
+    bates_characteristic_function,
+    heston_cf_vectorized,
+    heston_characteristic_function,
+    merton_cf_vectorized,
+    merton_characteristic_function,
+)
 
 # GARCH family models (now also using merged parameters)
 from backend.models.garch import (
     BaseGARCHModel,
     GARCHModel,
-    NGARCHModel,
-    GJRGARCHModel,
     # Backward compatibility aliases (params classes now alias model classes)
     GARCHParams,
-    NGARCHParams,
+    GJRGARCHModel,
     GJRGARCHParams,
+    NGARCHModel,
+    NGARCHParams,
 )
-
-# Characteristic functions (Numba-optimized)
-from backend.models.characteristic_functions import (
-    heston_characteristic_function,
-    heston_cf_vectorized,
-    bates_characteristic_function,
-    bates_cf_vectorized,
-    merton_characteristic_function,
-    merton_cf_vectorized,
-)
-
-# =============================================================================
-# Base Classes and Registry
-# =============================================================================
-
-from backend.models.base import Measure
-# PricingCapability is canonical in backend.core.result_types
-from backend.core.result_types import PricingCapability
-from backend.models.registry import registry, ModelRegistry
-
+from backend.models.gbm import GBMModel
+from backend.models.heston import HestonModel
+from backend.models.merton import MertonModel
+from backend.models.registry import ModelRegistry, registry
 
 # =============================================================================
 # EXPORTS

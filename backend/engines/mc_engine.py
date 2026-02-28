@@ -12,26 +12,27 @@ Author: Thomas
 Created: 2025
 """
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import List, Optional, Callable, Tuple
+
 import numpy as np
 
-from backend.core.interfaces import PricingEngine, Instrument, Model
+from backend.core.interfaces import Instrument, Model, PricingEngine
 from backend.core.market import MarketEnvironment
 from backend.core.result_types import (
-    PricingResult, PricingCapability, ExerciseStyle, GreeksResult
+    ExerciseStyle,
+    GreeksResult,
+    PricingCapability,
+    PricingResult,
 )
+from backend.engines.monte_carlo.mc_base import GenericMCEngine, MCConfig
 from backend.instruments.options import VanillaOption
-from backend.engines.monte_carlo.mc_base import (
-    GenericMCEngine, MCConfig
-)
+from backend.models.bates import BatesModel
 
 # Import model types for type checking
 from backend.models.gbm import GBMModel
 from backend.models.heston import HestonModel
-from backend.models.bates import BatesModel
 from backend.models.merton import MertonModel
-
 
 # =============================================================================
 # MONTE CARLO ENGINE
@@ -80,7 +81,7 @@ class MonteCarloEngine(PricingEngine):
 
     n_paths: int = 100_000
     n_steps: int = 252
-    seed: Optional[int] = None
+    seed: int | None = None
     antithetic: bool = True
 
     def __post_init__(self):
@@ -98,7 +99,7 @@ class MonteCarloEngine(PricingEngine):
         return PricingCapability.MONTE_CARLO
 
     @property
-    def supported_exercises(self) -> List[ExerciseStyle]:
+    def supported_exercises(self) -> list[ExerciseStyle]:
         """European and potentially American with LSM."""
         return [ExerciseStyle.EUROPEAN]
 
@@ -116,7 +117,10 @@ class MonteCarloEngine(PricingEngine):
 
         # Reject path-dependent exotic options — terminal simulation only
         from backend.instruments.options import (
-            BarrierOption, AsianOption, DigitalOption, LookbackOption
+            AsianOption,
+            BarrierOption,
+            DigitalOption,
+            LookbackOption,
         )
         if isinstance(instrument, (BarrierOption, AsianOption, DigitalOption, LookbackOption)):
             return False
@@ -242,7 +246,7 @@ class MonteCarloEngine(PricingEngine):
         instrument: Instrument,
         model: Model,
         market: MarketEnvironment,
-    ) -> Tuple[PricingResult, np.ndarray]:
+    ) -> tuple[PricingResult, np.ndarray]:
         """
         Price an option and return the simulated terminal prices.
 
@@ -300,7 +304,7 @@ class MonteCarloEngine(PricingEngine):
         model: Model,
         market: MarketEnvironment,
         strikes: np.ndarray,
-    ) -> Tuple[np.ndarray, np.ndarray]:
+    ) -> tuple[np.ndarray, np.ndarray]:
         """
         Price multiple strikes with single simulation.
 
@@ -350,7 +354,7 @@ class MonteCarloEngine(PricingEngine):
 
     def _get_terminal_simulator(
         self, model: Model, q: float
-    ) -> Callable[[float, float, float, int, int, Optional[int]], np.ndarray]:
+    ) -> Callable[[float, float, float, int, int, int | None], np.ndarray]:
         """
         Build a terminal price simulator for the given model.
 
@@ -371,18 +375,17 @@ class MonteCarloEngine(PricingEngine):
         """
         if isinstance(model, GBMModel):
             return self._make_gbm_simulator(model, q)
-        elif isinstance(model, HestonModel):
+        if isinstance(model, HestonModel):
             return self._make_heston_simulator(model, q)
-        elif isinstance(model, BatesModel):
+        if isinstance(model, BatesModel):
             return self._make_bates_simulator(model, q)
-        elif isinstance(model, MertonModel):
+        if isinstance(model, MertonModel):
             return self._make_merton_simulator(model, q)
-        else:
-            return self._make_generic_simulator(model, q)
+        return self._make_generic_simulator(model, q)
 
     def _make_gbm_simulator(
         self, model: GBMModel, q: float
-    ) -> Callable[[float, float, float, int, int, Optional[int]], np.ndarray]:
+    ) -> Callable[[float, float, float, int, int, int | None], np.ndarray]:
         """Create GBM terminal simulator."""
         from backend.simulation.models.gbm import GBMSimulator
 
@@ -398,7 +401,7 @@ class MonteCarloEngine(PricingEngine):
 
     def _make_heston_simulator(
         self, model: HestonModel, q: float
-    ) -> Callable[[float, float, float, int, int, Optional[int]], np.ndarray]:
+    ) -> Callable[[float, float, float, int, int, int | None], np.ndarray]:
         """Create Heston terminal simulator."""
         from backend.simulation.models.heston import HestonSimulator
 
@@ -419,7 +422,7 @@ class MonteCarloEngine(PricingEngine):
 
     def _make_bates_simulator(
         self, model: BatesModel, q: float
-    ) -> Callable[[float, float, float, int, int, Optional[int]], np.ndarray]:
+    ) -> Callable[[float, float, float, int, int, int | None], np.ndarray]:
         """Create Bates terminal simulator."""
         from backend.simulation.models.bates import BatesSimulator
 
@@ -436,7 +439,7 @@ class MonteCarloEngine(PricingEngine):
 
     def _make_merton_simulator(
         self, model: MertonModel, q: float
-    ) -> Callable[[float, float, float, int, int, Optional[int]], np.ndarray]:
+    ) -> Callable[[float, float, float, int, int, int | None], np.ndarray]:
         """Create Merton terminal simulator."""
         from backend.simulation.models.merton import MertonSimulator
 
@@ -452,7 +455,7 @@ class MonteCarloEngine(PricingEngine):
 
     def _make_generic_simulator(
         self, model: Model, q: float
-    ) -> Callable[[float, float, float, int, int, Optional[int]], np.ndarray]:
+    ) -> Callable[[float, float, float, int, int, int | None], np.ndarray]:
         """Create generic Euler-Maruyama terminal simulator for custom models."""
         from backend.simulation.models.generic_euler import GenericEulerSimulator
 
@@ -466,13 +469,13 @@ class MonteCarloEngine(PricingEngine):
 
 
 if __name__ == "__main__":
-    from backend.instruments.options import VanillaOption
-    from backend.models.gbm import GBMModel
-    from backend.models.heston import HestonModel
-    from backend.models.bates import BatesModel
-    from backend.models.merton import MertonModel
     from backend.core.market import MarketEnvironment
     from backend.engines import BSAnalyticEngine, FFTEngine
+    from backend.instruments.options import VanillaOption
+    from backend.models.bates import BatesModel
+    from backend.models.gbm import GBMModel
+    from backend.models.heston import HestonModel
+    from backend.models.merton import MertonModel
 
     print("=" * 50)
     print("MonteCarloEngine Smoke Test")

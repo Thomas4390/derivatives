@@ -27,10 +27,11 @@ from numba import njit, prange
 # Import from single source of truth
 from backend.utils.math import (
     bs_greeks as _bs_greeks,
+)
+from backend.utils.math import (
     bs_second_order_greeks,
     bs_third_order_greeks,
 )
-
 
 # =============================================================================
 # GREEK INDEX MAPPING

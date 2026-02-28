@@ -16,17 +16,16 @@ Created: 2025
 """
 
 from dataclasses import dataclass
-from typing import List
+
 import numpy as np
 
 from backend.core.interfaces import Instrument, Payoff
 from backend.core.result_types import ExerciseStyle
 from backend.instruments.payoffs import (
+    CompositePayoff,
     VanillaCallPayoff,
     VanillaPutPayoff,
-    CompositePayoff,
 )
-
 
 # =============================================================================
 # STRATEGY LEG
@@ -92,7 +91,7 @@ class OptionStrategy(Instrument):
     All strategies are European exercise only.
     """
 
-    def __init__(self, legs: List[StrategyLeg], maturity: float):
+    def __init__(self, legs: list[StrategyLeg], maturity: float):
         """
         Initialize strategy.
 
@@ -117,7 +116,7 @@ class OptionStrategy(Instrument):
         pass
 
     @property
-    def legs(self) -> List[StrategyLeg]:
+    def legs(self) -> list[StrategyLeg]:
         """Strategy legs (read-only)."""
         return list(self._legs)
 

@@ -2,11 +2,11 @@
 P&L Analysis Charts — Simulated P&L scatter with marginal histogram + 3D scatter.
 """
 
+
 import numpy as np
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 import streamlit as st
-from typing import Optional
+from plotly.subplots import make_subplots
 
 from backend.simulation.base import SimulationResult
 
@@ -39,7 +39,7 @@ _AXIS_STYLE = dict(
 def render_payoff_with_distribution(
     result: SimulationResult,
     pnl_values: np.ndarray,
-    breakeven_prices: Optional[np.ndarray] = None,
+    breakeven_prices: np.ndarray | None = None,
     spot: float = 100.0,
     max_scatter: int = 5000,
 ) -> None:

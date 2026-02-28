@@ -96,10 +96,9 @@ def _format_breakeven_points(breakeven_points: list[float] | None) -> str:
 
     if len(be_points) == 1:
         return f"${be_points[0]:,.2f}"
-    elif len(be_points) == 2:
+    if len(be_points) == 2:
         return f"${be_points[0]:,.0f} / ${be_points[1]:,.0f}"
-    else:
-        return f"{len(be_points)} points"
+    return f"{len(be_points)} points"
 
 
 def render_position_info_banner(

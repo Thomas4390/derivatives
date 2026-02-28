@@ -12,12 +12,12 @@ Created: 2025
 """
 
 from abc import ABC, abstractmethod
-from typing import List, Dict, Any
+from typing import Any
+
 import numpy as np
 
-from backend.core.result_types import PricingResult, PricingCapability, ExerciseStyle
 from backend.core.market import MarketEnvironment
-
+from backend.core.result_types import ExerciseStyle, PricingCapability, PricingResult
 
 # =============================================================================
 # PILLAR 1: PAYOFF (The Contract Terms)
@@ -140,12 +140,12 @@ class Model(ABC):
 
     @property
     @abstractmethod
-    def supported_engines(self) -> List[PricingCapability]:
+    def supported_engines(self) -> list[PricingCapability]:
         """Which pricing methods this model supports."""
         pass
 
     @abstractmethod
-    def get_parameters(self) -> Dict[str, Any]:
+    def get_parameters(self) -> dict[str, Any]:
         """Return model parameters as dictionary."""
         pass
 
@@ -317,7 +317,7 @@ class PricingEngine(ABC):
 
     @property
     @abstractmethod
-    def supported_exercises(self) -> List[ExerciseStyle]:
+    def supported_exercises(self) -> list[ExerciseStyle]:
         """Which exercise styles this engine can handle."""
         pass
 

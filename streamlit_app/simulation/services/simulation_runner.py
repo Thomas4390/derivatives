@@ -5,20 +5,20 @@ Provides P&L calculation from simulation results.
 """
 
 import time as time_module
-from typing import Dict, Any, Optional
+from typing import Any
 
-from backend.simulation.base import SimulationResult
 from backend.portfolio.pnl import (
     calculate_portfolio_pnl_vectorized,
     calculate_portfolio_pnl_with_stock,
     compute_risk_metrics,
 )
+from backend.simulation.base import SimulationResult
 
 
 def calculate_pnl_from_paths(
     price_result: SimulationResult,
-    params: Dict[str, Any]
-) -> Optional[Dict[str, Any]]:
+    params: dict[str, Any]
+) -> dict[str, Any] | None:
     """
     Calculate portfolio P&L from existing price simulation result.
 

@@ -13,19 +13,19 @@ Created: 2025
 """
 
 from dataclasses import dataclass
-from typing import List
+
 import numpy as np
 
-from backend.core.interfaces import PricingEngine, Instrument, Model
+from backend.core.interfaces import Instrument, Model, PricingEngine
 from backend.core.market import MarketEnvironment
 from backend.core.result_types import (
-    PricingResult, PricingCapability, ExerciseStyle, GreeksResult
+    ExerciseStyle,
+    GreeksResult,
+    PricingCapability,
+    PricingResult,
 )
+from backend.engines.fourier.carr_madan import CarrMadanFFTEngine, FFTConfig
 from backend.instruments.options import VanillaOption
-from backend.engines.fourier.carr_madan import (
-    CarrMadanFFTEngine, FFTConfig
-)
-
 
 # =============================================================================
 # FFT ENGINE
@@ -80,7 +80,7 @@ class FFTEngine(PricingEngine):
         return PricingCapability.FFT
 
     @property
-    def supported_exercises(self) -> List[ExerciseStyle]:
+    def supported_exercises(self) -> list[ExerciseStyle]:
         """Only European exercise supported by FFT."""
         return [ExerciseStyle.EUROPEAN]
 
@@ -298,13 +298,13 @@ class FFTEngine(PricingEngine):
 
 
 if __name__ == "__main__":
-    from backend.instruments.options import VanillaOption
-    from backend.models.gbm import GBMModel
-    from backend.models.heston import HestonModel
-    from backend.models.bates import BatesModel
-    from backend.models.merton import MertonModel
     from backend.core.market import MarketEnvironment
     from backend.engines import BSAnalyticEngine
+    from backend.instruments.options import VanillaOption
+    from backend.models.bates import BatesModel
+    from backend.models.gbm import GBMModel
+    from backend.models.heston import HestonModel
+    from backend.models.merton import MertonModel
 
     print("=" * 50)
     print("FFTEngine Smoke Test")

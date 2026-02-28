@@ -20,9 +20,9 @@ Created: 2025
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Optional, Dict, Any
-import numpy as np
+from typing import Any
 
+import numpy as np
 
 # =============================================================================
 # Result Containers
@@ -58,8 +58,8 @@ class SimulationResult:
     computation_time: float
     n_paths: int
     n_steps: int
-    volatility_paths: Optional[np.ndarray] = None
-    parameters: Dict[str, Any] = field(default_factory=dict)
+    volatility_paths: np.ndarray | None = None
+    parameters: dict[str, Any] = field(default_factory=dict)
 
     @property
     def terminal_prices(self) -> np.ndarray:
@@ -92,14 +92,14 @@ class SimulationResult:
         return float(np.std(self.terminal_prices))
 
     @property
-    def terminal_volatility(self) -> Optional[np.ndarray]:
+    def terminal_volatility(self) -> np.ndarray | None:
         """Returns terminal volatility values if available."""
         if self.volatility_paths is not None:
             return self.volatility_paths[:, -1]
         return None
 
     @property
-    def mean_volatility_path(self) -> Optional[np.ndarray]:
+    def mean_volatility_path(self) -> np.ndarray | None:
         """Returns mean volatility path if available."""
         if self.volatility_paths is not None:
             return np.mean(self.volatility_paths, axis=0)
@@ -209,7 +209,7 @@ class BaseSimulator(ABC):
         t: float,
         n_paths: int,
         n_steps: int,
-        seed: Optional[int] = None
+        seed: int | None = None
     ) -> SimulationResult:
         """
         Simulate full price paths under the P-measure (physical measure).
@@ -244,7 +244,7 @@ class BaseSimulator(ABC):
         t: float,
         n_paths: int,
         n_steps: int,
-        seed: Optional[int] = None
+        seed: int | None = None
     ) -> np.ndarray:
         """
         Simulate only terminal values S(T).
@@ -275,7 +275,7 @@ class BaseSimulator(ABC):
         pass
 
     @abstractmethod
-    def get_parameters(self) -> Dict[str, Any]:
+    def get_parameters(self) -> dict[str, Any]:
         """
         Return current model parameters.
 

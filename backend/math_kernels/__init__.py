@@ -58,55 +58,51 @@ Author: Thomas
 Created: 2025
 """
 
-from backend.math_kernels.sde_kernels import (
-    euler_step,
-    milstein_step,
-    gbm_exact_step,
-    gbm_euler_step,
-    heston_euler_step,
-    heston_truncation_step,
-    heston_reflection_step,
-    heston_qe_step,
-    heston_spot_step,
-    merton_jump_step,
-)
-
-from backend.math_kernels.random import (
-    generate_normal,
-    generate_normal_2d,
-    generate_correlated_normals,
-    generate_correlated_brownian,
-    generate_antithetic_normals,
-    generate_antithetic_brownian,
-    cholesky_transform,
-    compute_cholesky,
-    box_muller_transform,
-)
-
 from backend.math_kernels.payoff_kernels import (
+    asian_arithmetic_payoff,
+    barrier_down_out_put_payoff,
+    barrier_up_out_call_payoff,
+    butterfly_payoff,
     call_payoff,
-    put_payoff,
     call_payoff_vec,
-    put_payoff_vec,
     digital_call_payoff,
-    digital_put_payoff,
     digital_call_payoff_vec,
+    digital_put_payoff,
     digital_put_payoff_vec,
+    put_payoff,
+    put_payoff_vec,
     straddle_payoff,
     strangle_payoff,
-    butterfly_payoff,
-    asian_arithmetic_payoff,
-    barrier_up_out_call_payoff,
-    barrier_down_out_put_payoff,
 )
-
+from backend.math_kernels.random import (
+    box_muller_transform,
+    cholesky_transform,
+    compute_cholesky,
+    generate_antithetic_brownian,
+    generate_antithetic_normals,
+    generate_correlated_brownian,
+    generate_correlated_normals,
+    generate_normal,
+    generate_normal_2d,
+)
 from backend.math_kernels.regression import (
-    laguerre_basis,
-    polynomial_basis,
-    lstsq_regression,
     continuation_value,
+    laguerre_basis,
+    lstsq_regression,
+    polynomial_basis,
 )
-
+from backend.math_kernels.sde_kernels import (
+    euler_step,
+    gbm_euler_step,
+    gbm_exact_step,
+    heston_euler_step,
+    heston_qe_step,
+    heston_reflection_step,
+    heston_spot_step,
+    heston_truncation_step,
+    merton_jump_step,
+    milstein_step,
+)
 
 __all__ = [
     # SDE kernels

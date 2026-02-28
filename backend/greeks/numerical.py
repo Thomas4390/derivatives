@@ -13,17 +13,15 @@ Author: Thomas
 Created: 2025
 """
 
-from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable, NamedTuple, Optional
+from typing import TYPE_CHECKING, NamedTuple
 
 from backend.utils.math import DAYS_PER_YEAR
 
 if TYPE_CHECKING:
-    from backend.core.interfaces import PricingEngine, Instrument, Model
+    from backend.core.interfaces import Instrument, Model, PricingEngine
     from backend.core.market import MarketEnvironment
 
 
@@ -660,11 +658,11 @@ def finite_difference_greeks(
     vol: float,
     time: float,
     rate: float,
-    config: Optional[GreeksBumpConfig] = None,
-    spot_bump: Optional[float] = None,
-    vol_bump: Optional[float] = None,
-    time_bump_days: Optional[float] = None,
-    rate_bump: Optional[float] = None,
+    config: GreeksBumpConfig | None = None,
+    spot_bump: float | None = None,
+    vol_bump: float | None = None,
+    time_bump_days: float | None = None,
+    rate_bump: float | None = None,
     **kwargs
 ) -> NumericalGreeks:
     """
@@ -765,7 +763,7 @@ class ModelNumericalGreeks:
         Bump configuration. If not provided, uses DEFAULT_BUMP_CONFIG.
     """
 
-    def __init__(self, config: Optional[GreeksBumpConfig] = None):
+    def __init__(self, config: GreeksBumpConfig | None = None):
         """
         Initialize numerical Greeks calculator.
 

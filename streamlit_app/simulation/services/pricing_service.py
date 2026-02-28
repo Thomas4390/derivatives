@@ -8,21 +8,23 @@ Provides:
 - Greeks computation where available
 """
 
-from typing import Dict, Any, Optional, List, Tuple
 from dataclasses import dataclass
+from typing import Any
+
 import numpy as np
 
-# Backend imports
-from backend.simulation.base import SimulationResult
+from backend.core.market import MarketEnvironment
+from backend.core.result_types import ExerciseStyle
 from backend.engines.analytic_engine import BSAnalyticEngine
-from backend.engines.fft_engine import FFTEngine, FFTConfig
+from backend.engines.fft_engine import FFTConfig, FFTEngine
+from backend.instruments.options import VanillaOption
+from backend.models.bates import BatesModel
 from backend.models.gbm import GBMModel
 from backend.models.heston import HestonModel
 from backend.models.merton import MertonModel
-from backend.models.bates import BatesModel
-from backend.instruments.options import VanillaOption
-from backend.core.result_types import ExerciseStyle
-from backend.core.market import MarketEnvironment
+
+# Backend imports
+from backend.simulation.base import SimulationResult
 
 
 @dataclass
@@ -31,26 +33,26 @@ class PricingComparison:
     # Monte Carlo
     mc_price: float
     mc_std_error: float
-    mc_confidence_interval: Tuple[float, float]
+    mc_confidence_interval: tuple[float, float]
     mc_n_paths: int
 
     # Analytical (BS) - only for GBM
-    analytical_price: Optional[float] = None
-    analytical_delta: Optional[float] = None
-    analytical_gamma: Optional[float] = None
-    analytical_vega: Optional[float] = None
-    analytical_theta: Optional[float] = None
+    analytical_price: float | None = None
+    analytical_delta: float | None = None
+    analytical_gamma: float | None = None
+    analytical_vega: float | None = None
+    analytical_theta: float | None = None
 
     # FFT - for models with characteristic function
-    fft_price: Optional[float] = None
+    fft_price: float | None = None
 
     # Comparison metrics
-    mc_vs_analytical_error: Optional[float] = None
-    mc_vs_fft_error: Optional[float] = None
+    mc_vs_analytical_error: float | None = None
+    mc_vs_fft_error: float | None = None
 
     # Model info
     model: str = ""
-    available_methods: List[str] = None
+    available_methods: list[str] = None
 
     def __post_init__(self):
         if self.available_methods is None:
@@ -82,14 +84,14 @@ def _create_market(spot: float, rate: float) -> MarketEnvironment:
     return MarketEnvironment(spot=spot, rate=rate)
 
 
-def _create_model(model_key: str, params: Dict[str, Any]):
+def _create_model(model_key: str, params: dict[str, Any]):
     """Create pricing model from parameters."""
     model_lower = model_key.lower()
 
     if model_lower == "gbm":
         return GBMModel(sigma=params.get("sigma", 0.20))
 
-    elif model_lower == "heston":
+    if model_lower == "heston":
         return HestonModel(
             v0=params.get("v0", 0.04),
             kappa=params.get("kappa", 2.0),
@@ -98,7 +100,7 @@ def _create_model(model_key: str, params: Dict[str, Any]):
             rho=params.get("rho", -0.7)
         )
 
-    elif model_lower == "merton":
+    if model_lower == "merton":
         return MertonModel(
             sigma=params.get("sigma", 0.20),
             lambda_j=params.get("lambda_j", 0.5),
@@ -106,7 +108,7 @@ def _create_model(model_key: str, params: Dict[str, Any]):
             sigma_j=params.get("sigma_j", 0.2)
         )
 
-    elif model_lower == "bates":
+    if model_lower == "bates":
         return BatesModel(
             v0=params.get("v0", 0.04),
             kappa=params.get("kappa", 2.0),
@@ -118,16 +120,18 @@ def _create_model(model_key: str, params: Dict[str, Any]):
             sigma_j=params.get("sigma_j", 0.2)
         )
 
-    else:
-        # Try custom model
-        from services.custom_model_service import is_custom_model, get_custom_model_class
-        if is_custom_model(model_key):
-            cls = get_custom_model_class()
-            if cls is not None:
-                from services.simulation_service import _extract_model_params
-                model_params = _extract_model_params(model_key, params)
-                return cls(**model_params)
-        return None
+    # Try custom model
+    from services.custom_model_service import (
+        get_custom_model_class,
+        is_custom_model,
+    )
+    if is_custom_model(model_key):
+        cls = get_custom_model_class()
+        if cls is not None:
+            from services.simulation_service import _extract_model_params
+            model_params = _extract_model_params(model_key, params)
+            return cls(**model_params)
+    return None
 
 
 def price_from_terminals(
@@ -137,7 +141,7 @@ def price_from_terminals(
     risk_free_rate: float,
     is_call: bool = True,
     confidence_level: float = 0.95
-) -> Dict[str, float]:
+) -> dict[str, float]:
     """
     Price option from terminal prices using Monte Carlo.
 
@@ -184,13 +188,13 @@ def price_from_terminals(
 
 def price_with_analytical(
     model_key: str,
-    params: Dict[str, Any],
+    params: dict[str, Any],
     strike: float,
     time_to_maturity: float,
     spot: float,
     risk_free_rate: float,
     is_call: bool = True
-) -> Optional[Dict[str, float]]:
+) -> dict[str, float] | None:
     """
     Price option using analytical formula (Black-Scholes).
     Only available for GBM model.
@@ -232,13 +236,13 @@ def price_with_analytical(
 
 def price_with_fft(
     model_key: str,
-    params: Dict[str, Any],
+    params: dict[str, Any],
     strike: float,
     time_to_maturity: float,
     spot: float,
     risk_free_rate: float,
     is_call: bool = True
-) -> Optional[float]:
+) -> float | None:
     """
     Price option using FFT (Carr-Madan).
     Available for GBM, Heston, Merton, Bates.
@@ -275,7 +279,7 @@ def price_with_fft(
 
 def compare_pricing(
     model_key: str,
-    params: Dict[str, Any],
+    params: dict[str, Any],
     terminal_prices: np.ndarray,
     strike: float,
     time_to_maturity: float,
@@ -361,14 +365,14 @@ def compare_pricing(
 
 def price_multiple_strikes(
     model_key: str,
-    params: Dict[str, Any],
+    params: dict[str, Any],
     simulation_result: SimulationResult,
     strikes: np.ndarray,
     time_to_maturity: float,
     spot: float,
     risk_free_rate: float,
     is_call: bool = True
-) -> Dict[str, np.ndarray]:
+) -> dict[str, np.ndarray]:
     """
     Price options at multiple strikes.
 
@@ -436,29 +440,32 @@ def price_multiple_strikes(
     return result
 
 
-def get_available_pricing_methods(model_key: str) -> List[str]:
+def get_available_pricing_methods(model_key: str) -> list[str]:
     """Get available pricing methods for a model."""
     model_lower = model_key.lower()
 
     if model_lower == "gbm":
         return ["analytical", "fft", "monte_carlo"]
-    elif model_lower in ["heston", "merton", "bates"]:
+    if model_lower in ["heston", "merton", "bates"]:
         return ["fft", "monte_carlo"]
-    elif model_lower in ["garch", "ngarch", "gjr_garch"]:
+    if model_lower in ["garch", "ngarch", "gjr_garch"]:
         return ["monte_carlo"]
-    else:
-        # Custom model: read from supported_engines
-        from services.custom_model_service import is_custom_model, get_custom_model_class
-        from backend.core.result_types import PricingCapability
-        if is_custom_model(model_key):
-            cls = get_custom_model_class()
-            if cls is not None:
-                instance = cls(**{s["name"]: s["default"] for s in cls.PARAMETER_SPECS})
-                methods = []
-                if PricingCapability.FFT in instance.supported_engines:
-                    methods.append("fft")
-                methods.append("monte_carlo")
-                return methods
-        return ["monte_carlo"]
+    # Custom model: read from supported_engines
+    from services.custom_model_service import (
+        get_custom_model_class,
+        is_custom_model,
+    )
+
+    from backend.core.result_types import PricingCapability
+    if is_custom_model(model_key):
+        cls = get_custom_model_class()
+        if cls is not None:
+            instance = cls(**{s["name"]: s["default"] for s in cls.PARAMETER_SPECS})
+            methods = []
+            if PricingCapability.FFT in instance.supported_engines:
+                methods.append("fft")
+            methods.append("monte_carlo")
+            return methods
+    return ["monte_carlo"]
 
 

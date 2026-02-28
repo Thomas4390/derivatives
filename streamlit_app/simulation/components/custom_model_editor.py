@@ -9,13 +9,11 @@ Provides a step-by-step workflow:
 
 import streamlit as st
 from code_editor import code_editor
-
 from services.custom_model_service import (
     compile_and_validate,
     register_custom_model,
     unregister_custom_model,
 )
-
 
 # ── Template code ────────────────────────────────────────────────────────
 

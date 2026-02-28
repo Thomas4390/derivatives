@@ -13,18 +13,20 @@ Created: 2025
 """
 
 from dataclasses import dataclass
-from typing import List
+
 import numpy as np
 from scipy.stats import norm
 
-from backend.core.interfaces import PricingEngine, Instrument, Model
+from backend.core.interfaces import Instrument, Model, PricingEngine
 from backend.core.market import MarketEnvironment
 from backend.core.result_types import (
-    PricingResult, GreeksResult, PricingCapability, ExerciseStyle
+    ExerciseStyle,
+    GreeksResult,
+    PricingCapability,
+    PricingResult,
 )
 from backend.instruments.options import VanillaOption
 from backend.models.gbm import GBMModel
-
 
 # =============================================================================
 # BLACK-SCHOLES ANALYTICAL ENGINE
@@ -64,7 +66,7 @@ class BSAnalyticEngine(PricingEngine):
         return PricingCapability.ANALYTICAL
 
     @property
-    def supported_exercises(self) -> List[ExerciseStyle]:
+    def supported_exercises(self) -> list[ExerciseStyle]:
         """Only European exercise supported."""
         return [ExerciseStyle.EUROPEAN]
 
@@ -286,8 +288,7 @@ class BSAnalyticEngine(PricingEngine):
             # At expiry
             if is_call:
                 return max(s0 - k, 0.0)
-            else:
-                return max(k - s0, 0.0)
+            return max(k - s0, 0.0)
 
         d1, d2 = self._d1_d2(s0=s0, k=k, t=t, r=r, q=q, sigma=sigma)
         discount = np.exp(-r * t)
@@ -319,9 +320,9 @@ class BSAnalyticEngine(PricingEngine):
 
 
 if __name__ == "__main__":
+    from backend.core.market import MarketEnvironment
     from backend.instruments.options import VanillaOption
     from backend.models.gbm import GBMModel
-    from backend.core.market import MarketEnvironment
 
     print("=" * 50)
     print("BSAnalyticEngine Smoke Test")

@@ -24,8 +24,8 @@ Position dict formats:
         }
 """
 
+
 import streamlit as st
-from typing import Optional
 
 
 def init_session_state() -> None:
@@ -47,7 +47,7 @@ def get_positions() -> list[dict]:
     return st.session_state.get('positions', [])
 
 
-def get_stock_position() -> Optional[dict]:
+def get_stock_position() -> dict | None:
     """
     Get the current stock position.
 
@@ -87,7 +87,7 @@ def remove_last_position() -> bool:
     return False
 
 
-def set_stock_position(stock_position: Optional[dict]) -> None:
+def set_stock_position(stock_position: dict | None) -> None:
     """
     Set the stock position.
 
@@ -138,7 +138,7 @@ def get_position_count() -> tuple[int, bool]:
     return option_count, has_stock
 
 
-def set_positions_from_strategy(positions: list[dict], stock_position: Optional[dict]) -> None:
+def set_positions_from_strategy(positions: list[dict], stock_position: dict | None) -> None:
     """
     Set positions from a predefined strategy.
 
@@ -160,12 +160,12 @@ def create_option_position(
     strike: float,
     quantity: int,
     premium_paid: float,
-    dte_days: Optional[int] = None,
-    volatility: Optional[float] = None,
+    dte_days: int | None = None,
+    volatility: float | None = None,
     instrument_class: str = 'vanilla',
-    barrier: Optional[float] = None,
-    is_up: Optional[bool] = None,
-    is_knock_in: Optional[bool] = None,
+    barrier: float | None = None,
+    is_up: bool | None = None,
+    is_knock_in: bool | None = None,
     rebate: float = 0.0,
     payout: float = 1.0,
 ) -> dict:

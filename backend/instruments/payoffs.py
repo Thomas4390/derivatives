@@ -13,12 +13,11 @@ Author: Thomas
 Created: 2025
 """
 
-from typing import List
+
 import numpy as np
 from numba import njit
 
 from backend.core.interfaces import Payoff
-
 
 # =============================================================================
 # VALIDATION HELPERS
@@ -320,13 +319,13 @@ class CompositePayoff(Payoff):
     straddle(np.array([90, 100, 110]))  # array([10, 0, 10])
     """
 
-    def __init__(self, legs: List[tuple]):
+    def __init__(self, legs: list[tuple]):
         if not legs:
             raise ValueError("CompositePayoff requires at least one leg")
         self._legs = legs
 
     @property
-    def legs(self) -> List[tuple]:
+    def legs(self) -> list[tuple]:
         """List of (weight, payoff) tuples."""
         return self._legs
 

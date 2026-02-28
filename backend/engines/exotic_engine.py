@@ -21,18 +21,26 @@ from dataclasses import dataclass
 
 from numba import njit
 
-from backend.utils.math import norm_cdf, DAYS_PER_YEAR
-from backend.core.interfaces import PricingEngine, Instrument, Model
+from backend.core.interfaces import Instrument, Model, PricingEngine
 from backend.core.market import MarketEnvironment
 from backend.core.result_types import (
-    PricingResult, GreeksResult, PricingCapability, ExerciseStyle
+    ExerciseStyle,
+    GreeksResult,
+    PricingCapability,
+    PricingResult,
 )
 from backend.instruments.options import (
-    BarrierOption, AsianOption, DigitalOption, LookbackOption,
-    ChooserOption, AssetOrNothingOption, PowerOption, GapOption,
+    AsianOption,
+    AssetOrNothingOption,
+    BarrierOption,
+    ChooserOption,
+    DigitalOption,
+    GapOption,
+    LookbackOption,
+    PowerOption,
 )
 from backend.models.gbm import GBMModel
-
+from backend.utils.math import DAYS_PER_YEAR, norm_cdf
 
 # =============================================================================
 # Option type constants for Greeks dispatch
@@ -70,8 +78,7 @@ def _bs_vanilla_price(S: float, K: float, T: float, r: float, q: float,
     df = math.exp(-r * T)
     if is_call:
         return S * qd * norm_cdf(d1) - K * df * norm_cdf(d2)
-    else:
-        return K * df * norm_cdf(-d2) - S * qd * norm_cdf(-d1)
+    return K * df * norm_cdf(-d2) - S * qd * norm_cdf(-d1)
 
 
 @njit(fastmath=True, cache=True)
@@ -123,8 +130,7 @@ def barrier_option_price(S: float, K: float, H: float, T: float, r: float, q: fl
             breached = S <= H
         if is_knock_in:
             return payoff if breached else 0.0
-        else:
-            return payoff if not breached else rebate
+        return payoff if not breached else rebate
 
     if sigma <= 0:
         # Deterministic forward: S * exp((r-q)*T)
@@ -143,8 +149,7 @@ def barrier_option_price(S: float, K: float, H: float, T: float, r: float, q: fl
 
         if is_knock_in:
             return (intrinsic * df) if breached else 0.0
-        else:
-            return (rebate * df) if breached else (intrinsic * df)
+        return (rebate * df) if breached else (intrinsic * df)
 
     # Check barrier breach (spot already past barrier)
     if is_up and S >= H:
@@ -329,8 +334,7 @@ def digital_price(S: float, K: float, T: float, r: float, q: float, sigma: float
     if T <= 0:
         if is_call:
             return payout if S > K else 0.0
-        else:
-            return payout if S < K else 0.0
+        return payout if S < K else 0.0
 
     if sigma <= 0:
         # Deterministic forward
@@ -338,8 +342,7 @@ def digital_price(S: float, K: float, T: float, r: float, q: float, sigma: float
         df = math.exp(-r * T)
         if is_call:
             return (payout * df) if F > K else 0.0
-        else:
-            return (payout * df) if F < K else 0.0
+        return (payout * df) if F < K else 0.0
 
     sqrt_T = math.sqrt(T)
     d2 = (math.log(S / K) + (r - q - 0.5 * sigma * sigma) * T) / (sigma * sqrt_T)
@@ -347,8 +350,7 @@ def digital_price(S: float, K: float, T: float, r: float, q: float, sigma: float
 
     if is_call:
         return payout * df * norm_cdf(d2)
-    else:
-        return payout * df * norm_cdf(-d2)
+    return payout * df * norm_cdf(-d2)
 
 
 @njit(fastmath=True, cache=True)
@@ -394,8 +396,7 @@ def lookback_fixed_price(S: float, K: float, M_min: float, M_max: float, T: floa
     if T <= 0:
         if is_call:
             return max(M_max - K, 0.0)
-        else:
-            return max(K - M_min, 0.0)
+        return max(K - M_min, 0.0)
 
     if sigma <= 0:
         # Deterministic forward: path is monotone, so max/min is at endpoints
@@ -406,10 +407,9 @@ def lookback_fixed_price(S: float, K: float, M_min: float, M_max: float, T: floa
             path_max = max(S, F)
             effective_max = max(M_max, path_max)
             return max(effective_max - K, 0.0) * df
-        else:
-            path_min = min(S, F)
-            effective_min = min(M_min, path_min)
-            return max(K - effective_min, 0.0) * df
+        path_min = min(S, F)
+        effective_min = min(M_min, path_min)
+        return max(K - effective_min, 0.0) * df
 
     df = math.exp(-r * T)
 
@@ -468,8 +468,7 @@ def lookback_floating_price(S: float, M_min: float, M_max: float, T: float,
     if T <= 0:
         if is_call:
             return max(S - M_min, 0.0)
-        else:
-            return max(M_max - S, 0.0)
+        return max(M_max - S, 0.0)
 
     if sigma <= 0:
         # Deterministic forward: path is monotone
@@ -479,9 +478,8 @@ def lookback_floating_price(S: float, M_min: float, M_max: float, T: float,
         if is_call:
             effective_min = min(M_min, min(S, F))
             return max(F - effective_min, 0.0) * df
-        else:
-            effective_max = max(M_max, max(S, F))
-            return max(effective_max - F, 0.0) * df
+        effective_max = max(M_max, max(S, F))
+        return max(effective_max - F, 0.0) * df
 
     b = r - q
     # Guard against b ≈ 0 (division by zero in σ²/(2b) terms)
@@ -601,16 +599,14 @@ def asset_or_nothing_price(S: float, K: float, T: float, r: float, q: float,
     if T <= 0:
         if is_call:
             return S if S > K else 0.0
-        else:
-            return S if S < K else 0.0
+        return S if S < K else 0.0
 
     if sigma <= 0:
         F = S * math.exp((r - q) * T)
         qd = math.exp(-q * T)
         if is_call:
             return (S * qd) if F > K else 0.0
-        else:
-            return (S * qd) if F < K else 0.0
+        return (S * qd) if F < K else 0.0
 
     sqrt_T = math.sqrt(T)
     d1 = (math.log(S / K) + (r - q + 0.5 * sigma * sigma) * T) / (sigma * sqrt_T)
@@ -618,8 +614,7 @@ def asset_or_nothing_price(S: float, K: float, T: float, r: float, q: float,
 
     if is_call:
         return S * qd * norm_cdf(d1)
-    else:
-        return S * qd * norm_cdf(-d1)
+    return S * qd * norm_cdf(-d1)
 
 
 @njit(fastmath=True, cache=True)
@@ -660,8 +655,7 @@ def power_option_price(S: float, K: float, T: float, r: float, q: float,
         S_n = S ** n
         if is_call:
             return max(S_n - K, 0.0)
-        else:
-            return max(K - S_n, 0.0)
+        return max(K - S_n, 0.0)
 
     S_n = S ** n
     sigma_adj = n * sigma
@@ -672,8 +666,7 @@ def power_option_price(S: float, K: float, T: float, r: float, q: float,
         df = math.exp(-r * T)
         if is_call:
             return max(F_n - K, 0.0) * df
-        else:
-            return max(K - F_n, 0.0) * df
+        return max(K - F_n, 0.0) * df
 
     mu_adj = n * (r - q) + 0.5 * n * (n - 1.0) * sigma * sigma
 
@@ -734,8 +727,7 @@ def gap_option_price(S: float, K1: float, K2: float, T: float, r: float, q: floa
     if T <= 0:
         if is_call:
             return (S - K1) if S > K2 else 0.0
-        else:
-            return (K1 - S) if S < K2 else 0.0
+        return (K1 - S) if S < K2 else 0.0
 
     if sigma <= 0:
         F = S * math.exp((r - q) * T)
@@ -743,8 +735,7 @@ def gap_option_price(S: float, K1: float, K2: float, T: float, r: float, q: floa
         df = math.exp(-r * T)
         if is_call:
             return (S * qd - K1 * df) if F > K2 else 0.0
-        else:
-            return (K1 * df - S * qd) if F < K2 else 0.0
+        return (K1 * df - S * qd) if F < K2 else 0.0
 
     sqrt_T = math.sqrt(T)
     d1 = (math.log(S / K2) + (r - q + 0.5 * sigma * sigma) * T) / (sigma * sqrt_T)
@@ -755,8 +746,7 @@ def gap_option_price(S: float, K1: float, K2: float, T: float, r: float, q: floa
 
     if is_call:
         return S * qd * norm_cdf(d1) - K1 * df * norm_cdf(d2)
-    else:
-        return K1 * df * norm_cdf(-d2) - S * qd * norm_cdf(-d1)
+    return K1 * df * norm_cdf(-d2) - S * qd * norm_cdf(-d1)
 
 
 @njit(fastmath=True, cache=True)
@@ -773,24 +763,23 @@ def _exotic_price(option_type: int, S: float, K: float, T: float, r: float, q: f
     """
     if option_type == BARRIER:
         return barrier_option_price(S, K, H, T, r, q, sigma, is_call, is_knock_in, is_up, rebate)
-    elif option_type == ASIAN_GEO:
+    if option_type == ASIAN_GEO:
         return asian_geometric_price(S, K, T, r, q, sigma, is_call)
-    elif option_type == DIGITAL:
+    if option_type == DIGITAL:
         return digital_price(S, K, T, r, q, sigma, is_call, payout)
-    elif option_type == LOOKBACK_FIXED:
+    if option_type == LOOKBACK_FIXED:
         return lookback_fixed_price(S, K, M_min, M_max, T, r, q, sigma, is_call)
-    elif option_type == LOOKBACK_FLOATING:
+    if option_type == LOOKBACK_FLOATING:
         return lookback_floating_price(S, M_min, M_max, T, r, q, sigma, is_call)
-    elif option_type == CHOOSER:
+    if option_type == CHOOSER:
         return chooser_price(S, K, T, extra1, r, q, sigma)
-    elif option_type == ASSET_OR_NOTHING:
+    if option_type == ASSET_OR_NOTHING:
         return asset_or_nothing_price(S, K, T, r, q, sigma, is_call)
-    elif option_type == POWER:
+    if option_type == POWER:
         return power_option_price(S, K, T, r, q, sigma, is_call, extra1)
-    elif option_type == GAP:
+    if option_type == GAP:
         return gap_option_price(S, K, extra1, T, r, q, sigma, is_call)
-    else:
-        return 0.0
+    return 0.0
 
 
 @njit(fastmath=True, cache=True)
@@ -852,7 +841,7 @@ def exotic_calculate_greeks(option_type: int, S: float, K: float, T: float, r: f
     vega = (p_vol_up - p_vol_dn) / (2.0 * dV) / 100.0
 
     # Theta (forward difference on T)
-    if T > dT:
+    if dT < T:
         p_t_dn = _exotic_price(option_type, S, K, T - dT, r, q, sigma, is_call,
                                H, M_min, M_max, is_knock_in, is_up, rebate, payout, extra1)
         theta = (p_t_dn - price) / dT
@@ -1206,13 +1195,16 @@ class ExoticAnalyticEngine(PricingEngine):
 
 
 if __name__ == "__main__":
-    from backend.models.gbm import GBMModel
     from backend.core.market import MarketEnvironment
-    from backend.instruments.options import (
-        BarrierOption, AsianOption, DigitalOption, LookbackOption
-    )
     from backend.engines.analytic_engine import BSAnalyticEngine
-    from backend.instruments.options import VanillaOption
+    from backend.instruments.options import (
+        AsianOption,
+        BarrierOption,
+        DigitalOption,
+        LookbackOption,
+        VanillaOption,
+    )
+    from backend.models.gbm import GBMModel
 
     print("=" * 60)
     print("ExoticAnalyticEngine Smoke Test")

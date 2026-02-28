@@ -7,10 +7,10 @@ Provides:
 - Registration/unregistration in session state
 """
 
-from dataclasses import dataclass, field
-from typing import Optional, Type, List
-import numpy as np
 import math
+from dataclasses import dataclass, field
+
+import numpy as np
 
 from backend.core.interfaces import Model
 from backend.core.result_types import PricingCapability
@@ -27,8 +27,8 @@ class TestResult:
 @dataclass
 class ValidationResult:
     """Result of the full validation suite."""
-    tests: List[TestResult] = field(default_factory=list)
-    model_class: Optional[Type[Model]] = None
+    tests: list[TestResult] = field(default_factory=list)
+    model_class: type[Model] | None = None
     all_passed: bool = False
 
     def __post_init__(self):
@@ -59,7 +59,7 @@ def compile_and_validate(source_code: str) -> ValidationResult:
     7. CF test (if FFT)
     8. Quick simulation test
     """
-    tests: List[TestResult] = []
+    tests: list[TestResult] = []
     model_class = None
 
     # 1. Compilation — use restricted namespace with pre-injected safe modules
@@ -114,7 +114,7 @@ def compile_and_validate(source_code: str) -> ValidationResult:
     if len(model_classes) == 0:
         tests.append(TestResult("Class Discovery", False, "No Model subclass found. Define a class inheriting from Model."))
         return ValidationResult(tests=tests)
-    elif len(model_classes) > 1:
+    if len(model_classes) > 1:
         names = ", ".join(c.__name__ for c in model_classes)
         tests.append(TestResult("Class Discovery", False, f"Multiple Model subclasses found ({names}). Define exactly one."))
         return ValidationResult(tests=tests)
@@ -258,11 +258,15 @@ def compile_and_validate(source_code: str) -> ValidationResult:
     return result
 
 
-def register_custom_model(model_class: Type[Model], source_code: str) -> None:
+def register_custom_model(model_class: type[Model], source_code: str) -> None:
     """Register a validated custom model in session state."""
     import streamlit as st
+
     from streamlit_app.simulation.config.model_registry import (
-        ModelSpec, ModelCategory, PricingMethod, ParameterSpec,
+        ModelCategory,
+        ModelSpec,
+        ParameterSpec,
+        PricingMethod,
     )
 
     specs = model_class.PARAMETER_SPECS
@@ -343,7 +347,7 @@ def is_custom_model(key: str) -> bool:
     return key == "custom"
 
 
-def get_custom_model_class() -> Optional[Type[Model]]:
+def get_custom_model_class() -> type[Model] | None:
     """Get the compiled custom model class, or None."""
     import streamlit as st
     custom = st.session_state.get("custom_model")

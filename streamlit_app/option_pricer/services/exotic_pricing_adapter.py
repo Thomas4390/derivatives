@@ -8,26 +8,33 @@ charting exotic vs vanilla price/Greeks comparisons.
 Author: Thomas Vaudescal
 """
 
-import numpy as np
 import math
 
+import numpy as np
+
+from backend.core.market import MarketEnvironment
 from backend.engines.exotic_engine import (
-    exotic_calculate_greeks,
-    _exotic_price,
-    _bs_vanilla_price,
-    ExoticAnalyticEngine,
-    BARRIER,
     ASIAN_GEO,
+    BARRIER,
     DIGITAL,
     LOOKBACK_FIXED,
     LOOKBACK_FLOATING,
+    ExoticAnalyticEngine,
+    _bs_vanilla_price,
+    _exotic_price,
+    exotic_calculate_greeks,
 )
-from backend.engines.vectorized_bs import calculate_all_greeks as _calculate_all_greeks_numba
-from backend.instruments.options import BarrierOption, AsianOption, DigitalOption, LookbackOption
-from backend.models.gbm import GBMModel
-from backend.core.market import MarketEnvironment
+from backend.engines.vectorized_bs import (
+    calculate_all_greeks as _calculate_all_greeks_numba,
+)
 from backend.greeks.calculator import GreeksCalculator
-
+from backend.instruments.options import (
+    AsianOption,
+    BarrierOption,
+    DigitalOption,
+    LookbackOption,
+)
+from backend.models.gbm import GBMModel
 
 # Mapping from string type names to integer constants
 EXOTIC_TYPE_MAP = {
@@ -122,27 +129,26 @@ def _create_exotic_instrument(exotic_type, strike, maturity, is_call, **kwargs):
             is_call=is_call, is_up=kwargs['is_up'],
             is_knock_in=kwargs['is_knock_in'], rebate=kwargs.get('rebate', 0.0),
         )
-    elif exotic_type == 'digital':
+    if exotic_type == 'digital':
         return DigitalOption(
             strike=strike, maturity=maturity, is_call=is_call,
             payout=kwargs.get('payout', 1.0),
         )
-    elif exotic_type == 'asian':
+    if exotic_type == 'asian':
         return AsianOption(
             strike=strike, maturity=maturity, is_call=is_call,
             average_type="geometric",
         )
-    elif exotic_type == 'lookback_floating':
+    if exotic_type == 'lookback_floating':
         return LookbackOption(
             maturity=maturity, is_call=is_call, lookback_type="floating",
         )
-    elif exotic_type == 'lookback_fixed':
+    if exotic_type == 'lookback_fixed':
         return LookbackOption(
             maturity=maturity, is_call=is_call, strike=strike,
             lookback_type="fixed",
         )
-    else:
-        raise ValueError(f"Unknown exotic type: {exotic_type}")
+    raise ValueError(f"Unknown exotic type: {exotic_type}")
 
 
 def calculate_exotic_all_greeks(
@@ -259,8 +265,7 @@ def calculate_exotic_payoff_at_expiry(spot: float, position: dict) -> float:
     if exotic_type == 'digital':
         if is_call:
             return payout_amount if spot > strike else 0.0
-        else:
-            return payout_amount if spot < strike else 0.0
+        return payout_amount if spot < strike else 0.0
 
     if exotic_type == 'barrier':
         # Simplified terminal barrier check
@@ -272,8 +277,8 @@ def calculate_exotic_payoff_at_expiry(spot: float, position: dict) -> float:
 
         if is_knock_in:
             return vanilla_payoff if barrier_hit else 0.0
-        else:  # knock-out
-            return 0.0 if barrier_hit else vanilla_payoff
+        # knock-out
+        return 0.0 if barrier_hit else vanilla_payoff
 
     if exotic_type == 'lookback_floating':
         # Floating lookback payoff depends on path extremes unavailable at expiry.
@@ -283,8 +288,7 @@ def calculate_exotic_payoff_at_expiry(spot: float, position: dict) -> float:
     # (without actual path history, vanilla intrinsic is the best deterministic proxy)
     if is_call:
         return max(spot - strike, 0.0)
-    else:
-        return max(strike - spot, 0.0)
+    return max(strike - spot, 0.0)
 
 
 def calculate_exotic_greeks_surface(

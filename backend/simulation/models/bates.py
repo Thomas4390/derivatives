@@ -23,13 +23,17 @@ Author: Thomas
 Created: 2025
 """
 
+import time
+from typing import Any
+
 import numpy as np
 from numba import njit, prange
-import time
-from typing import Optional, Dict, Any, Tuple
 
-from backend.simulation.base import BaseSimulator, SimulationResult, StochasticVolatilityMixin
-
+from backend.simulation.base import (
+    BaseSimulator,
+    SimulationResult,
+    StochasticVolatilityMixin,
+)
 
 # =============================================================================
 # Numba-Optimized Kernels
@@ -50,7 +54,7 @@ def _simulate_bates_paths(
     t: float,
     n_paths: int,
     n_steps: int
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray]:
     """
     Numba kernel for Bates model path simulation.
 
@@ -296,7 +300,7 @@ class BatesSimulator(BaseSimulator, StochasticVolatilityMixin):
         """Returns E[J - 1], the expected percentage jump."""
         return np.exp(self._mu_j + 0.5 * self._sigma_j ** 2) - 1
 
-    def get_parameters(self) -> Dict[str, Any]:
+    def get_parameters(self) -> dict[str, Any]:
         """Returns model parameters."""
         return {
             # Heston
@@ -326,7 +330,7 @@ class BatesSimulator(BaseSimulator, StochasticVolatilityMixin):
         t: float,
         n_paths: int,
         n_steps: int,
-        seed: Optional[int] = None
+        seed: int | None = None
     ) -> SimulationResult:
         """
         Simulate Bates price and variance paths.
@@ -374,7 +378,7 @@ class BatesSimulator(BaseSimulator, StochasticVolatilityMixin):
         t: float,
         n_paths: int,
         n_steps: int,
-        seed: Optional[int] = None
+        seed: int | None = None
     ) -> np.ndarray:
         """
         Simulate only terminal prices S(T).
@@ -415,7 +419,7 @@ def simulate_bates(
     t: float,
     n_paths: int = 100000,
     n_steps: int = 252,
-    seed: Optional[int] = None,
+    seed: int | None = None,
     terminal_only: bool = False
 ):
     """
@@ -465,8 +469,7 @@ def simulate_bates(
 
     if terminal_only:
         return simulator.simulate_terminal(s0, mu, t, n_paths, n_steps, seed)
-    else:
-        return simulator.simulate_paths(s0, mu, t, n_paths, n_steps, seed)
+    return simulator.simulate_paths(s0, mu, t, n_paths, n_steps, seed)
 
 
 # =============================================================================

@@ -16,48 +16,47 @@ project_root = app_dir.parent.parent
 sys.path.insert(0, str(project_root))
 sys.path.insert(0, str(app_dir))
 
-import streamlit as st
-import numpy as np
 import json
 
-# Pricing functions (using backend architecture, no classes)
-from services.pricing_adapter import (
-    calculate_all_greeks,
-    calculate_option_premium,
-    calculate_pnl_at_expiry_arrays as calculate_portfolio_pnl_at_expiry,
-    find_breakeven_points,
-    calculate_portfolio_greeks_3d_dte,
-    calculate_portfolio_greeks_3d_iv,
-    calculate_greeks_3d_strike,
+import numpy as np
+import streamlit as st
+from charts.exotic_charts import render_exotic_tab
+from charts.greeks_chart import (
+    render_first_order_greeks,
+    render_second_order_greeks,
+    render_third_order_greeks,
 )
-
-# Local imports
-from config.styles import inject_styles, render_header, footer_html
+from charts.pnl_chart import render_pnl_tab
+from charts.surface_3d import render_3d_tab
+from components.sidebar import render_sidebar
 from config.constants import (
+    DEFAULT_DTE,
+    DEFAULT_IV,
     DTE_RANGE,
     IV_RANGE,
     SPOT_RANGE_FACTOR,
     SPOT_RANGE_POINTS,
-    DEFAULT_DTE,
-    DEFAULT_IV
 )
-from components.sidebar import render_sidebar
-from charts.pnl_chart import render_pnl_tab
-from charts.greeks_chart import (
-    render_first_order_greeks,
-    render_second_order_greeks,
-    render_third_order_greeks
-)
-from charts.surface_3d import render_3d_tab
-from services.state_manager import init_session_state
-from services.portfolio_calculator import (
-    calculate_all_surfaces,
-    prepare_portfolio_data
-)
-from guide_formula import render_guide_section
-from charts.exotic_charts import render_exotic_tab
-from services.exotic_pricing_adapter import calculate_exotic_all_greeks
 
+# Local imports
+from config.styles import footer_html, inject_styles, render_header
+from guide_formula import render_guide_section
+from services.exotic_pricing_adapter import calculate_exotic_all_greeks
+from services.portfolio_calculator import calculate_all_surfaces, prepare_portfolio_data
+
+# Pricing functions (using backend architecture, no classes)
+from services.pricing_adapter import (
+    calculate_all_greeks,
+    calculate_greeks_3d_strike,
+    calculate_option_premium,
+    calculate_portfolio_greeks_3d_dte,
+    calculate_portfolio_greeks_3d_iv,
+    find_breakeven_points,
+)
+from services.pricing_adapter import (
+    calculate_pnl_at_expiry_arrays as calculate_portfolio_pnl_at_expiry,
+)
+from services.state_manager import init_session_state
 
 # =============================================================================
 # PAGE CONFIGURATION

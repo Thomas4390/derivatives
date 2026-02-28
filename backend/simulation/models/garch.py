@@ -23,13 +23,17 @@ Author: Thomas
 Created: 2025
 """
 
+import time
+from typing import Any
+
 import numpy as np
 from numba import njit, prange
-import time
-from typing import Optional, Dict, Any, Tuple
 
-from backend.simulation.base import BaseSimulator, SimulationResult, StochasticVolatilityMixin
-
+from backend.simulation.base import (
+    BaseSimulator,
+    SimulationResult,
+    StochasticVolatilityMixin,
+)
 
 # =============================================================================
 # Numba-Optimized Kernels
@@ -46,7 +50,7 @@ def _simulate_garch_paths(
     t: float,
     n_paths: int,
     n_steps: int
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray]:
     """
     Numba kernel for GARCH(1,1) joint price-volatility simulation.
 
@@ -223,7 +227,7 @@ class GARCHSimulator(BaseSimulator, StochasticVolatilityMixin):
         """Returns α + β, the persistence of shocks."""
         return self._alpha + self._beta
 
-    def get_parameters(self) -> Dict[str, Any]:
+    def get_parameters(self) -> dict[str, Any]:
         """Returns model parameters."""
         return {
             "sigma0": self._sigma0,
@@ -261,7 +265,7 @@ class GARCHSimulator(BaseSimulator, StochasticVolatilityMixin):
         t: float,
         n_paths: int,
         n_steps: int,
-        seed: Optional[int] = None
+        seed: int | None = None
     ) -> SimulationResult:
         """
         Simulate GARCH price and volatility paths.
@@ -305,7 +309,7 @@ class GARCHSimulator(BaseSimulator, StochasticVolatilityMixin):
         t: float,
         n_paths: int,
         n_steps: int,
-        seed: Optional[int] = None
+        seed: int | None = None
     ) -> np.ndarray:
         """
         Simulate only terminal prices S(T).
@@ -335,7 +339,7 @@ def estimate_garch_params(
     target_long_run_vol: float,
     half_life_steps: int = 20,
     alpha_ratio: float = 0.1
-) -> Dict[str, float]:
+) -> dict[str, float]:
     """
     Estimate GARCH parameters from target volatility and half-life.
 
@@ -383,7 +387,7 @@ def simulate_garch(
     t: float,
     n_paths: int = 100000,
     n_steps: int = 252,
-    seed: Optional[int] = None,
+    seed: int | None = None,
     terminal_only: bool = False
 ):
     """
@@ -424,8 +428,7 @@ def simulate_garch(
 
     if terminal_only:
         return simulator.simulate_terminal(s0, mu, t, n_paths, n_steps, seed)
-    else:
-        return simulator.simulate_paths(s0, mu, t, n_paths, n_steps, seed)
+    return simulator.simulate_paths(s0, mu, t, n_paths, n_steps, seed)
 
 
 # =============================================================================

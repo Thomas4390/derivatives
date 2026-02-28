@@ -41,10 +41,10 @@ Author: Thomas
 Created: 2025
 """
 
+from typing import NamedTuple
+
 import numpy as np
 from numba import njit, prange
-from typing import Tuple, NamedTuple
-
 
 # =============================================================================
 # Data Classes for Results
@@ -214,7 +214,7 @@ def calculate_portfolio_pnl_with_stock(
 # =============================================================================
 
 @njit(cache=True, fastmath=True)
-def compute_risk_metrics_core(pnl: np.ndarray) -> Tuple[float, ...]:
+def compute_risk_metrics_core(pnl: np.ndarray) -> tuple[float, ...]:
     """
     Compute core risk metrics from P&L distribution.
 
@@ -263,7 +263,7 @@ def compute_risk_metrics_core(pnl: np.ndarray) -> Tuple[float, ...]:
 
 
 @njit(cache=True, fastmath=True)
-def compute_skewness_kurtosis(pnl: np.ndarray) -> Tuple[float, float]:
+def compute_skewness_kurtosis(pnl: np.ndarray) -> tuple[float, float]:
     """
     Compute skewness and excess kurtosis of P&L distribution.
 
@@ -485,7 +485,7 @@ def find_breakeven_points(
 # Utility Functions
 # =============================================================================
 
-def prepare_position_arrays(positions: list) -> Tuple[np.ndarray, ...]:
+def prepare_position_arrays(positions: list) -> tuple[np.ndarray, ...]:
     """
     Convert list of position dictionaries to numpy arrays for Numba functions.
 

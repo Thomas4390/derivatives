@@ -10,15 +10,15 @@ Author: Thomas
 Created: 2025
 """
 
-from typing import Callable, Dict, List, Optional, Type, Tuple, Union
+from collections.abc import Callable
 
 from backend.core.interfaces import Instrument, Model, PricingEngine
-from backend.core.result_types import PricingResult, PricingCapability
 from backend.core.market import MarketEnvironment
+from backend.core.result_types import PricingCapability, PricingResult
 
 # Type alias for engine providers
 # Supports: Class, pre-configured instance, or factory function
-EngineProvider = Union[Type[PricingEngine], Callable[[], PricingEngine], PricingEngine]
+EngineProvider = type[PricingEngine] | Callable[[], PricingEngine] | PricingEngine
 
 
 class EngineRegistry:
@@ -62,7 +62,7 @@ class EngineRegistry:
         PricingCapability.MONTE_CARLO,
     ]
 
-    _engines: Dict[Tuple[str, PricingCapability], EngineProvider] = {}
+    _engines: dict[tuple[str, PricingCapability], EngineProvider] = {}
 
     @classmethod
     def register(
@@ -108,7 +108,7 @@ class EngineRegistry:
         if isinstance(provider, PricingEngine):
             # Pre-configured instance
             return provider
-        elif callable(provider):
+        if callable(provider):
             # Class or factory function
             return provider()
         raise TypeError(f"Invalid engine provider: {provider}")
@@ -146,7 +146,7 @@ class EngineRegistry:
         cls,
         instrument: Instrument,
         model: Model,
-        preferred: Optional[PricingCapability] = None,
+        preferred: PricingCapability | None = None,
     ) -> PricingEngine:
         """
         Get the optimal engine for instrument/model pair.
@@ -212,7 +212,7 @@ class EngineRegistry:
         instrument: Instrument,
         model: Model,
         market: MarketEnvironment,
-        preferred: Optional[PricingCapability] = None,
+        preferred: PricingCapability | None = None,
     ) -> PricingResult:
         """
         Convenience method: get engine and price in one call.
@@ -237,7 +237,7 @@ class EngineRegistry:
         return engine.price(instrument, model, market)
 
     @classmethod
-    def list_engines(cls) -> List[Tuple[str, str]]:
+    def list_engines(cls) -> list[tuple[str, str]]:
         """
         List all registered engines.
 
@@ -257,7 +257,7 @@ def price(
     instrument: Instrument,
     model: Model,
     market: MarketEnvironment,
-    method: Optional[PricingCapability] = None,
+    method: PricingCapability | None = None,
 ) -> PricingResult:
     """
     Price an instrument under a model.

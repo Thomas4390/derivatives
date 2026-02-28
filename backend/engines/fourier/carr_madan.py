@@ -16,10 +16,11 @@ Author: Thomas
 Created: 2025
 """
 
+from collections.abc import Callable
+from dataclasses import dataclass
+
 import numpy as np
 from numba import njit
-from typing import Callable, Tuple
-from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
@@ -166,7 +167,7 @@ class CarrMadanFFTEngine:
         self,
         integrand: np.ndarray,
         log_s0: float
-    ) -> Tuple[np.ndarray, np.ndarray]:
+    ) -> tuple[np.ndarray, np.ndarray]:
         """
         Apply FFT and return damped call prices and log-strike grid.
 
@@ -454,8 +455,7 @@ def fft_price(
 
     if is_call:
         return engine.price_call(characteristic_fn, s0, k, t, r, q)
-    else:
-        return engine.price_put(characteristic_fn, s0, k, t, r, q)
+    return engine.price_put(characteristic_fn, s0, k, t, r, q)
 
 
 # =============================================================================

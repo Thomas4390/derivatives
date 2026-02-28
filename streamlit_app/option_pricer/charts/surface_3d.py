@@ -4,20 +4,13 @@
 Professional 3D visualization for Greeks surfaces.
 """
 
-import streamlit as st
-import plotly.graph_objects as go
-import numpy as np
 import json
-from config.constants import (
-    GREEK_NAMES,
-    GREEK_TITLES,
-    STRIKE_RANGE_FACTORS
-)
-from config.chart_theme import (
-    SCENE_DEFAULTS,
-    SURFACE_COLORSCALES,
-    LAYOUT_DEFAULTS
-)
+
+import numpy as np
+import plotly.graph_objects as go
+import streamlit as st
+from config.chart_theme import LAYOUT_DEFAULTS, SCENE_DEFAULTS, SURFACE_COLORSCALES
+from config.constants import GREEK_NAMES, GREEK_TITLES, STRIKE_RANGE_FACTORS
 
 
 def create_3d_surface_figure(
@@ -147,18 +140,17 @@ def calculate_3d_surface(
             greek_idx
         )
         return spot_range, dte_range, matrix_2d.T, "DTE (days)"
-    else:
-        iv_range = np.linspace(0.05, 0.50, 100)
-        # New signature: (portfolio_json, spot_range, iv_range, risk_free_rate, base_dte, greek_index)
-        matrix_2d = _calculate_greeks_3d_iv_func(
-            portfolio_json,
-            spot_range,
-            iv_range,
-            risk_free_rate,
-            30.0,  # base_dte
-            greek_idx
-        )
-        return spot_range, iv_range * 100, matrix_2d.T, "IV (%)"
+    iv_range = np.linspace(0.05, 0.50, 100)
+    # New signature: (portfolio_json, spot_range, iv_range, risk_free_rate, base_dte, greek_index)
+    matrix_2d = _calculate_greeks_3d_iv_func(
+        portfolio_json,
+        spot_range,
+        iv_range,
+        risk_free_rate,
+        30.0,  # base_dte
+        greek_idx
+    )
+    return spot_range, iv_range * 100, matrix_2d.T, "IV (%)"
 
 
 @st.cache_data(ttl=600)

@@ -44,91 +44,90 @@ Created: 2025
 """
 
 # Payoffs
-from backend.instruments.payoffs import (
-    VanillaCallPayoff,
-    VanillaPutPayoff,
-    DigitalCallPayoff,
-    DigitalPutPayoff,
-    CompositePayoff,
-    # Exotic payoffs
-    AsianCallPayoff,
-    AsianPutPayoff,
-    BarrierUpOutCallPayoff,
-    BarrierDownOutPutPayoff,
-    LookbackFloatingCallPayoff,
-    LookbackFloatingPutPayoff,
+from backend.core.result_types import ExerciseStyle
+
+# Exercise schedules
+from backend.instruments.exercise import (
+    AmericanExercise,
+    BermudanExercise,
+    EuropeanExercise,
+    ExerciseType,  # Backward compatibility alias for ExerciseStyle
+    create_exercise,
 )
 
 # Options
 from backend.instruments.options import (
-    VanillaOption,
+    AmericanCall,
+    AmericanPut,
+    # Exotic factories
+    AsianCall,
+    AsianGeometricCall,
+    AsianGeometricPut,
+    # Exotic options
+    AsianOption,
+    AsianPut,
+    AssetOrNothingCall,
+    AssetOrNothingOption,
+    AssetOrNothingPut,
+    BarrierDownInCall,
+    BarrierDownInPut,
+    BarrierDownOutCall,
+    BarrierDownOutPut,
+    BarrierOption,
+    BarrierUpInCall,
+    BarrierUpInPut,
+    BarrierUpOutCall,
+    BarrierUpOutPut,
+    BermudanCall,
+    BermudanPut,
+    Chooser,
+    ChooserOption,
     DigitalOption,
-    # Generic factory
-    create_vanilla_option,
     # Convenience factories
     EuropeanCall,
     EuropeanPut,
-    AmericanCall,
-    AmericanPut,
-    BermudanCall,
-    BermudanPut,
-    # Exotic options
-    AsianOption,
-    BarrierOption,
-    LookbackOption,
-    ChooserOption,
-    AssetOrNothingOption,
-    PowerOption,
+    GapCall,
     GapOption,
-    # Exotic factories
-    AsianCall,
-    AsianPut,
-    AsianGeometricCall,
-    AsianGeometricPut,
-    BarrierUpOutCall,
-    BarrierUpInCall,
-    BarrierDownOutCall,
-    BarrierDownInCall,
-    BarrierUpOutPut,
-    BarrierUpInPut,
-    BarrierDownOutPut,
-    BarrierDownInPut,
+    GapPut,
     LookbackCall,
-    LookbackPut,
     LookbackFixedCall,
     LookbackFixedPut,
-    Chooser,
-    AssetOrNothingCall,
-    AssetOrNothingPut,
+    LookbackOption,
+    LookbackPut,
     PowerCall,
+    PowerOption,
     PowerPut,
-    GapCall,
-    GapPut,
+    VanillaOption,
+    # Generic factory
+    create_vanilla_option,
+)
+from backend.instruments.payoffs import (
+    # Exotic payoffs
+    AsianCallPayoff,
+    AsianPutPayoff,
+    BarrierDownOutPutPayoff,
+    BarrierUpOutCallPayoff,
+    CompositePayoff,
+    DigitalCallPayoff,
+    DigitalPutPayoff,
+    LookbackFloatingCallPayoff,
+    LookbackFloatingPutPayoff,
+    VanillaCallPayoff,
+    VanillaPutPayoff,
 )
 
 # Strategies
 from backend.instruments.strategies import (
-    StrategyLeg,
+    Butterfly,
+    CallSpread,
+    IronButterfly,
+    IronCondor,
     OptionStrategy,
+    PutSpread,
     Straddle,
     Strangle,
-    Butterfly,
-    IronCondor,
-    IronButterfly,
-    CallSpread,
-    PutSpread,
+    StrategyLeg,
 )
-
-# Exercise schedules
-from backend.instruments.exercise import (
-    ExerciseType,  # Backward compatibility alias for ExerciseStyle
-    EuropeanExercise,
-    AmericanExercise,
-    BermudanExercise,
-    create_exercise,
-)
-from backend.core.result_types import ExerciseStyle
-
 
 __all__ = [
     # Payoffs

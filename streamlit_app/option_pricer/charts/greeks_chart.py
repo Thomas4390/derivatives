@@ -4,25 +4,25 @@ Greeks Chart components for Options Greeks Explorer.
 Professional visualization for first, second, and third-order Greeks.
 """
 
-import streamlit as st
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 import numpy as np
-from config.constants import (
-    GREEK_TITLES,
-    FIRST_ORDER,
-    SECOND_ORDER,
-    THIRD_ORDER,
-    DTE_RANGE,
-    IV_RANGE,
-    STRIKE_RANGE_FACTORS
-)
+import plotly.graph_objects as go
+import streamlit as st
 from config.chart_theme import (
+    CHART_COLORS,
     GREEK_COLORS,
     SLIDER_DEFAULTS,
-    CHART_COLORS,
-    get_layout_config
+    get_layout_config,
 )
+from config.constants import (
+    DTE_RANGE,
+    FIRST_ORDER,
+    GREEK_TITLES,
+    IV_RANGE,
+    SECOND_ORDER,
+    STRIKE_RANGE_FACTORS,
+    THIRD_ORDER,
+)
+from plotly.subplots import make_subplots
 
 # Colors for individual legs (distinct from aggregate)
 LEG_COLORS = [

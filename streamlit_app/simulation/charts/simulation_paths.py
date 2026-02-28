@@ -9,18 +9,19 @@ Volatility subplot uses the same green/red coloring for stochastic vol models.
 Constant vol models (GBM, Merton) show a flat line.
 """
 
+from typing import Any
+
 import numpy as np
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 import streamlit as st
-from typing import Dict, Any, Optional
+from plotly.subplots import make_subplots
+from services.simulation_service import (
+    compute_long_run_volatility,
+    get_initial_volatility,
+    get_model_characteristics,
+)
 
 from backend.simulation.base import SimulationResult
-from services.simulation_service import (
-    get_model_characteristics,
-    get_initial_volatility,
-    compute_long_run_volatility,
-)
 
 # ── Color palette ─────────────────────────────────────────────────────────
 _GREEN = "rgba(34, 197, 94, 0.40)"
@@ -63,11 +64,11 @@ MODEL_DISPLAY_NAMES = {
 def render_simulation_chart(
     result: SimulationResult,
     model_key: str,
-    params: Dict[str, Any],
+    params: dict[str, Any],
     n_display: int = 150,
     show_bands: bool = True,
-    pnl_values: Optional[np.ndarray] = None,
-    breakeven_prices: Optional[np.ndarray] = None,
+    pnl_values: np.ndarray | None = None,
+    breakeven_prices: np.ndarray | None = None,
 ) -> None:
     """Render price paths + volatility paths chart."""
     chars = get_model_characteristics(model_key)
@@ -255,7 +256,7 @@ def _add_paths(
 def _add_vol_references(
     fig: go.Figure,
     model_key: str,
-    params: Dict[str, Any],
+    params: dict[str, Any],
 ) -> None:
     """Add initial-vol and long-run-vol reference lines to the vol panel."""
     model_lower = model_key.lower()
@@ -303,7 +304,7 @@ def _add_vol_references(
             )
 
 
-def render_path_controls() -> Dict[str, Any]:
+def render_path_controls() -> dict[str, Any]:
     """Controls for path visualization."""
     col1, col2 = st.columns(2)
     with col1:

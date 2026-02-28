@@ -9,9 +9,9 @@ quantity, premium_paid, etc.
 import streamlit as st
 from config.constants import CONTRACT_MULTIPLIER
 from config.styles import (
+    net_position_card_html,
     position_item_html,
     stock_position_html,
-    net_position_card_html
 )
 
 

@@ -5,9 +5,9 @@ Provides a common header for analysis tabs with Run button,
 stale results warning, and summary metrics.
 """
 
-import streamlit as st
-from typing import Dict, Any, Optional
+from typing import Any
 
+import streamlit as st
 from config.constants import PRICE_MODELS, VOLATILITY_MODELS
 from config.styles import stale_results_warning_html, strategy_collapsed_html
 from services.state_manager import are_results_stale
@@ -18,8 +18,8 @@ from streamlit_app.option_pricer.config.constants import STRATEGY_DISPLAY_NAMES
 
 def render_analysis_header(
     analysis_type: str,
-    params: Dict[str, Any],
-    result: Optional[Any] = None
+    params: dict[str, Any],
+    result: Any | None = None
 ) -> bool:
     """
     Render the analysis header with Run button and status.
@@ -66,7 +66,7 @@ def render_analysis_header(
 
 def _render_summary_metrics(
     analysis_type: str,
-    params: Dict[str, Any],
+    params: dict[str, Any],
     result: Any
 ) -> None:
     """Render summary metrics for the analysis result."""
@@ -104,7 +104,7 @@ def _render_summary_metrics(
 
 
 def render_strategy_summary_compact(
-    params: Dict[str, Any],
+    params: dict[str, Any],
     collapsed: bool = True
 ) -> None:
     """

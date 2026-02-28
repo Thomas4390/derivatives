@@ -13,16 +13,20 @@ Author: Thomas
 Created: 2025
 """
 
-from typing import Optional, List
+
 import numpy as np
 
 from backend.instruments.options import VanillaOption
 from backend.portfolio.positions import PortfolioPosition, StockPosition
 from backend.portfolio.risk_analysis import (
     RiskProfile,
-    check_unlimited_risk as _check_unlimited_risk_backend,
-    analyze_portfolio_risk as _analyze_portfolio_risk_backend,
     get_risk_summary,
+)
+from backend.portfolio.risk_analysis import (
+    analyze_portfolio_risk as _analyze_portfolio_risk_backend,
+)
+from backend.portfolio.risk_analysis import (
+    check_unlimited_risk as _check_unlimited_risk_backend,
 )
 
 # Re-export for backwards compatibility
@@ -42,7 +46,7 @@ __all__ = [
 # CONVERSION FUNCTIONS: Dict -> Backend Position Classes
 # =============================================================================
 
-def convert_dict_positions(positions: List[dict]) -> List[PortfolioPosition]:
+def convert_dict_positions(positions: list[dict]) -> list[PortfolioPosition]:
     """
     Convert dict-based positions to PortfolioPosition objects.
 
@@ -95,7 +99,7 @@ def convert_dict_positions(positions: List[dict]) -> List[PortfolioPosition]:
     return result
 
 
-def convert_dict_stock(stock_dict: Optional[dict]) -> Optional[StockPosition]:
+def convert_dict_stock(stock_dict: dict | None) -> StockPosition | None:
     """
     Convert dict-based stock position to StockPosition object.
 

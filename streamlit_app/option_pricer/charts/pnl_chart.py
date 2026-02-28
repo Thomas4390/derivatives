@@ -4,17 +4,17 @@ P&L Chart components for Options Greeks Explorer.
 Professional, clean chart design with interactive features.
 """
 
-import streamlit as st
-import plotly.graph_objects as go
 import numpy as np
-from config.constants import DTE_RANGE, IV_RANGE, STRIKE_RANGE_FACTORS
+import plotly.graph_objects as go
+import streamlit as st
 from config.chart_theme import (
-    CHART_COLORS,
     AXIS_DEFAULTS,
-    SLIDER_DEFAULTS,
+    CHART_COLORS,
     LINE_STYLES,
-    get_layout_config
+    SLIDER_DEFAULTS,
+    get_layout_config,
 )
+from config.constants import DTE_RANGE, IV_RANGE, STRIKE_RANGE_FACTORS
 
 
 def create_pnl_figure(
@@ -608,9 +608,9 @@ def render_pnl_tab(
         find_breakeven_func: Function to find breakeven points (for strike variation)
     """
     from components.metrics import (
+        render_chart_controls,
         render_metrics_row,
         render_position_info_banner,
-        render_chart_controls
     )
     from services.portfolio_calculator import calculate_strike_surfaces
 

@@ -6,19 +6,19 @@ both animated with Play/Pause and scenario slider.
 All data is pre-computed, then rendered via Plotly frames.
 """
 
+
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 import streamlit as st
-from typing import List
-
+from plotly.subplots import make_subplots
 from services.pricing_service import (
+    price_from_terminals,
     price_with_analytical,
     price_with_fft,
-    price_from_terminals,
 )
 from services.simulation_service import _extract_model_params
+
 from backend.simulation.factory import create_simulator
 
 # ── Color palette ──────────────────────────────────────────────────────────
@@ -64,7 +64,7 @@ def _build_n_paths_grid(max_n: int) -> list:
 # Leg helpers
 # ═══════════════════════════════════════════════════════════════════════════
 
-def extract_legs(position_arrays: dict, default_spot: float) -> List[dict]:
+def extract_legs(position_arrays: dict, default_spot: float) -> list[dict]:
     """Extract option legs from position_arrays. Falls back to ATM call."""
     strikes = position_arrays.get("strikes", [])
     if len(strikes) == 0:
@@ -154,7 +154,7 @@ def precompute_convergence(
 
     model_params = _extract_model_params(model_key, params)
 
-    from services.custom_model_service import is_custom_model, get_custom_model_class
+    from services.custom_model_service import get_custom_model_class, is_custom_model
     if is_custom_model(model_key):
         cls = get_custom_model_class()
         instance = cls(**model_params)

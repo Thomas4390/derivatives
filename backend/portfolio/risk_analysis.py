@@ -21,7 +21,8 @@ Author: Thomas
 Created: 2025
 """
 
-from typing import Optional, NamedTuple, List, TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
+
 import numpy as np
 from numba import njit
 
@@ -29,7 +30,6 @@ if TYPE_CHECKING:
     from backend.portfolio.portfolio import OptionsPortfolio
 
 from backend.portfolio.positions import PortfolioPosition, StockPosition
-
 
 # =============================================================================
 # RESULT TYPES
@@ -39,10 +39,10 @@ class RiskProfile(NamedTuple):
     """Risk profile for a portfolio."""
     has_unlimited_profit: bool
     has_unlimited_loss: bool
-    max_profit: Optional[float]
-    max_loss: Optional[float]
-    max_profit_spot: Optional[float]
-    max_loss_spot: Optional[float]
+    max_profit: float | None
+    max_loss: float | None
+    max_profit_spot: float | None
+    max_loss_spot: float | None
 
 
 # =============================================================================
@@ -74,8 +74,7 @@ def _check_unlimited_risk_numba(
     if has_stock:
         if stock_is_long:
             return True, False  # Unlimited profit, limited loss
-        else:
-            return False, True  # Limited profit, unlimited loss
+        return False, True  # Limited profit, unlimited loss
 
     n = len(option_types)
     if n == 0:
@@ -175,7 +174,7 @@ def check_unlimited_risk_arrays(
 # =============================================================================
 
 def _positions_to_arrays(
-    positions: List[PortfolioPosition]
+    positions: list[PortfolioPosition]
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Convert position objects to numpy arrays for Numba functions.
@@ -197,8 +196,8 @@ def _positions_to_arrays(
 
 
 def check_unlimited_risk(
-    positions: List[PortfolioPosition],
-    stock: Optional[StockPosition] = None
+    positions: list[PortfolioPosition],
+    stock: StockPosition | None = None
 ) -> tuple[bool, bool]:
     """
     Check if portfolio has unlimited profit or loss potential.
@@ -246,8 +245,8 @@ def check_unlimited_risk_from_portfolio(portfolio: 'OptionsPortfolio') -> tuple[
 # =============================================================================
 
 def analyze_portfolio_risk(
-    positions: List[PortfolioPosition],
-    stock: Optional[StockPosition],
+    positions: list[PortfolioPosition],
+    stock: StockPosition | None,
     breakeven_result,  # BreakevenResult or None
     expiry_pnl: np.ndarray
 ) -> RiskProfile:
@@ -363,7 +362,12 @@ def get_risk_summary(risk_profile: RiskProfile) -> dict:
 
 if __name__ == "__main__":
     from backend.portfolio.positions import (
-        long_call, short_call, long_put, short_put, long_stock, short_stock
+        long_call,
+        long_put,
+        long_stock,
+        short_call,
+        short_put,
+        short_stock,
     )
 
     print("=" * 50)

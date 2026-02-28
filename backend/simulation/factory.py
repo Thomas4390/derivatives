@@ -11,26 +11,25 @@ Author: Thomas
 Created: 2025
 """
 
-from typing import Dict, Any, Type, Union
+from typing import Any
 
 from backend.simulation.base import BaseSimulator
-from backend.simulation.enums import ModelType, DiscretizationScheme
+from backend.simulation.enums import DiscretizationScheme, ModelType
 from backend.simulation.models import (
-    GBMSimulator,
-    HestonSimulator,
-    MertonSimulator,
     BatesSimulator,
     GARCHSimulator,
-    NGARCHSimulator,
+    GBMSimulator,
     GJRGARCHSimulator,
+    HestonSimulator,
+    MertonSimulator,
+    NGARCHSimulator,
 )
-
 
 # =============================================================================
 # Model Registry
 # =============================================================================
 
-_MODEL_REGISTRY: Dict[ModelType, Type[BaseSimulator]] = {
+_MODEL_REGISTRY: dict[ModelType, type[BaseSimulator]] = {
     ModelType.GBM: GBMSimulator,
     ModelType.HESTON: HestonSimulator,
     ModelType.MERTON: MertonSimulator,
@@ -40,7 +39,7 @@ _MODEL_REGISTRY: Dict[ModelType, Type[BaseSimulator]] = {
     ModelType.GJR_GARCH: GJRGARCHSimulator,
 }
 
-_MODEL_NAME_MAP: Dict[str, ModelType] = {
+_MODEL_NAME_MAP: dict[str, ModelType] = {
     "gbm": ModelType.GBM,
     "geometric_brownian_motion": ModelType.GBM,
     "heston": ModelType.HESTON,
@@ -64,7 +63,7 @@ _MODEL_NAME_MAP: Dict[str, ModelType] = {
 # =============================================================================
 
 def create_simulator(
-    model: Union[str, ModelType],
+    model: str | ModelType,
     **kwargs
 ) -> BaseSimulator:
     """
@@ -183,7 +182,7 @@ def create_gjr_garch(
 # Model Information
 # =============================================================================
 
-def list_models() -> Dict[str, str]:
+def list_models() -> dict[str, str]:
     """
     List all available models with descriptions.
 
@@ -195,7 +194,7 @@ def list_models() -> Dict[str, str]:
     return {model_type.name: model_type.value for model_type in ModelType}
 
 
-def get_model_info(model: Union[str, ModelType]) -> Dict[str, Any]:
+def get_model_info(model: str | ModelType) -> dict[str, Any]:
     """
     Get information about a specific model.
 

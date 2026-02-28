@@ -5,9 +5,9 @@ Provides dataclasses and functions for computing and representing
 distribution statistics from simulation results.
 """
 
-import numpy as np
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+
+import numpy as np
 from scipy import stats
 
 
@@ -39,13 +39,13 @@ class DistributionStats:
     max_val: float
     skewness: float
     kurtosis: float
-    percentiles: Dict[int, float] = field(default_factory=dict)
+    percentiles: dict[int, float] = field(default_factory=dict)
 
     @classmethod
     def from_array(
         cls,
         values: np.ndarray,
-        percentile_levels: Optional[List[int]] = None
+        percentile_levels: list[int] | None = None
     ) -> 'DistributionStats':
         """
         Create DistributionStats from a numpy array.
@@ -99,7 +99,7 @@ class DistributionStats:
             return np.inf
         return self.std / abs(self.mean)
 
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         """Convert to dictionary representation."""
         return {
             'mean': self.mean,
@@ -134,7 +134,7 @@ class PnLStats(DistributionStats):
     def from_pnl_array(
         cls,
         pnl: np.ndarray,
-        percentile_levels: Optional[List[int]] = None
+        percentile_levels: list[int] | None = None
     ) -> 'PnLStats':
         """
         Create PnLStats from a P&L array.
@@ -212,7 +212,7 @@ class PnLStats(DistributionStats):
         return (self.prob_profit * self.expected_profit +
                 self.prob_loss * self.expected_loss)
 
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         """Convert to dictionary representation."""
         base_dict = super().to_dict()
         base_dict.update({
@@ -237,7 +237,7 @@ def compute_histogram_data(
     values: np.ndarray,
     bins: int = 50,
     density: bool = False
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Compute histogram data for visualization.
 
@@ -263,8 +263,8 @@ def compute_histogram_data(
 def compute_kde(
     values: np.ndarray,
     n_points: int = 200,
-    bandwidth: Optional[float] = None
-) -> Tuple[np.ndarray, np.ndarray]:
+    bandwidth: float | None = None
+) -> tuple[np.ndarray, np.ndarray]:
     """
     Compute kernel density estimate.
 
@@ -298,7 +298,7 @@ def compute_kde(
 
 def compute_empirical_cdf(
     values: np.ndarray
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray]:
     """
     Compute empirical cumulative distribution function.
 
@@ -320,7 +320,7 @@ def compute_empirical_cdf(
 def compute_confidence_interval(
     values: np.ndarray,
     confidence: float = 0.95
-) -> Tuple[float, float]:
+) -> tuple[float, float]:
     """
     Compute confidence interval for the mean.
 
@@ -351,7 +351,7 @@ def compute_confidence_interval(
 def compare_distributions(
     values1: np.ndarray,
     values2: np.ndarray
-) -> Dict[str, float]:
+) -> dict[str, float]:
     """
     Compare two distributions using various statistical tests.
 

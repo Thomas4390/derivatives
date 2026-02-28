@@ -8,15 +8,17 @@ Provides:
 - Caching support
 """
 
-from typing import Dict, Any, Optional, Union
+from typing import Any
+
 import numpy as np
+
+from backend.simulation.base import SimulationResult
 
 # Backend imports
 from backend.simulation.factory import create_simulator
-from backend.simulation.base import SimulationResult
 
 
-def _extract_model_params(model: str, params: Dict[str, Any]) -> Dict[str, Any]:
+def _extract_model_params(model: str, params: dict[str, Any]) -> dict[str, Any]:
     """Extract model-specific parameters from unified params dict."""
     model_lower = model.lower()
 
@@ -26,7 +28,7 @@ def _extract_model_params(model: str, params: Dict[str, Any]) -> Dict[str, Any]:
             result["antithetic"] = False
         return result
 
-    elif model_lower == "heston":
+    if model_lower == "heston":
         return {
             "v0": params.get("v0", 0.04),
             "kappa": params.get("kappa", 2.0),
@@ -35,7 +37,7 @@ def _extract_model_params(model: str, params: Dict[str, Any]) -> Dict[str, Any]:
             "rho": params.get("rho", -0.7),
         }
 
-    elif model_lower == "merton":
+    if model_lower == "merton":
         return {
             "sigma": params.get("sigma", 0.20),
             "lambda_j": params.get("lambda_j", 0.5),
@@ -43,7 +45,7 @@ def _extract_model_params(model: str, params: Dict[str, Any]) -> Dict[str, Any]:
             "sigma_j": params.get("sigma_j", 0.2),
         }
 
-    elif model_lower == "bates":
+    if model_lower == "bates":
         return {
             "v0": params.get("v0", 0.04),
             "kappa": params.get("kappa", 2.0),
@@ -55,7 +57,7 @@ def _extract_model_params(model: str, params: Dict[str, Any]) -> Dict[str, Any]:
             "sigma_j": params.get("sigma_j", 0.2),
         }
 
-    elif model_lower == "garch":
+    if model_lower == "garch":
         return {
             "sigma0": params.get("sigma0", 0.20),
             "omega": params.get("omega", 0.002),
@@ -63,7 +65,7 @@ def _extract_model_params(model: str, params: Dict[str, Any]) -> Dict[str, Any]:
             "beta": params.get("beta", 0.90),
         }
 
-    elif model_lower == "ngarch":
+    if model_lower == "ngarch":
         return {
             "sigma0": params.get("sigma0", 0.20),
             "omega": params.get("omega", 0.002),
@@ -72,7 +74,7 @@ def _extract_model_params(model: str, params: Dict[str, Any]) -> Dict[str, Any]:
             "theta": params.get("theta_ngarch", params.get("theta", 0.5)),
         }
 
-    elif model_lower == "gjr_garch":
+    if model_lower == "gjr_garch":
         return {
             "sigma0": params.get("sigma0", 0.20),
             "omega": params.get("omega", 0.002),
@@ -81,21 +83,23 @@ def _extract_model_params(model: str, params: Dict[str, Any]) -> Dict[str, Any]:
             "gamma": params.get("gamma", 0.03),
         }
 
-    else:
-        # Custom model: extract params from PARAMETER_SPECS
-        from services.custom_model_service import is_custom_model, get_custom_model_class
-        if is_custom_model(model):
-            cls = get_custom_model_class()
-            if cls is not None:
-                return {s["name"]: params.get(s["name"], s["default"]) for s in cls.PARAMETER_SPECS}
-        raise ValueError(f"Unknown model: {model}")
+    # Custom model: extract params from PARAMETER_SPECS
+    from services.custom_model_service import (
+        get_custom_model_class,
+        is_custom_model,
+    )
+    if is_custom_model(model):
+        cls = get_custom_model_class()
+        if cls is not None:
+            return {s["name"]: params.get(s["name"], s["default"]) for s in cls.PARAMETER_SPECS}
+    raise ValueError(f"Unknown model: {model}")
 
 
 def run_simulation(
     model: str,
-    params: Dict[str, Any],
+    params: dict[str, Any],
     return_simulator: bool = False
-) -> Union[SimulationResult, tuple]:
+) -> SimulationResult | tuple:
     """
     Run unified simulation for any model.
 
@@ -114,7 +118,7 @@ def run_simulation(
     time_horizon = params.get("time_horizon", 1.0)
     n_paths = int(params.get("n_paths", 10000))
     n_steps = int(params.get("n_steps", 252))
-    seed = params.get("seed", None)
+    seed = params.get("seed")
 
     # Handle seed=0 as random
     if seed == 0:
@@ -124,7 +128,7 @@ def run_simulation(
     model_params = _extract_model_params(model, params)
 
     # Create simulator
-    from services.custom_model_service import is_custom_model, get_custom_model_class
+    from services.custom_model_service import get_custom_model_class, is_custom_model
     if is_custom_model(model):
         cls = get_custom_model_class()
         instance = cls(**model_params)
@@ -150,7 +154,7 @@ def run_simulation(
 
 def run_terminal_simulation(
     model: str,
-    params: Dict[str, Any]
+    params: dict[str, Any]
 ) -> np.ndarray:
     """
     Run simulation and return only terminal prices (memory efficient).
@@ -168,14 +172,14 @@ def run_terminal_simulation(
     time_horizon = params.get("time_horizon", 1.0)
     n_paths = int(params.get("n_paths", 10000))
     n_steps = int(params.get("n_steps", 252))
-    seed = params.get("seed", None)
+    seed = params.get("seed")
 
     if seed == 0:
         seed = None
 
     model_params = _extract_model_params(model, params)
 
-    from services.custom_model_service import is_custom_model, get_custom_model_class
+    from services.custom_model_service import get_custom_model_class, is_custom_model
     if is_custom_model(model):
         cls = get_custom_model_class()
         instance = cls(**model_params)
@@ -194,7 +198,7 @@ def run_terminal_simulation(
     )
 
 
-def get_model_characteristics(model: str) -> Dict[str, Any]:
+def get_model_characteristics(model: str) -> dict[str, Any]:
     """
     Get characteristics of a model.
 
@@ -246,7 +250,10 @@ def get_model_characteristics(model: str) -> Dict[str, Any]:
 
     if model_lower not in characteristics:
         # Detect features from custom model
-        from services.custom_model_service import is_custom_model, get_custom_model_class
+        from services.custom_model_service import (
+            get_custom_model_class,
+            is_custom_model,
+        )
         if is_custom_model(model):
             cls = get_custom_model_class()
             if cls is not None:
@@ -267,7 +274,7 @@ def get_model_characteristics(model: str) -> Dict[str, Any]:
     return characteristics[model_lower]
 
 
-def check_model_conditions(model: str, params: Dict[str, Any]) -> Dict[str, Any]:
+def check_model_conditions(model: str, params: dict[str, Any]) -> dict[str, Any]:
     """
     Check model-specific conditions (stationarity, Feller, etc.).
 
@@ -355,7 +362,7 @@ def check_model_conditions(model: str, params: Dict[str, Any]) -> Dict[str, Any]
     }
 
 
-def compute_long_run_volatility(model: str, params: Dict[str, Any]) -> Optional[float]:
+def compute_long_run_volatility(model: str, params: dict[str, Any]) -> float | None:
     """
     Compute long-run (unconditional) volatility for models that support it.
 
@@ -368,7 +375,7 @@ def compute_long_run_volatility(model: str, params: Dict[str, Any]) -> Optional[
         theta = params.get("theta", 0.04)
         return np.sqrt(theta)
 
-    elif model_lower == "garch":
+    if model_lower == "garch":
         omega = params.get("omega", 0.002)
         alpha = params.get("alpha", 0.06)
         beta = params.get("beta", 0.90)
@@ -380,7 +387,7 @@ def compute_long_run_volatility(model: str, params: Dict[str, Any]) -> Optional[
         #  so sigma^2_t is annualized variance; no n_steps scaling needed)
         return np.sqrt(omega / (1 - persistence))
 
-    elif model_lower == "ngarch":
+    if model_lower == "ngarch":
         omega = params.get("omega", 0.002)
         alpha = params.get("alpha", 0.06)
         beta = params.get("beta", 0.90)
@@ -390,7 +397,7 @@ def compute_long_run_volatility(model: str, params: Dict[str, Any]) -> Optional[
             return None
         return np.sqrt(omega / (1 - persistence))
 
-    elif model_lower == "gjr_garch":
+    if model_lower == "gjr_garch":
         omega = params.get("omega", 0.002)
         alpha = params.get("alpha", 0.06)
         beta = params.get("beta", 0.90)
@@ -400,28 +407,28 @@ def compute_long_run_volatility(model: str, params: Dict[str, Any]) -> Optional[
             return None
         return np.sqrt(omega / (1 - persistence))
 
-    elif model_lower in ["gbm", "merton"]:
+    if model_lower in ["gbm", "merton"]:
         return params.get("sigma", 0.20)
 
     return None
 
 
-def get_initial_volatility(model: str, params: Dict[str, Any]) -> float:
+def get_initial_volatility(model: str, params: dict[str, Any]) -> float:
     """Get initial volatility for a model."""
     model_lower = model.lower()
 
     if model_lower in ["gbm", "merton"]:
         return params.get("sigma", 0.20)
 
-    elif model_lower in ["heston", "bates"]:
+    if model_lower in ["heston", "bates"]:
         v0 = params.get("v0", 0.04)
         return np.sqrt(v0)
 
-    elif model_lower in ["garch", "ngarch", "gjr_garch"]:
+    if model_lower in ["garch", "ngarch", "gjr_garch"]:
         return params.get("sigma0", 0.20)
 
     # Custom model: try to read first vol-like param
-    from services.custom_model_service import is_custom_model, get_custom_model_class
+    from services.custom_model_service import get_custom_model_class, is_custom_model
     if is_custom_model(model):
         cls = get_custom_model_class()
         if cls is not None:

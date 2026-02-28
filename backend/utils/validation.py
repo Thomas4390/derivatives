@@ -14,9 +14,8 @@ Author: Thomas
 Created: 2025
 """
 
-from typing import Optional
-import numpy as np
 
+import numpy as np
 
 # =============================================================================
 # Validation Exceptions
@@ -87,8 +86,8 @@ def validate_positive(
 def validate_in_range(
     value: float,
     name: str,
-    min_val: Optional[float] = None,
-    max_val: Optional[float] = None,
+    min_val: float | None = None,
+    max_val: float | None = None,
     min_inclusive: bool = True,
     max_inclusive: bool = True
 ) -> float:

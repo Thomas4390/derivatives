@@ -31,13 +31,17 @@ Author: Thomas
 Created: 2025
 """
 
+import time
+from typing import Any
+
 import numpy as np
 from numba import njit, prange
-import time
-from typing import Optional, Dict, Any, Tuple
 
-from backend.simulation.base import BaseSimulator, SimulationResult, StochasticVolatilityMixin
-
+from backend.simulation.base import (
+    BaseSimulator,
+    SimulationResult,
+    StochasticVolatilityMixin,
+)
 
 # =============================================================================
 # Numba-Optimized Kernels
@@ -55,7 +59,7 @@ def _simulate_gjr_garch_paths(
     t: float,
     n_paths: int,
     n_steps: int
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray]:
     """
     Numba kernel for GJR-GARCH joint price-volatility simulation.
 
@@ -252,7 +256,7 @@ class GJRGARCHSimulator(BaseSimulator, StochasticVolatilityMixin):
         """Returns α + 0.5γ + β, the persistence of shocks."""
         return self._alpha + 0.5 * self._gamma + self._beta
 
-    def get_parameters(self) -> Dict[str, Any]:
+    def get_parameters(self) -> dict[str, Any]:
         """Returns model parameters."""
         return {
             "sigma0": self._sigma0,
@@ -306,7 +310,7 @@ class GJRGARCHSimulator(BaseSimulator, StochasticVolatilityMixin):
         t: float,
         n_paths: int,
         n_steps: int,
-        seed: Optional[int] = None
+        seed: int | None = None
     ) -> SimulationResult:
         """
         Simulate GJR-GARCH price and volatility paths.
@@ -350,7 +354,7 @@ class GJRGARCHSimulator(BaseSimulator, StochasticVolatilityMixin):
         t: float,
         n_paths: int,
         n_steps: int,
-        seed: Optional[int] = None
+        seed: int | None = None
     ) -> np.ndarray:
         """
         Simulate only terminal prices S(T).
@@ -387,7 +391,7 @@ def simulate_gjr_garch(
     t: float,
     n_paths: int = 100000,
     n_steps: int = 252,
-    seed: Optional[int] = None,
+    seed: int | None = None,
     terminal_only: bool = False
 ):
     """
@@ -430,8 +434,7 @@ def simulate_gjr_garch(
 
     if terminal_only:
         return simulator.simulate_terminal(s0, mu, t, n_paths, n_steps, seed)
-    else:
-        return simulator.simulate_paths(s0, mu, t, n_paths, n_steps, seed)
+    return simulator.simulate_paths(s0, mu, t, n_paths, n_steps, seed)
 
 
 # =============================================================================

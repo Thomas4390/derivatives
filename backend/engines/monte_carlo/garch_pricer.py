@@ -28,13 +28,13 @@ Author: Thomas
 Created: 2025
 """
 
-import numpy as np
-from numba import njit, prange
 import time
 from dataclasses import dataclass
-from typing import Optional, Union, Tuple, Dict, Any
 from enum import Enum
+from typing import Any
 
+import numpy as np
+from numba import njit, prange
 
 # =============================================================================
 # Types and Enums
@@ -78,7 +78,7 @@ class GARCHPricingResult:
     computation_time: float
     n_paths: int
     garch_type: str
-    parameters: Dict[str, Any]
+    parameters: dict[str, Any]
 
 
 # =============================================================================
@@ -226,7 +226,7 @@ def _compute_mc_price_and_se(
     r: float,
     t: float,
     is_call: bool
-) -> Tuple[float, float]:
+) -> tuple[float, float]:
     """Compute Monte Carlo price and standard error."""
     n = len(terminals)
 
@@ -314,7 +314,7 @@ class GARCHMCPricer:
 
     def __init__(
         self,
-        garch_type: Union[str, GARCHType],
+        garch_type: str | GARCHType,
         sigma0: float,
         omega: float,
         alpha: float,
@@ -418,10 +418,10 @@ class GARCHMCPricer:
         """Returns the persistence of shocks."""
         if self._garch_type == GARCHType.GARCH:
             return self._alpha + self._beta
-        elif self._garch_type == GARCHType.NGARCH:
+        if self._garch_type == GARCHType.NGARCH:
             return self._alpha * (1 + self._theta ** 2) + self._beta
-        else:  # GJR_GARCH
-            return self._alpha + 0.5 * self._gamma + self._beta
+        # GJR_GARCH
+        return self._alpha + 0.5 * self._gamma + self._beta
 
     def long_run_variance(self) -> float:
         """Returns the theoretical long-run variance."""
@@ -438,7 +438,7 @@ class GARCHMCPricer:
         r: float,
         n_paths: int,
         n_steps: int,
-        seed: Optional[int] = None,
+        seed: int | None = None,
         **kwargs
     ) -> np.ndarray:
         """Simulate terminal prices under risk-neutral measure."""
@@ -450,16 +450,16 @@ class GARCHMCPricer:
                 s0, r, self._sigma0, self._omega, self._alpha, self._beta,
                 t, n_paths, n_steps
             )
-        elif self._garch_type == GARCHType.NGARCH:
+        if self._garch_type == GARCHType.NGARCH:
             return _simulate_ngarch_terminal_rn(
                 s0, r, self._sigma0, self._omega, self._alpha, self._beta,
                 self._theta, t, n_paths, n_steps
             )
-        else:  # GJR_GARCH
-            return _simulate_gjr_garch_terminal_rn(
-                s0, r, self._sigma0, self._omega, self._alpha, self._beta,
-                self._gamma, t, n_paths, n_steps
-            )
+        # GJR_GARCH
+        return _simulate_gjr_garch_terminal_rn(
+            s0, r, self._sigma0, self._omega, self._alpha, self._beta,
+            self._gamma, t, n_paths, n_steps
+        )
 
     def price(
         self,
@@ -467,10 +467,10 @@ class GARCHMCPricer:
         k: float,
         t: float,
         r: float,
-        option_type: Union[str, OptionType] = OptionType.CALL,
-        n_paths: Optional[int] = None,
-        n_steps: Optional[int] = None,
-        seed: Optional[int] = None,
+        option_type: str | OptionType = OptionType.CALL,
+        n_paths: int | None = None,
+        n_steps: int | None = None,
+        seed: int | None = None,
         **kwargs
     ) -> GARCHPricingResult:
         """
@@ -547,9 +547,9 @@ class GARCHMCPricer:
         strikes: np.ndarray,
         maturities: np.ndarray,
         r: float,
-        option_type: Union[str, OptionType] = OptionType.CALL,
-        n_paths: Optional[int] = None,
-        n_steps: Optional[int] = None,
+        option_type: str | OptionType = OptionType.CALL,
+        n_paths: int | None = None,
+        n_steps: int | None = None,
         **kwargs
     ) -> np.ndarray:
         """

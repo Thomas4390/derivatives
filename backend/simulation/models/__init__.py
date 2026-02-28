@@ -23,22 +23,22 @@ def __getattr__(name: str):
     if name == "GBMSimulator":
         from backend.simulation.models.gbm import GBMSimulator
         return GBMSimulator
-    elif name == "HestonSimulator":
+    if name == "HestonSimulator":
         from backend.simulation.models.heston import HestonSimulator
         return HestonSimulator
-    elif name == "MertonSimulator":
+    if name == "MertonSimulator":
         from backend.simulation.models.merton import MertonSimulator
         return MertonSimulator
-    elif name == "BatesSimulator":
+    if name == "BatesSimulator":
         from backend.simulation.models.bates import BatesSimulator
         return BatesSimulator
-    elif name == "GARCHSimulator":
+    if name == "GARCHSimulator":
         from backend.simulation.models.garch import GARCHSimulator
         return GARCHSimulator
-    elif name == "NGARCHSimulator":
+    if name == "NGARCHSimulator":
         from backend.simulation.models.ngarch import NGARCHSimulator
         return NGARCHSimulator
-    elif name == "GJRGARCHSimulator":
+    if name == "GJRGARCHSimulator":
         from backend.simulation.models.gjr_garch import GJRGARCHSimulator
         return GJRGARCHSimulator
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

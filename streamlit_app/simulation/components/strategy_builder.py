@@ -5,14 +5,14 @@ Provides the same strategy builder interface as option_pricer,
 with editable legs and full customization support.
 """
 
-import streamlit as st
-import numpy as np
+import importlib.util
 from dataclasses import dataclass
-from typing import List, Dict, Optional, Tuple
 
 # Import strategy definitions from option_pricer using importlib
 from pathlib import Path
-import importlib.util
+
+import numpy as np
+import streamlit as st
 
 # Import option_pricer constants explicitly from file path
 _option_pricer_path = Path(__file__).parent.parent.parent / "option_pricer"
@@ -62,7 +62,7 @@ def render_strategy_builder(
     time_to_expiry: float,
     volatility: float,
     bs_price_function
-) -> Tuple[List[SimulationOptionPosition], Optional[SimulationStockPosition]]:
+) -> tuple[list[SimulationOptionPosition], SimulationStockPosition | None]:
     """
     Render the strategy builder component for P&L simulation.
     Matches the option_pricer interface with editable legs.
@@ -677,7 +677,7 @@ def _build_positions_from_state(
     bs_price_function,
     is_custom: bool,
     has_stock: bool
-) -> Tuple[List[SimulationOptionPosition], Optional[SimulationStockPosition]]:
+) -> tuple[list[SimulationOptionPosition], SimulationStockPosition | None]:
     """Build position objects from session state."""
     positions = []
     stock_position = None
@@ -733,9 +733,9 @@ def _build_positions_from_state(
 # =============================================================================
 
 def export_positions_for_pnl_engine(
-    positions: List[SimulationOptionPosition],
-    stock_position: Optional[SimulationStockPosition] = None
-) -> Dict[str, np.ndarray]:
+    positions: list[SimulationOptionPosition],
+    stock_position: SimulationStockPosition | None = None
+) -> dict[str, np.ndarray]:
     """Export positions to numpy arrays for the Numba P&L engine."""
     n_legs = len(positions)
 

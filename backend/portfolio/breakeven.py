@@ -16,16 +16,18 @@ Created: 2025
 """
 
 from dataclasses import dataclass
-from typing import List, Optional, Tuple, TYPE_CHECKING
-import numpy as np
+from typing import TYPE_CHECKING
 
-from backend.portfolio.positions import PortfolioPosition, StockPosition
+import numpy as np
 
 # Import Numba-optimized functions from portfolio.pnl (moved from simulation)
 from backend.portfolio.pnl import (
     compute_payoff_curve as _compute_payoff_curve_numba,
+)
+from backend.portfolio.pnl import (
     find_breakeven_points as _find_breakeven_points_numba,
 )
+from backend.portfolio.positions import PortfolioPosition, StockPosition
 
 if TYPE_CHECKING:
     from backend.portfolio.portfolio import OptionsPortfolio
@@ -57,13 +59,13 @@ class BreakevenResult:
     loss_zones : List[Tuple[float, float]]
         Ranges where portfolio is at a loss
     """
-    breakeven_points: List[float]
+    breakeven_points: list[float]
     max_profit: float
     max_profit_spot: float
     max_loss: float
     max_loss_spot: float
-    profit_zones: List[Tuple[float, float]]
-    loss_zones: List[Tuple[float, float]]
+    profit_zones: list[tuple[float, float]]
+    loss_zones: list[tuple[float, float]]
 
     def summary(self) -> str:
         """Generate a formatted summary of breakeven analysis."""
@@ -118,8 +120,8 @@ class BreakevenResult:
 # =============================================================================
 
 def _positions_to_arrays(
-    positions: List[PortfolioPosition],
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    positions: list[PortfolioPosition],
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
     Convert portfolio positions to numpy arrays for Numba functions.
 
@@ -159,8 +161,8 @@ def _positions_to_arrays(
 
 def calculate_portfolio_pnl_at_expiry(
     spot: float,
-    positions: List[PortfolioPosition],
-    stock: Optional[StockPosition] = None,
+    positions: list[PortfolioPosition],
+    stock: StockPosition | None = None,
 ) -> float:
     """
     Calculate portfolio P&L at expiration for a given spot price.
@@ -237,10 +239,10 @@ class BreakevenCalculator:
 
     def calculate(
         self,
-        positions: List[PortfolioPosition],
-        stock: Optional[StockPosition] = None,
-        spot_min: Optional[float] = None,
-        spot_max: Optional[float] = None,
+        positions: list[PortfolioPosition],
+        stock: StockPosition | None = None,
+        spot_min: float | None = None,
+        spot_max: float | None = None,
     ) -> BreakevenResult:
         """
         Find all breakeven points for a portfolio.
@@ -300,8 +302,8 @@ class BreakevenCalculator:
     def calculate_from_portfolio(
         self,
         portfolio: 'OptionsPortfolio',
-        spot_min: Optional[float] = None,
-        spot_max: Optional[float] = None,
+        spot_min: float | None = None,
+        spot_max: float | None = None,
     ) -> BreakevenResult:
         """
         Find breakeven points directly from an OptionsPortfolio.
@@ -330,8 +332,8 @@ class BreakevenCalculator:
     def _calculate_pnl_array(
         self,
         spot_range: np.ndarray,
-        positions: List[PortfolioPosition],
-        stock: Optional[StockPosition],
+        positions: list[PortfolioPosition],
+        stock: StockPosition | None,
     ) -> np.ndarray:
         """
         Calculate P&L for entire spot array using Numba-optimized function.
@@ -361,7 +363,7 @@ class BreakevenCalculator:
         self,
         spot_range: np.ndarray,
         pnl_values: np.ndarray,
-    ) -> List[float]:
+    ) -> list[float]:
         """
         Find breakeven points using Numba-optimized function.
 
@@ -373,13 +375,13 @@ class BreakevenCalculator:
 
     def _identify_zones(
         self,
-        breakeven_points: List[float],
+        breakeven_points: list[float],
         first_pnl: float,
-        positions: List[PortfolioPosition],
-        stock: Optional[StockPosition],
+        positions: list[PortfolioPosition],
+        stock: StockPosition | None,
         spot_min: float,
         spot_max: float,
-    ) -> Tuple[List[Tuple[float, float]], List[Tuple[float, float]]]:
+    ) -> tuple[list[tuple[float, float]], list[tuple[float, float]]]:
         """Identify profit and loss zones based on breakeven points."""
         profit_zones = []
         loss_zones = []
@@ -422,8 +424,8 @@ class BreakevenCalculator:
 # =============================================================================
 
 def find_breakevens(
-    positions: List[PortfolioPosition],
-    stock: Optional[StockPosition] = None,
+    positions: list[PortfolioPosition],
+    stock: StockPosition | None = None,
     spot_min: float = 0.1,
     spot_max: float = 1000.0,
     precision: int = 10000,
@@ -495,7 +497,7 @@ def find_breakevens_from_portfolio(
 # =============================================================================
 
 if __name__ == "__main__":
-    from backend.portfolio.positions import long_call, short_call, long_put, long_stock
+    from backend.portfolio.positions import long_call, long_put, long_stock, short_call
 
     print("=" * 50)
     print("Breakeven Module Smoke Test")

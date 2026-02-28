@@ -10,7 +10,6 @@ Provides comprehensive information about each model including:
 """
 
 from dataclasses import dataclass
-from typing import Dict, List, Optional
 from enum import Enum
 
 
@@ -51,17 +50,17 @@ class ModelSpec:
     category: ModelCategory
     has_stochastic_vol: bool
     has_jumps: bool
-    pricing_methods: List[PricingMethod]
-    parameters: List[ParameterSpec]
+    pricing_methods: list[PricingMethod]
+    parameters: list[ParameterSpec]
     equation_main: str
-    equation_vol: Optional[str] = None
-    equation_jump: Optional[str] = None
-    equation_analytical: Optional[str] = None   # Closed-form pricing (BS)
-    equation_cf: Optional[str] = None           # Characteristic function (FFT)
-    equation_mc: Optional[str] = None           # Monte Carlo discretization
+    equation_vol: str | None = None
+    equation_jump: str | None = None
+    equation_analytical: str | None = None   # Closed-form pricing (BS)
+    equation_cf: str | None = None           # Characteristic function (FFT)
+    equation_mc: str | None = None           # Monte Carlo discretization
     description: str = ""
-    stationarity_condition: Optional[str] = None
-    feller_condition: Optional[str] = None
+    stationarity_condition: str | None = None
+    feller_condition: str | None = None
 
 
 # ============================================================================
@@ -369,7 +368,7 @@ GJR_GARCH_PARAMETERS = GARCH_PARAMETERS + [
 # MODEL REGISTRY
 # ============================================================================
 
-MODEL_REGISTRY: Dict[str, ModelSpec] = {
+MODEL_REGISTRY: dict[str, ModelSpec] = {
     "gbm": ModelSpec(
         key="gbm",
         name="Geometric Brownian Motion",
@@ -507,38 +506,38 @@ def get_model(key: str) -> ModelSpec:
     raise ValueError(f"Unknown model: {key}. Available: {list(MODEL_REGISTRY.keys())}")
 
 
-def get_all_models() -> Dict[str, ModelSpec]:
+def get_all_models() -> dict[str, ModelSpec]:
     """Get all model specifications."""
     return MODEL_REGISTRY
 
 
-def get_models_by_category(category: ModelCategory) -> Dict[str, ModelSpec]:
+def get_models_by_category(category: ModelCategory) -> dict[str, ModelSpec]:
     """Get models filtered by category."""
     return {k: v for k, v in MODEL_REGISTRY.items() if v.category == category}
 
 
-def get_models_with_stochastic_vol() -> Dict[str, ModelSpec]:
+def get_models_with_stochastic_vol() -> dict[str, ModelSpec]:
     """Get models with stochastic volatility."""
     return {k: v for k, v in MODEL_REGISTRY.items() if v.has_stochastic_vol}
 
 
-def get_models_with_jumps() -> Dict[str, ModelSpec]:
+def get_models_with_jumps() -> dict[str, ModelSpec]:
     """Get models with jump components."""
     return {k: v for k, v in MODEL_REGISTRY.items() if v.has_jumps}
 
 
-def get_models_with_pricing_method(method: PricingMethod) -> Dict[str, ModelSpec]:
+def get_models_with_pricing_method(method: PricingMethod) -> dict[str, ModelSpec]:
     """Get models supporting a specific pricing method."""
     return {k: v for k, v in MODEL_REGISTRY.items() if method in v.pricing_methods}
 
 
-def get_parameter_defaults(model_key: str) -> Dict[str, float]:
+def get_parameter_defaults(model_key: str) -> dict[str, float]:
     """Get default parameter values for a model."""
     model = get_model(model_key)
     return {p.name: p.default for p in model.parameters}
 
 
-def get_all_parameter_defaults(model_key: str) -> Dict[str, float]:
+def get_all_parameter_defaults(model_key: str) -> dict[str, float]:
     """Get all defaults including market and simulation parameters."""
     defaults = {}
     for p in MARKET_PARAMETERS + SIMULATION_PARAMETERS:

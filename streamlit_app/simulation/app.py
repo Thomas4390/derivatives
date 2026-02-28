@@ -5,53 +5,57 @@ Author: Thomas Vaudescal
 """
 
 import sys
-from pathlib import Path
 import time
+from pathlib import Path
 
 app_dir = Path(__file__).parent
 project_root = app_dir.parent.parent
 sys.path.insert(0, str(project_root))
 sys.path.insert(0, str(app_dir))
 
-import streamlit as st
 import numpy as np
-from backend.utils.math import bs_price as _backend_bs_price
-from backend.portfolio.pnl import compute_payoff_curve, find_breakeven_points
-
-from config.styles import inject_styles, render_compact_header, footer_html, metric_card_html
-from config.model_registry import get_model
-
+import streamlit as st
+from charts.path_explorer import render_path_explorer_chart
+from charts.pnl_analysis import render_3d_pnl_chart, render_payoff_with_distribution
+from charts.pricing_comparison import (
+    compute_reference_prices,
+    extract_legs,
+    precompute_convergence,
+    render_animated_convergence_chart,
+    render_final_table,
+    render_legs_summary,
+)
+from charts.simulation_paths import render_path_controls, render_simulation_chart
+from components.custom_model_editor import render_custom_model_editor
 from components.model_selector import render_model_selector
 from components.parameter_panel import (
     render_market_parameters,
     render_model_parameters,
     render_simulation_settings,
 )
-from components.strategy_builder import render_strategy_builder, export_positions_for_pnl_engine
-
-from charts.simulation_paths import render_simulation_chart, render_path_controls
-from charts.pnl_analysis import render_payoff_with_distribution, render_3d_pnl_chart
-from charts.path_explorer import render_path_explorer_chart
-from charts.pricing_comparison import (
-    extract_legs,
-    compute_reference_prices,
-    render_legs_summary,
-    precompute_convergence,
-    render_animated_convergence_chart,
-    render_final_table,
-)
-
-from services.simulation_service import (
-    run_simulation,
-    check_model_conditions,
-    get_initial_volatility,
-)
 from components.path_explorer_params import render_explorer_params
+from components.strategy_builder import (
+    export_positions_for_pnl_engine,
+    render_strategy_builder,
+)
+from config.model_registry import get_model
+from config.styles import (
+    footer_html,
+    inject_styles,
+    metric_card_html,
+    render_compact_header,
+)
 from services.pricing_service import get_available_pricing_methods
 from services.simulation_runner import calculate_pnl_from_paths
-from components.custom_model_editor import render_custom_model_editor
-from services.simulation_service import get_model_display_name
+from services.simulation_service import (
+    check_model_conditions,
+    get_initial_volatility,
+    get_model_display_name,
+    run_simulation,
+)
 
+from backend.portfolio.pnl import compute_payoff_curve, find_breakeven_points
+from backend.utils.math import bs_price as _backend_bs_price
 
 # ═════════════════════════════════════════════════════════════════════════
 # PAGE CONFIG

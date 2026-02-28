@@ -13,8 +13,6 @@ Created: 2025
 
 from dataclasses import dataclass
 from enum import Enum, auto
-from typing import Optional
-
 
 # =============================================================================
 # Enums
@@ -57,7 +55,7 @@ class PricingResult:
     price: float
     engine: str = ""
     model: str = ""
-    error: Optional[float] = None
+    error: float | None = None
 
     def __repr__(self) -> str:
         err_str = f", error={self.error:.6f}" if self.error else ""

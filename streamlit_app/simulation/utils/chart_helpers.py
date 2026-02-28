@@ -5,19 +5,18 @@ Provides consistent styling and common patterns for Plotly charts
 used across the application.
 """
 
-import numpy as np
-import plotly.graph_objects as go
-from typing import Optional, List
-
 # Import constants from config
 import sys
 from pathlib import Path
+
+import numpy as np
+import plotly.graph_objects as go
+
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from config.constants import (
     CHART_HEIGHT_STANDARD,
 )
-
 
 # =============================================================================
 # LAYOUT HELPERS
@@ -203,7 +202,7 @@ def add_horizontal_line(
     y: float,
     line_dash: str = "dot",
     line_color: str = "#64748b",
-    annotation_text: Optional[str] = None,
+    annotation_text: str | None = None,
     annotation_position: str = "top right"
 ) -> go.Figure:
     """
@@ -244,7 +243,7 @@ def add_vertical_line(
     x: float,
     line_dash: str = "dash",
     line_color: str = "#64748b",
-    annotation_text: Optional[str] = None,
+    annotation_text: str | None = None,
     annotation_position: str = "top left"
 ) -> go.Figure:
     """
@@ -448,12 +447,11 @@ def format_large_number(value: float, decimals: int = 1) -> str:
 
     if abs_value >= 1e9:
         return f"{sign}{abs_value/1e9:.{decimals}f}B"
-    elif abs_value >= 1e6:
+    if abs_value >= 1e6:
         return f"{sign}{abs_value/1e6:.{decimals}f}M"
-    elif abs_value >= 1e3:
+    if abs_value >= 1e3:
         return f"{sign}{abs_value/1e3:.{decimals}f}K"
-    else:
-        return f"{sign}{abs_value:.{decimals}f}"
+    return f"{sign}{abs_value:.{decimals}f}"
 
 
 # =============================================================================
@@ -484,7 +482,7 @@ def get_profit_loss_color(value: float, profit_color: str = '#22c55e', loss_colo
 def create_color_scale(
     values: np.ndarray,
     colorscale: str = 'RdYlGn'
-) -> List[str]:
+) -> list[str]:
     """
     Create a list of colors based on values using a colorscale.
 

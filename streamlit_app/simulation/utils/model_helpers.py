@@ -8,19 +8,19 @@ Provides:
 - LaTeX equation rendering
 """
 
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Any
+
 import numpy as np
 
 from streamlit_app.simulation.config.model_registry import (
-    MODEL_REGISTRY,
-    ModelCategory,
-    PricingMethod,
-    ParameterSpec,
     MARKET_PARAMETERS,
+    MODEL_REGISTRY,
     SIMULATION_PARAMETERS,
+    ModelCategory,
+    ParameterSpec,
+    PricingMethod,
     get_model,
 )
-
 
 # ============================================================================
 # CATEGORIZATION HELPERS
@@ -47,13 +47,12 @@ def get_volatility_type(model_key: str) -> str:
 
     if not model.has_stochastic_vol:
         return "Constant"
-    elif model.category == ModelCategory.DISCRETE:
+    if model.category == ModelCategory.DISCRETE:
         return "Time-Varying (GARCH)"
-    else:
-        return "Stochastic"
+    return "Stochastic"
 
 
-def get_model_features(model_key: str) -> Dict[str, bool]:
+def get_model_features(model_key: str) -> dict[str, bool]:
     """Get feature flags for a model."""
     model = get_model(model_key)
     return {
@@ -66,7 +65,7 @@ def get_model_features(model_key: str) -> Dict[str, bool]:
     }
 
 
-def get_feature_badges(model_key: str) -> List[Tuple[str, str]]:
+def get_feature_badges(model_key: str) -> list[tuple[str, str]]:
     """
     Get badge labels for model features.
 
@@ -100,7 +99,7 @@ def get_feature_badges(model_key: str) -> List[Tuple[str, str]]:
     return badges
 
 
-def group_models_by_category() -> Dict[str, List[str]]:
+def group_models_by_category() -> dict[str, list[str]]:
     """Group models by their category."""
     groups = {}
     for key, model in MODEL_REGISTRY.items():
@@ -115,19 +114,19 @@ def group_models_by_category() -> Dict[str, List[str]]:
 # PARAMETER HELPERS
 # ============================================================================
 
-def get_model_parameters(model_key: str) -> List[ParameterSpec]:
+def get_model_parameters(model_key: str) -> list[ParameterSpec]:
     """Get parameter specifications for a model."""
     model = get_model(model_key)
     return model.parameters
 
 
-def get_all_parameters(model_key: str) -> List[ParameterSpec]:
+def get_all_parameters(model_key: str) -> list[ParameterSpec]:
     """Get all parameters (market + simulation + model)."""
     model = get_model(model_key)
     return MARKET_PARAMETERS + model.parameters + SIMULATION_PARAMETERS
 
 
-def validate_parameters(model_key: str, params: Dict[str, Any]) -> List[str]:
+def validate_parameters(model_key: str, params: dict[str, Any]) -> list[str]:
     """
     Validate parameters for a model.
 
@@ -161,7 +160,7 @@ def format_parameter_value(param_spec: ParameterSpec, value: float) -> str:
 # EQUATION HELPERS
 # ============================================================================
 
-def get_model_equations(model_key: str) -> Dict[str, str]:
+def get_model_equations(model_key: str) -> dict[str, str]:
     """Get LaTeX equations for a model."""
     model = get_model(model_key)
     equations = {"main": model.equation_main}
@@ -185,7 +184,7 @@ def get_model_equations(model_key: str) -> Dict[str, str]:
 
 def get_equation_with_values(
     model_key: str,
-    params: Dict[str, Any]
+    params: dict[str, Any]
 ) -> str:
     """
     Get equation with parameter values substituted.
@@ -198,7 +197,7 @@ def get_equation_with_values(
         sigma = params.get("sigma", 0.20)
         return rf"dS = \mu S \, dt + {sigma:.2f} S \, dW"
 
-    elif model_lower == "heston":
+    if model_lower == "heston":
         kappa = params.get("kappa", 2.0)
         theta = params.get("theta", 0.04)
         xi = params.get("xi", 0.3)
@@ -208,7 +207,7 @@ def get_equation_with_values(
             rf"\quad (\rho = {rho:.2f})"
         )
 
-    elif model_lower == "garch":
+    if model_lower == "garch":
         omega = params.get("omega", 0.002)
         alpha = params.get("alpha", 0.06)
         beta = params.get("beta", 0.90)
@@ -222,7 +221,7 @@ def get_equation_with_values(
 # CONDITION HELPERS
 # ============================================================================
 
-def check_feller_condition(params: Dict[str, Any]) -> Tuple[bool, float, float]:
+def check_feller_condition(params: dict[str, Any]) -> tuple[bool, float, float]:
     """
     Check Feller condition for Heston/Bates.
 
@@ -241,8 +240,8 @@ def check_feller_condition(params: Dict[str, Any]) -> Tuple[bool, float, float]:
 
 def check_garch_stationarity(
     model_key: str,
-    params: Dict[str, Any]
-) -> Tuple[bool, float]:
+    params: dict[str, Any]
+) -> tuple[bool, float]:
     """
     Check stationarity condition for GARCH models.
 
@@ -268,7 +267,7 @@ def check_garch_stationarity(
     return (persistence < 1, persistence)
 
 
-def get_condition_display(model_key: str, params: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def get_condition_display(model_key: str, params: dict[str, Any]) -> dict[str, Any] | None:
     """
     Get condition check display info.
 
@@ -361,7 +360,7 @@ def format_price_display(price: float) -> str:
 def compute_summary_statistics(
     terminal_prices: np.ndarray,
     initial_price: float
-) -> Dict[str, float]:
+) -> dict[str, float]:
     """Compute summary statistics for terminal distribution."""
     returns = np.log(terminal_prices / initial_price)
 

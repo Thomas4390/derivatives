@@ -21,9 +21,10 @@ Author: Thomas
 Created: 2025
 """
 
+
 from __future__ import annotations
 
-from typing import Any, Dict, Type, Optional, List, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from backend.core.interfaces import Model as BaseModel
 from backend.core.result_types import PricingCapability
@@ -46,21 +47,21 @@ class ModelRegistry:
         - Model discovery via list_models()
     """
 
-    _instance: Optional["ModelRegistry"] = None
+    _instance: "ModelRegistry" | None = None
 
     def __new__(cls):
         """Singleton pattern."""
         if cls._instance is None:
             cls._instance = super().__new__(cls)
-            cls._instance._models: Dict[str, Type[BaseModel]] = {}
-            cls._instance._aliases: Dict[str, str] = {}
+            cls._instance._models: dict[str, type[BaseModel]] = {}
+            cls._instance._aliases: dict[str, str] = {}
         return cls._instance
 
     def register(
         self,
         key: str,
-        model_class: Type[BaseModel],
-        aliases: Optional[List[str]] = None
+        model_class: type[BaseModel],
+        aliases: list[str] | None = None
     ) -> None:
         """
         Register a model class.
@@ -90,7 +91,7 @@ class ModelRegistry:
         key = key.lower()
         return self._aliases.get(key, key)
 
-    def get(self, key: str) -> Type[BaseModel]:
+    def get(self, key: str) -> type[BaseModel]:
         """
         Get model class by key.
 
@@ -170,7 +171,7 @@ class ModelRegistry:
     def create_pricer(
         self,
         key: str,
-        method: Optional[PricingCapability] = None,
+        method: PricingCapability | None = None,
         **params
     ) -> Any:
         """
@@ -206,7 +207,7 @@ class ModelRegistry:
         model = self.create(key, **model_params)
         return model.create_pricer(method=method, **pricer_opts)
 
-    def list_models(self) -> Dict[str, str]:
+    def list_models(self) -> dict[str, str]:
         """
         List all registered models.
 
@@ -225,7 +226,7 @@ class ModelRegistry:
                 result[key] = key
         return result
 
-    def list_aliases(self) -> Dict[str, str]:
+    def list_aliases(self) -> dict[str, str]:
         """
         List all registered aliases.
 

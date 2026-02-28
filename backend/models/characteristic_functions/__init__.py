@@ -15,18 +15,18 @@ Author: Thomas
 Created: 2025
 """
 
-from backend.models.characteristic_functions.heston_cf import (
-    heston_characteristic_function,
-    heston_cf_vectorized,
-)
 from backend.models.characteristic_functions.bates_cf import (
-    bates_characteristic_function,
     bates_cf_vectorized,
+    bates_characteristic_function,
+)
+from backend.models.characteristic_functions.heston_cf import (
+    heston_cf_vectorized,
+    heston_characteristic_function,
 )
 from backend.models.characteristic_functions.merton_cf import (
-    merton_characteristic_function,
-    merton_cf_vectorized,
     create_merton_cf,
+    merton_cf_vectorized,
+    merton_characteristic_function,
 )
 
 __all__ = [

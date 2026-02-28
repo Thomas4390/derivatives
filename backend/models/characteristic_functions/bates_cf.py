@@ -226,7 +226,9 @@ if __name__ == "__main__":
 
     # Compare with Heston (lambda=0 should reduce to Heston CF)
     print("\n--- Comparison with Heston (lambda_j=0) ---")
-    from backend.models.characteristic_functions.heston_cf import heston_characteristic_function
+    from backend.models.characteristic_functions.heston_cf import (
+        heston_characteristic_function,
+    )
 
     cf_bates_no_jump = bates_characteristic_function(u, s0, v0, t, r, kappa, theta, xi, rho, 0.0, mu_j, sigma_j)
     cf_heston = heston_characteristic_function(u, s0, v0, t, r, kappa, theta, xi, rho)

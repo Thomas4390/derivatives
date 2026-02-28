@@ -28,13 +28,17 @@ Author: Thomas
 Created: 2025
 """
 
+import time
+from typing import Any
+
 import numpy as np
 from numba import njit, prange
-import time
-from typing import Optional, Dict, Any, Tuple
 
-from backend.simulation.base import BaseSimulator, SimulationResult, StochasticVolatilityMixin
-
+from backend.simulation.base import (
+    BaseSimulator,
+    SimulationResult,
+    StochasticVolatilityMixin,
+)
 
 # =============================================================================
 # Numba-Optimized Kernels
@@ -52,7 +56,7 @@ def _simulate_ngarch_paths(
     t: float,
     n_paths: int,
     n_steps: int
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray]:
     """
     Numba kernel for NGARCH joint price-volatility simulation.
 
@@ -245,7 +249,7 @@ class NGARCHSimulator(BaseSimulator, StochasticVolatilityMixin):
         """Returns α·(1 + θ²) + β, the persistence of shocks."""
         return self._alpha * (1 + self._theta ** 2) + self._beta
 
-    def get_parameters(self) -> Dict[str, Any]:
+    def get_parameters(self) -> dict[str, Any]:
         """Returns model parameters."""
         return {
             "sigma0": self._sigma0,
@@ -294,7 +298,7 @@ class NGARCHSimulator(BaseSimulator, StochasticVolatilityMixin):
         t: float,
         n_paths: int,
         n_steps: int,
-        seed: Optional[int] = None
+        seed: int | None = None
     ) -> SimulationResult:
         """
         Simulate NGARCH price and volatility paths.
@@ -338,7 +342,7 @@ class NGARCHSimulator(BaseSimulator, StochasticVolatilityMixin):
         t: float,
         n_paths: int,
         n_steps: int,
-        seed: Optional[int] = None
+        seed: int | None = None
     ) -> np.ndarray:
         """
         Simulate only terminal prices S(T).
@@ -375,7 +379,7 @@ def simulate_ngarch(
     t: float,
     n_paths: int = 100000,
     n_steps: int = 252,
-    seed: Optional[int] = None,
+    seed: int | None = None,
     terminal_only: bool = False
 ):
     """
@@ -418,8 +422,7 @@ def simulate_ngarch(
 
     if terminal_only:
         return simulator.simulate_terminal(s0, mu, t, n_paths, n_steps, seed)
-    else:
-        return simulator.simulate_paths(s0, mu, t, n_paths, n_steps, seed)
+    return simulator.simulate_paths(s0, mu, t, n_paths, n_steps, seed)
 
 
 # =============================================================================

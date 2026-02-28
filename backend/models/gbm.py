@@ -15,13 +15,13 @@ Created: 2025
 """
 
 from dataclasses import dataclass
-from typing import List, Dict, Any
+from typing import Any
+
 import numpy as np
 from numba import njit
 
 from backend.core.interfaces import Model
 from backend.core.result_types import PricingCapability
-
 
 # =============================================================================
 # NUMBA KERNELS (Hot Path)
@@ -132,7 +132,7 @@ class GBMModel(Model):
         return "Geometric Brownian Motion"
 
     @property
-    def supported_engines(self) -> List[PricingCapability]:
+    def supported_engines(self) -> list[PricingCapability]:
         """Which pricing methods this model supports."""
         return [
             PricingCapability.ANALYTICAL,
@@ -140,7 +140,7 @@ class GBMModel(Model):
             PricingCapability.MONTE_CARLO,
         ]
 
-    def get_parameters(self) -> Dict[str, Any]:
+    def get_parameters(self) -> dict[str, Any]:
         """Return model parameters as dictionary."""
         return {"sigma": self.sigma}
 

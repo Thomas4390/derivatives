@@ -27,12 +27,12 @@ from backend.engines.fourier.carr_madan import (
 # Re-export characteristic functions for convenience
 # (Primary location remains in models.characteristic_functions)
 from backend.models.characteristic_functions import (
-    heston_characteristic_function,
-    heston_cf_vectorized,
-    bates_characteristic_function,
     bates_cf_vectorized,
-    merton_characteristic_function,
+    bates_characteristic_function,
+    heston_cf_vectorized,
+    heston_characteristic_function,
     merton_cf_vectorized,
+    merton_characteristic_function,
 )
 
 __all__ = [

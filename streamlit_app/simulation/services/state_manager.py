@@ -4,35 +4,35 @@ State management for Monte Carlo Simulation Explorer.
 This module provides a centralized interface for managing Streamlit session state.
 """
 
-import streamlit as st
-from typing import Any, Dict, Optional
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
+from typing import Any
 
+import streamlit as st
 from config.constants import (
-    DEFAULT_SPOT_PRICE,
-    DEFAULT_RISK_FREE_RATE,
-    DEFAULT_VOLATILITY,
-    DEFAULT_TIME_HORIZON,
-    DEFAULT_NUM_PATHS,
-    DEFAULT_NUM_STEPS,
-    DEFAULT_HESTON_V0,
+    DEFAULT_EGARCH_GAMMA,
+    DEFAULT_EXPECTED_RETURN,
+    DEFAULT_GARCH_ALPHA,
+    DEFAULT_GARCH_BETA,
+    DEFAULT_GARCH_OMEGA,
+    DEFAULT_GJR_GAMMA,
     DEFAULT_HESTON_KAPPA,
-    DEFAULT_HESTON_THETA,
-    DEFAULT_HESTON_XI,
     DEFAULT_HESTON_RHO,
+    DEFAULT_HESTON_THETA,
+    DEFAULT_HESTON_V0,
+    DEFAULT_HESTON_XI,
     DEFAULT_MERTON_LAMBDA,
     DEFAULT_MERTON_MU_J,
     DEFAULT_MERTON_SIGMA_J,
+    DEFAULT_NGARCH_THETA,
+    DEFAULT_NUM_PATHS,
+    DEFAULT_NUM_STEPS,
+    DEFAULT_RISK_FREE_RATE,
     DEFAULT_SABR_BETA,
     DEFAULT_SABR_NU,
     DEFAULT_SABR_RHO,
-    DEFAULT_GARCH_OMEGA,
-    DEFAULT_GARCH_ALPHA,
-    DEFAULT_GARCH_BETA,
-    DEFAULT_NGARCH_THETA,
-    DEFAULT_GJR_GAMMA,
-    DEFAULT_EGARCH_GAMMA,
-    DEFAULT_EXPECTED_RETURN
+    DEFAULT_SPOT_PRICE,
+    DEFAULT_TIME_HORIZON,
+    DEFAULT_VOLATILITY,
 )
 
 
@@ -46,7 +46,7 @@ class SimulationParams:
     time_horizon: float = DEFAULT_TIME_HORIZON
     num_paths: int = DEFAULT_NUM_PATHS
     num_steps: int = DEFAULT_NUM_STEPS
-    seed: Optional[int] = 42
+    seed: int | None = 42
 
     # Heston parameters
     heston_v0: float = DEFAULT_HESTON_V0
@@ -76,7 +76,7 @@ class SimulationParams:
     # Option P&L parameters
     expected_return: float = DEFAULT_EXPECTED_RETURN
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return asdict(self)
 

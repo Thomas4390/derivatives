@@ -9,7 +9,6 @@ Created: 2025
 """
 
 from dataclasses import dataclass
-from typing import Optional
 
 
 @dataclass(frozen=True)
@@ -42,7 +41,7 @@ class MarketEnvironment:
     spot: float
     rate: float
     dividend_yield: float = 0.0
-    valuation_date: Optional[str] = None
+    valuation_date: str | None = None
 
     def __post_init__(self):
         """Validate market parameters."""
@@ -67,7 +66,7 @@ class MarketEnvironment:
 
     @classmethod
     def _create_without_validation(
-        cls, spot: float, rate: float, dividend_yield: float, valuation_date: Optional[str]
+        cls, spot: float, rate: float, dividend_yield: float, valuation_date: str | None
     ) -> 'MarketEnvironment':
         """
         Create MarketEnvironment bypassing __post_init__ validation.

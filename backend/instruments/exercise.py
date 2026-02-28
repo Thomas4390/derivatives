@@ -16,8 +16,9 @@ Author: Thomas
 Created: 2025
 """
 
-from typing import List, Optional, Union, NamedTuple
 from dataclasses import dataclass
+from typing import NamedTuple
+
 import numpy as np
 
 from backend.core.result_types import ExerciseStyle
@@ -105,7 +106,7 @@ class BermudanExercise:
     exercise_dates : List[float]
         List of exercise times in years
     """
-    exercise_dates: List[float]
+    exercise_dates: list[float]
 
     def __post_init__(self):
         """Sort exercise dates."""
@@ -178,7 +179,7 @@ class BermudanExercise:
 # Type Alias
 # =============================================================================
 
-ExerciseSchedule = Union[EuropeanExercise, AmericanExercise, BermudanExercise]
+ExerciseSchedule = EuropeanExercise | AmericanExercise | BermudanExercise
 
 
 # =============================================================================
@@ -186,9 +187,9 @@ ExerciseSchedule = Union[EuropeanExercise, AmericanExercise, BermudanExercise]
 # =============================================================================
 
 def create_exercise(
-    exercise_type: Union[str, ExerciseStyle],
+    exercise_type: str | ExerciseStyle,
     maturity: float,
-    exercise_dates: Optional[List[float]] = None,
+    exercise_dates: list[float] | None = None,
     start_time: float = 0.0
 ) -> ExerciseSchedule:
     """
@@ -224,16 +225,15 @@ def create_exercise(
     if exercise_type == ExerciseStyle.EUROPEAN:
         return EuropeanExercise(maturity=maturity)
 
-    elif exercise_type == ExerciseStyle.AMERICAN:
+    if exercise_type == ExerciseStyle.AMERICAN:
         return AmericanExercise(maturity=maturity, start_time=start_time)
 
-    elif exercise_type == ExerciseStyle.BERMUDAN:
+    if exercise_type == ExerciseStyle.BERMUDAN:
         if exercise_dates is None:
             raise ValueError("exercise_dates required for Bermudan exercise")
         return BermudanExercise(exercise_dates=exercise_dates)
 
-    else:
-        raise ValueError(f"Unknown exercise type: {exercise_type}")
+    raise ValueError(f"Unknown exercise type: {exercise_type}")
 
 
 # =============================================================================
