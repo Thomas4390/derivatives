@@ -10,12 +10,14 @@ Model:
 The most fundamental model in option pricing. Under risk-neutral measure,
 drift equals r - q (risk-free rate minus dividend yield).
 
-Author: Thomas
-Created: 2025
+Author: Thomas Vaudescal
+Created: 2026
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from numba import njit
@@ -23,9 +25,13 @@ from numba import njit
 from backend.core.interfaces import Model
 from backend.core.result_types import PricingCapability
 
+if TYPE_CHECKING:
+    from backend.simulation.models.gbm import GBMSimulator
+
 # =============================================================================
 # NUMBA KERNELS (Hot Path)
 # =============================================================================
+
 
 @njit(cache=True, fastmath=True)
 def _gbm_characteristic_function(
@@ -64,12 +70,10 @@ def _gbm_characteristic_function(
     """
     i = 1j
     log_s0 = np.log(s0)
-    drift = r - q - 0.5 * sigma ** 2
-    variance = sigma ** 2 * t
+    drift = r - q - 0.5 * sigma**2
+    variance = sigma**2 * t
 
-    return np.exp(
-        i * u * (log_s0 + drift * t) - 0.5 * variance * u ** 2
-    )
+    return np.exp(i * u * (log_s0 + drift * t) - 0.5 * variance * u**2)
 
 
 @njit(cache=True, fastmath=True)
@@ -87,6 +91,7 @@ def _gbm_diffusion(s: float, sigma: float) -> float:
 # =============================================================================
 # GBM MODEL
 # =============================================================================
+
 
 @dataclass(frozen=True)
 class GBMModel(Model):
@@ -121,7 +126,7 @@ class GBMModel(Model):
 
     sigma: float
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         """Validate parameters."""
         if self.sigma <= 0:
             raise ValueError(f"sigma must be positive, got {self.sigma}")
@@ -195,12 +200,10 @@ class GBMModel(Model):
             Array of characteristic function values
         """
         log_s0 = np.log(s0)
-        drift = r - q - 0.5 * self.sigma ** 2
-        variance = self.sigma ** 2 * t
+        drift = r - q - 0.5 * self.sigma**2
+        variance = self.sigma**2 * t
 
-        return np.exp(
-            1j * u_arr * (log_s0 + drift * t) - 0.5 * variance * u_arr ** 2
-        )
+        return np.exp(1j * u_arr * (log_s0 + drift * t) - 0.5 * variance * u_arr**2)
 
     def drift(self, s: float, v: float, t: float, r: float, q: float) -> float:
         """
@@ -253,9 +256,9 @@ class GBMModel(Model):
     @property
     def variance(self) -> float:
         """Annualized variance sigma^2."""
-        return self.sigma ** 2
+        return self.sigma**2
 
-    def create_simulator(self, antithetic: bool = True, **kwargs):
+    def create_simulator(self, antithetic: bool = True, **kwargs: Any) -> GBMSimulator:
         """
         Create a GBM simulator for Monte Carlo pricing.
 
@@ -272,6 +275,7 @@ class GBMModel(Model):
             Configured simulator instance
         """
         from backend.simulation.models.gbm import GBMSimulator
+
         return GBMSimulator(sigma=self.sigma, antithetic=antithetic, **kwargs)
 
     def __repr__(self) -> str:

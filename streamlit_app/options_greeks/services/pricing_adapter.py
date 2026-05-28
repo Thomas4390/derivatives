@@ -47,9 +47,11 @@ from backend.portfolio.greeks_surfaces import (
 # RESULT TYPES
 # =============================================================================
 
+
 @dataclass
 class BreakevenResult:
     """Result of breakeven analysis."""
+
     breakeven_points: list
     max_profit: float
     max_profit_spot: float
@@ -61,13 +63,14 @@ class BreakevenResult:
 # PREMIUM CALCULATION
 # =============================================================================
 
+
 def calculate_option_premium(
     spot: float,
     strike: float,
     dte_days: int,
     risk_free_rate: float,
     volatility: float,
-    option_type: str  # 'call' or 'put'
+    option_type: str,  # 'call' or 'put'
 ) -> float:
     """
     Calculate option premium using Black-Scholes.
@@ -84,7 +87,7 @@ def calculate_option_premium(
         Option premium per share
     """
     time_to_expiry = dte_days / 365.0
-    opt_type_int = 1 if option_type == 'call' else 0
+    opt_type_int = 1 if option_type == "call" else 0
     greeks = _calculate_all_greeks_numba(
         spot, strike, time_to_expiry, risk_free_rate, volatility, opt_type_int
     )
@@ -95,13 +98,14 @@ def calculate_option_premium(
 # CORE PRICING FUNCTIONS (Using Numba)
 # =============================================================================
 
+
 def calculate_all_greeks(
     spot: float,
     strike: float,
     time_to_expiry: float,
     risk_free_rate: float,
     volatility: float,
-    option_type: int  # 1 for call, 0 for put
+    option_type: int,  # 1 for call, 0 for put
 ) -> np.ndarray:
     """
     Calculate all 14 Greeks for a single option.
@@ -136,7 +140,7 @@ def calculate_pnl_at_expiry_arrays(
     quantities: np.ndarray,
     premiums: np.ndarray,
     stock_quantity: int,
-    stock_entry_price: float
+    stock_entry_price: float,
 ) -> float:
     """
     Calculate portfolio P&L at expiration for a single spot price.
@@ -157,8 +161,14 @@ def calculate_pnl_at_expiry_arrays(
         Total P&L at expiration
     """
     return _calculate_pnl_numba(
-        spot, strikes, option_types, position_types,
-        quantities, premiums, float(stock_quantity), stock_entry_price
+        spot,
+        strikes,
+        option_types,
+        position_types,
+        quantities,
+        premiums,
+        float(stock_quantity),
+        stock_entry_price,
     )
 
 
@@ -172,7 +182,7 @@ def find_breakeven_points(
     stock_entry_price: float,
     min_spot: float,
     max_spot: float,
-    n_points: int
+    n_points: int,
 ) -> BreakevenResult | None:
     """
     Find breakeven points and max profit/loss for a portfolio.
@@ -202,8 +212,14 @@ def find_breakeven_points(
 
     # Calculate P&L curve (vectorized)
     pnls = calculate_pnl_curve(
-        spots, strikes, option_types, position_types,
-        quantities, premiums, float(stock_quantity), stock_entry_price
+        spots,
+        strikes,
+        option_types,
+        position_types,
+        quantities,
+        premiums,
+        float(stock_quantity),
+        stock_entry_price,
     )
 
     # Find breakeven points (sign changes)
@@ -224,7 +240,7 @@ def find_breakeven_points(
         max_profit=pnls[max_profit_idx],
         max_profit_spot=spots[max_profit_idx],
         max_loss=pnls[min_profit_idx],
-        max_loss_spot=spots[min_profit_idx]
+        max_loss_spot=spots[min_profit_idx],
     )
 
 
@@ -232,90 +248,12 @@ def find_breakeven_points(
 # 3D SURFACE CALCULATIONS (Using Numba Vectorized Functions)
 # =============================================================================
 
+
 def _split_vanilla_exotic(options: list) -> tuple[list, list, list, list]:
-    """Split options into vanilla and exotic lists with their indices.
-
-    Returns:
-        (vanilla_options, vanilla_indices, exotic_options, exotic_indices)
-    """
-    vanilla_opts, vanilla_idx = [], []
-    exotic_opts, exotic_idx = [], []
-    for i, opt in enumerate(options):
-        if opt.get('instrument_class', 'vanilla') != 'vanilla':
-            exotic_opts.append(opt)
-            exotic_idx.append(i)
-        else:
-            vanilla_opts.append(opt)
-            vanilla_idx.append(i)
-    return vanilla_opts, vanilla_idx, exotic_opts, exotic_idx
-
-
-def _exotic_greeks_surface_dte(
-    exotic_options: list,
-    spot_range: np.ndarray,
-    dte_range: np.ndarray,
-    risk_free_rate: float,
-    base_iv: float,
-    greek_index: int,
-) -> np.ndarray:
-    """Calculate 3D surface for exotic legs varying spot and DTE."""
-    from services.exotic_pricing_adapter import calculate_exotic_all_greeks
-
-    result = np.zeros((len(spot_range), len(dte_range)))
-    for opt in exotic_options:
-        opt_type_int = 1 if opt['option_type'] == 'call' else 0
-        pos_sign = 1 if opt['position_type'] == 'long' else -1
-        qty = opt['quantity'] * 100
-
-        for i, spot in enumerate(spot_range):
-            for j, dte in enumerate(dte_range):
-                t = dte / 365.0
-                greeks = calculate_exotic_all_greeks(
-                    spot, opt['strike'], t,
-                    risk_free_rate, base_iv, opt_type_int,
-                    exotic_type=opt['instrument_class'],
-                    barrier=opt.get('barrier', 0.0),
-                    is_up=opt.get('is_up', True),
-                    is_knock_in=opt.get('is_knock_in', False),
-                    rebate=opt.get('rebate', 0.0),
-                    payout=opt.get('payout', 1.0),
-                )
-                result[i, j] += greeks[greek_index] * qty * pos_sign
-    return result
-
-
-def _exotic_greeks_surface_iv(
-    exotic_options: list,
-    spot_range: np.ndarray,
-    iv_range: np.ndarray,
-    risk_free_rate: float,
-    base_dte: float,
-    greek_index: int,
-) -> np.ndarray:
-    """Calculate 3D surface for exotic legs varying spot and IV."""
-    from services.exotic_pricing_adapter import calculate_exotic_all_greeks
-
-    t = base_dte / 365.0
-    result = np.zeros((len(spot_range), len(iv_range)))
-    for opt in exotic_options:
-        opt_type_int = 1 if opt['option_type'] == 'call' else 0
-        pos_sign = 1 if opt['position_type'] == 'long' else -1
-        qty = opt['quantity'] * 100
-
-        for i, spot in enumerate(spot_range):
-            for j, iv in enumerate(iv_range):
-                greeks = calculate_exotic_all_greeks(
-                    spot, opt['strike'], t,
-                    risk_free_rate, iv, opt_type_int,
-                    exotic_type=opt['instrument_class'],
-                    barrier=opt.get('barrier', 0.0),
-                    is_up=opt.get('is_up', True),
-                    is_knock_in=opt.get('is_knock_in', False),
-                    rebate=opt.get('rebate', 0.0),
-                    payout=opt.get('payout', 1.0),
-                )
-                result[i, j] += greeks[greek_index] * qty * pos_sign
-    return result
+    """Split options into vanilla and exotic lists. Only vanilla supported."""
+    vanilla_opts = list(options)
+    vanilla_idx = list(range(len(options)))
+    return vanilla_opts, vanilla_idx, [], []
 
 
 def calculate_portfolio_greeks_3d_dte(
@@ -324,7 +262,7 @@ def calculate_portfolio_greeks_3d_dte(
     dte_range: np.ndarray,
     risk_free_rate: float,
     base_iv: float,
-    greek_index: int = 1  # Default to delta
+    greek_index: int = 1,  # Default to delta
 ) -> np.ndarray:
     """
     Calculate 3D Greek surface varying spot and DTE.
@@ -344,37 +282,41 @@ def calculate_portfolio_greeks_3d_dte(
     """
     portfolio_data = json.loads(portfolio_json)
 
-    if not portfolio_data.get('options') and not portfolio_data.get('stock'):
+    if not portfolio_data.get("options") and not portfolio_data.get("stock"):
         return np.zeros((len(spot_range), len(dte_range)))
 
-    options = portfolio_data.get('options', [])
+    options = portfolio_data.get("options", [])
     vanilla_opts, _, exotic_opts, _ = _split_vanilla_exotic(options)
 
     result = np.zeros((len(spot_range), len(dte_range)))
 
     # Vanilla legs: fast Numba path
     if vanilla_opts:
-        strikes = np.array([pos['strike'] for pos in vanilla_opts])
-        option_types = np.array([1 if pos['option_type'] == 'call' else 0 for pos in vanilla_opts])
-        position_types = np.array([1 if pos['position_type'] == 'long' else -1 for pos in vanilla_opts])
-        quantities = np.array([pos['quantity'] * 100 for pos in vanilla_opts])
+        strikes = np.array([pos["strike"] for pos in vanilla_opts])
+        option_types = np.array(
+            [1 if pos["option_type"] == "call" else 0 for pos in vanilla_opts]
+        )
+        position_types = np.array(
+            [1 if pos["position_type"] == "long" else -1 for pos in vanilla_opts]
+        )
+        quantities = np.array([pos["quantity"] * 100 for pos in vanilla_opts])
 
         result += calculate_portfolio_greeks_3d_dte_vectorized(
-            strikes, option_types, position_types, quantities,
-            spot_range, dte_range, risk_free_rate, base_iv, greek_index
-        )
-
-    # Exotic legs: Python loop
-    if exotic_opts:
-        result += _exotic_greeks_surface_dte(
-            exotic_opts, spot_range, dte_range,
-            risk_free_rate, base_iv, greek_index
+            strikes,
+            option_types,
+            position_types,
+            quantities,
+            spot_range,
+            dte_range,
+            risk_free_rate,
+            base_iv,
+            greek_index,
         )
 
     # Add stock contribution (only affects delta)
-    if portfolio_data.get('stock') and greek_index == 1:
-        stock = portfolio_data['stock']
-        stock_qty = stock['quantity'] * (1 if stock['position_type'] == 'long' else -1)
+    if portfolio_data.get("stock") and greek_index == 1:
+        stock = portfolio_data["stock"]
+        stock_qty = stock["quantity"] * (1 if stock["position_type"] == "long" else -1)
         result += stock_qty
 
     return result
@@ -386,7 +328,7 @@ def calculate_portfolio_greeks_3d_iv(
     iv_range: np.ndarray,
     risk_free_rate: float,
     base_dte: float,
-    greek_index: int = 1  # Default to delta
+    greek_index: int = 1,  # Default to delta
 ) -> np.ndarray:
     """
     Calculate 3D Greek surface varying spot and IV.
@@ -406,37 +348,41 @@ def calculate_portfolio_greeks_3d_iv(
     """
     portfolio_data = json.loads(portfolio_json)
 
-    if not portfolio_data.get('options') and not portfolio_data.get('stock'):
+    if not portfolio_data.get("options") and not portfolio_data.get("stock"):
         return np.zeros((len(spot_range), len(iv_range)))
 
-    options = portfolio_data.get('options', [])
+    options = portfolio_data.get("options", [])
     vanilla_opts, _, exotic_opts, _ = _split_vanilla_exotic(options)
 
     result = np.zeros((len(spot_range), len(iv_range)))
 
     # Vanilla legs: fast Numba path
     if vanilla_opts:
-        strikes = np.array([pos['strike'] for pos in vanilla_opts])
-        option_types = np.array([1 if pos['option_type'] == 'call' else 0 for pos in vanilla_opts])
-        position_types = np.array([1 if pos['position_type'] == 'long' else -1 for pos in vanilla_opts])
-        quantities = np.array([pos['quantity'] * 100 for pos in vanilla_opts])
+        strikes = np.array([pos["strike"] for pos in vanilla_opts])
+        option_types = np.array(
+            [1 if pos["option_type"] == "call" else 0 for pos in vanilla_opts]
+        )
+        position_types = np.array(
+            [1 if pos["position_type"] == "long" else -1 for pos in vanilla_opts]
+        )
+        quantities = np.array([pos["quantity"] * 100 for pos in vanilla_opts])
 
         result += calculate_portfolio_greeks_3d_iv_vectorized(
-            strikes, option_types, position_types, quantities,
-            spot_range, iv_range, risk_free_rate, base_dte, greek_index
-        )
-
-    # Exotic legs: Python loop
-    if exotic_opts:
-        result += _exotic_greeks_surface_iv(
-            exotic_opts, spot_range, iv_range,
-            risk_free_rate, base_dte, greek_index
+            strikes,
+            option_types,
+            position_types,
+            quantities,
+            spot_range,
+            iv_range,
+            risk_free_rate,
+            base_dte,
+            greek_index,
         )
 
     # Add stock contribution (only affects delta)
-    if portfolio_data.get('stock') and greek_index == 1:
-        stock = portfolio_data['stock']
-        stock_qty = stock['quantity'] * (1 if stock['position_type'] == 'long' else -1)
+    if portfolio_data.get("stock") and greek_index == 1:
+        stock = portfolio_data["stock"]
+        stock_qty = stock["quantity"] * (1 if stock["position_type"] == "long" else -1)
         result += stock_qty
 
     return result
@@ -449,7 +395,7 @@ def calculate_greeks_3d_strike(
     risk_free_rate: float,
     base_iv: float,
     base_dte: float,
-    greek_index: int = 1
+    greek_index: int = 1,
 ) -> np.ndarray:
     """
     Calculate 3D Greek surface varying spot and strike for single option.
@@ -470,17 +416,24 @@ def calculate_greeks_3d_strike(
     """
     portfolio_data = json.loads(portfolio_json)
 
-    if not portfolio_data.get('options'):
+    if not portfolio_data.get("options"):
         return np.zeros((len(spot_range), len(strike_range)))
 
     # Get option parameters from first option in portfolio
-    pos = portfolio_data['options'][0]
-    option_type = 1 if pos['option_type'] == 'call' else 0
-    position_type = 1 if pos['position_type'] == 'long' else -1
-    quantity = pos['quantity'] * 100
+    pos = portfolio_data["options"][0]
+    option_type = 1 if pos["option_type"] == "call" else 0
+    position_type = 1 if pos["position_type"] == "long" else -1
+    quantity = pos["quantity"] * 100
 
     # Use vectorized Numba function
     return calculate_greeks_3d_strike_vectorized(
-        spot_range, strike_range, base_dte, risk_free_rate, base_iv,
-        option_type, position_type, quantity, greek_index
+        spot_range,
+        strike_range,
+        base_dte,
+        risk_free_rate,
+        base_iv,
+        option_type,
+        position_type,
+        quantity,
+        greek_index,
     )

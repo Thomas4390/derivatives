@@ -12,14 +12,12 @@ from config.constants import PRICE_MODELS, VOLATILITY_MODELS
 from config.styles import stale_results_warning_html, strategy_collapsed_html
 from services.state_manager import are_results_stale
 
-# Import strategy display names
-from streamlit_app.options_greeks.config.constants import STRATEGY_DISPLAY_NAMES
+# Import strategy display names from simulation's own constants
+from config.strategy_constants import STRATEGY_DISPLAY_NAMES
 
 
 def render_analysis_header(
-    analysis_type: str,
-    params: dict[str, Any],
-    result: Any | None = None
+    analysis_type: str, params: dict[str, Any], result: Any | None = None
 ) -> bool:
     """
     Render the analysis header with Run button and status.
@@ -53,7 +51,7 @@ def render_analysis_header(
             "🚀 Run Simulation",
             type="primary",
             width="stretch",
-            key=f"run_{analysis_type}"
+            key=f"run_{analysis_type}",
         )
 
     # Show summary metrics if we have results
@@ -65,68 +63,74 @@ def render_analysis_header(
 
 
 def _render_summary_metrics(
-    analysis_type: str,
-    params: dict[str, Any],
-    result: Any
+    analysis_type: str, params: dict[str, Any], result: Any
 ) -> None:
     """Render summary metrics for the analysis result."""
     col1, col2, col3, col4 = st.columns(4)
 
-    if analysis_type == 'price':
+    if analysis_type == "price":
         with col1:
-            st.metric("Model", PRICE_MODELS.get(params['price_model'], params['price_model']))
+            st.metric(
+                "Model", PRICE_MODELS.get(params["price_model"], params["price_model"])
+            )
         with col2:
             st.metric("Paths Simulated", f"{result.num_paths:,}")
         with col3:
             st.metric("Time Steps", f"{result.num_steps:,}")
         with col4:
-            st.metric("Computation Time", f"{result.computation_time*1000:.1f} ms")
+            st.metric("Computation Time", f"{result.computation_time * 1000:.1f} ms")
 
-    elif analysis_type == 'volatility':
+    elif analysis_type == "volatility":
         with col1:
-            st.metric("Model", VOLATILITY_MODELS.get(params['vol_model'], params['vol_model']))
+            st.metric(
+                "Model", VOLATILITY_MODELS.get(params["vol_model"], params["vol_model"])
+            )
         with col2:
             st.metric("Paths Simulated", f"{result.num_paths:,}")
         with col3:
             st.metric("Time Steps", f"{result.num_steps:,}")
         with col4:
-            st.metric("Computation Time", f"{result.computation_time*1000:.1f} ms")
+            st.metric("Computation Time", f"{result.computation_time * 1000:.1f} ms")
 
-    elif analysis_type == 'pnl':
+    elif analysis_type == "pnl":
         with col1:
-            st.metric("Model", PRICE_MODELS.get(params['price_model'], params['price_model']))
+            st.metric(
+                "Model", PRICE_MODELS.get(params["price_model"], params["price_model"])
+            )
         with col2:
             st.metric("Scenarios Simulated", f"{result['num_paths']:,}")
         with col3:
             st.metric("P(Profit)", f"{result['risk_metrics'].prob_profit:.1%}")
         with col4:
-            st.metric("Computation Time", f"{result['computation_time']*1000:.1f} ms")
+            st.metric("Computation Time", f"{result['computation_time'] * 1000:.1f} ms")
 
 
 def render_strategy_summary_compact(
-    params: dict[str, Any],
-    collapsed: bool = True
+    params: dict[str, Any], collapsed: bool = True
 ) -> None:
     """
     Render a compact strategy summary for analysis tabs.
 
     Shows the current strategy configuration in a collapsed view.
     """
-    positions = params.get('option_positions', [])
-    stock_position = params.get('stock_position')
+    positions = params.get("option_positions", [])
+    stock_position = params.get("stock_position")
 
     if len(positions) == 0:
-        st.info("No strategy configured. Go to Configuration tab to set up option positions.")
+        st.info(
+            "No strategy configured. Go to Configuration tab to set up option positions."
+        )
         return
 
     # Calculate net cost
-    from streamlit_app.options_greeks.config.constants import CONTRACT_MULTIPLIER
+    from config.strategy_constants import CONTRACT_MULTIPLIER
+
     total_net_cost = 0.0
 
     # Stock cost
     if stock_position:
         stock_cost = stock_position.entry_price * stock_position.quantity
-        if stock_position.position_type == 'long':
+        if stock_position.position_type == "long":
             total_net_cost -= stock_cost
         else:
             total_net_cost += stock_cost
@@ -134,26 +138,28 @@ def render_strategy_summary_compact(
     # Option costs
     for pos in positions:
         total_cost = pos.premium * pos.quantity * CONTRACT_MULTIPLIER
-        if pos.position_type == 'long':
+        if pos.position_type == "long":
             total_net_cost -= total_cost
         else:
             total_net_cost += total_cost
 
     # Get strategy name
-    strategy_name = st.session_state.get('pnl_last_strategy', 'custom')
+    strategy_name = st.session_state.get("pnl_last_strategy", "custom")
     display_name = STRATEGY_DISPLAY_NAMES.get(strategy_name, "Custom Strategy")
 
     has_stock = stock_position is not None
 
     st.markdown(
-        strategy_collapsed_html(display_name, len(positions), has_stock, total_net_cost),
-        unsafe_allow_html=True
+        strategy_collapsed_html(
+            display_name, len(positions), has_stock, total_net_cost
+        ),
+        unsafe_allow_html=True,
     )
 
 
 def render_no_results_message(analysis_type: str) -> None:
     """Render a helpful message when no results are available."""
-    if analysis_type == 'price':
+    if analysis_type == "price":
         st.info("Run a price simulation to see the results.")
         st.markdown("""
         **How to use:**
@@ -161,7 +167,7 @@ def render_no_results_message(analysis_type: str) -> None:
         2. Select a price model (GBM, Heston, Merton, Bates, or SABR)
         3. Click **Run Simulation** to generate price paths
         """)
-    elif analysis_type == 'volatility':
+    elif analysis_type == "volatility":
         st.info("Run a volatility simulation to see the results.")
         st.markdown("""
         **How to use:**
@@ -169,7 +175,7 @@ def render_no_results_message(analysis_type: str) -> None:
         2. Select a volatility model (GARCH, NGARCH, GJR-GARCH, or EGARCH)
         3. Click **Run Simulation** to generate volatility paths
         """)
-    elif analysis_type == 'pnl':
+    elif analysis_type == "pnl":
         st.info("Run a P&L simulation to see the results.")
         st.markdown("""
         **How to use:**

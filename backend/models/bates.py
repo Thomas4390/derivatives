@@ -5,30 +5,42 @@ Bates Model
 Bates (1996) stochastic volatility with jumps model.
 
 Model:
-    dS = (r - q - lambda_j * k) * S * dt + sqrt(V) * S * dW_S + (J - 1) * S * dN
-    dV = kappa * (theta - V) * dt + xi * sqrt(V) * dW_V
+    dS = (r - q - lam * k) * S * dt + sqrt(V) * S * dW_S + (J - 1) * S * dN
+    dV = kappa * (theta - V) * dt + alpha * sqrt(V) * dW_V
     Corr(dW_S, dW_V) = rho
 
 Where:
-    - dN is a Poisson process with intensity lambda_j
-    - J is lognormal: ln(J) ~ N(mu_j, sigma_j^2)
-    - k = E[J - 1] = exp(mu_j + 0.5*sigma_j^2) - 1
+    - dN is a Poisson process with intensity lam
+    - J is lognormal: ln(J) ~ N(alpha_j, sigma_j^2)
+    - k = E[J - 1] = exp(alpha_j + 0.5*sigma_j^2) - 1
+
+Notation: long-run variance ``theta`` is
+written ``σ²``, vol-of-vol ``alpha`` is ``α``, jump intensity ``lam`` is ``λ``,
+and the log-jump law is ``J ~ N(α_J, σ_J²)``. The Python identifier ``theta``
+is kept (displayed σ²) to avoid colliding with the option Greek θ.
 
 The Bates model combines Heston stochastic volatility with Merton-style jumps,
 allowing for both volatility smile AND fat tails in the distribution.
 
-Author: Thomas
-Created: 2025
+Author: Thomas Vaudescal
+Created: 2026
 """
 
+from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
+from backend.utils.validation import (
+    feller_ratio as _feller_ratio,
+    feller_satisfied as _feller_satisfied,
+)
+
 if TYPE_CHECKING:
     from backend.models.heston import HestonModel
+    from backend.simulation.models.bates import BatesSimulator
 
 from backend.core.interfaces import Model
 from backend.core.result_types import PricingCapability
@@ -41,6 +53,7 @@ from backend.models.characteristic_functions.bates_cf import (
 # BATES MODEL
 # =============================================================================
 
+
 @dataclass(frozen=True)
 class BatesModel(Model):
     """
@@ -50,8 +63,8 @@ class BatesModel(Model):
     The most flexible single-asset model for equity options.
 
     Model:
-        dS = (r - q - lambda_j * k) * S * dt + sqrt(V) * S * dW_S + (J - 1) * S * dN
-        dV = kappa * (theta - V) * dt + xi * sqrt(V) * dW_V
+        dS = (r - q - lam * k) * S * dt + sqrt(V) * S * dW_S + (J - 1) * S * dN
+        dV = kappa * (theta - V) * dt + alpha * sqrt(V) * dW_V
         Corr(dW_S, dW_V) = rho
 
     Heston Parameters
@@ -62,16 +75,16 @@ class BatesModel(Model):
         Mean reversion speed of variance (typical: 1-5)
     theta : float
         Long-run variance level
-    xi : float
+    alpha : float
         Volatility of volatility (vol-of-vol)
     rho : float
         Correlation between price and variance (-1 to 1)
 
     Jump Parameters
     ---------------
-    lambda_j : float
+    lam : float
         Jump intensity (expected number of jumps per year)
-    mu_j : float
+    alpha_j : float
         Mean of log-jump size (e.g., -0.1 for 10% negative mean jump)
     sigma_j : float
         Volatility of log-jump size
@@ -79,8 +92,8 @@ class BatesModel(Model):
     Examples
     --------
     model = BatesModel(
-        v0=0.04, kappa=2.0, theta=0.04, xi=0.3, rho=-0.7,
-        lambda_j=0.5, mu_j=-0.1, sigma_j=0.2
+        v0=0.04, kappa=2.0, theta=0.04, alpha=0.3, rho=-0.7,
+        lam=0.5, alpha_j=-0.1, sigma_j=0.2
     )
 
     # Check Feller condition (same as Heston)
@@ -91,9 +104,9 @@ class BatesModel(Model):
 
     Notes
     -----
-    - When lambda_j = 0, reduces to Heston model
+    - When lam = 0, reduces to Heston model
     - Jumps add fat tails to the distribution
-    - mu_j < 0 creates negative skewness (crash risk)
+    - alpha_j < 0 creates negative skewness (crash risk)
     - sigma_j controls jump size uncertainty
     """
 
@@ -101,14 +114,14 @@ class BatesModel(Model):
     v0: float
     kappa: float
     theta: float
-    xi: float
+    alpha: float
     rho: float
     # Jump parameters
-    lambda_j: float
-    mu_j: float
+    lam: float
+    alpha_j: float
     sigma_j: float
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         """Validate parameters."""
         # Heston validation
         if self.v0 < 0:
@@ -117,15 +130,15 @@ class BatesModel(Model):
             raise ValueError(f"kappa must be positive, got {self.kappa}")
         if self.theta < 0:
             raise ValueError(f"theta must be non-negative, got {self.theta}")
-        if self.xi <= 0:
-            raise ValueError(f"xi must be positive, got {self.xi}")
+        if self.alpha <= 0:
+            raise ValueError(f"alpha must be positive, got {self.alpha}")
         if not -1 <= self.rho <= 1:
             raise ValueError(f"rho must be in [-1, 1], got {self.rho}")
         # Jump validation
-        if self.lambda_j < 0:
-            raise ValueError(f"lambda_j must be non-negative, got {self.lambda_j}")
-        if not -1.0 <= self.mu_j <= 1.0:
-            raise ValueError(f"mu_j should be in [-1, 1], got {self.mu_j}")
+        if self.lam < 0:
+            raise ValueError(f"lam must be non-negative, got {self.lam}")
+        if not -1.0 <= self.alpha_j <= 1.0:
+            raise ValueError(f"alpha_j should be in [-1, 1], got {self.alpha_j}")
         if self.sigma_j < 0:
             raise ValueError(f"sigma_j must be non-negative, got {self.sigma_j}")
 
@@ -149,11 +162,11 @@ class BatesModel(Model):
             "v0": self.v0,
             "kappa": self.kappa,
             "theta": self.theta,
-            "xi": self.xi,
+            "alpha": self.alpha,
             "rho": self.rho,
             # Jumps
-            "lambda_j": self.lambda_j,
-            "mu_j": self.mu_j,
+            "lam": self.lam,
+            "alpha_j": self.alpha_j,
             "sigma_j": self.sigma_j,
         }
 
@@ -185,9 +198,18 @@ class BatesModel(Model):
         """
         s0_adj = s0 * np.exp(-q * t)
         return bates_characteristic_function(
-            u, s0_adj, self.v0, t, r,
-            self.kappa, self.theta, self.xi, self.rho,
-            self.lambda_j, self.mu_j, self.sigma_j
+            u,
+            s0_adj,
+            self.v0,
+            t,
+            r,
+            self.kappa,
+            self.theta,
+            self.alpha,
+            self.rho,
+            self.lam,
+            self.alpha_j,
+            self.sigma_j,
         )
 
     def characteristic_function_vectorized(
@@ -196,16 +218,25 @@ class BatesModel(Model):
         """Vectorized characteristic function for FFT."""
         s0_adj = s0 * np.exp(-q * t)
         return bates_cf_vectorized(
-            u_arr, s0_adj, self.v0, t, r,
-            self.kappa, self.theta, self.xi, self.rho,
-            self.lambda_j, self.mu_j, self.sigma_j
+            u_arr,
+            s0_adj,
+            self.v0,
+            t,
+            r,
+            self.kappa,
+            self.theta,
+            self.alpha,
+            self.rho,
+            self.lam,
+            self.alpha_j,
+            self.sigma_j,
         )
 
     def drift(self, s: float, v: float, t: float, r: float, q: float) -> float:
         """
         Drift coefficient for SDE discretization.
 
-        For Bates: drift = (r - q - lambda_j * k) * S
+        For Bates: drift = (r - q - lam * k) * S
         where k = E[J - 1] is the expected jump size.
 
         Parameters
@@ -227,7 +258,7 @@ class BatesModel(Model):
             Drift value
         """
         k = self.expected_jump_size
-        return (r - q - self.lambda_j * k) * s
+        return (r - q - self.lam * k) * s
 
     def diffusion(self, s: float, v: float, t: float) -> float:
         """
@@ -257,16 +288,16 @@ class BatesModel(Model):
 
     def variance_diffusion(self, v: float) -> float:
         """Diffusion of the variance process."""
-        return self.xi * np.sqrt(max(v, 0.0))
+        return self.alpha * np.sqrt(max(v, 0.0))
 
     @property
     def expected_jump_size(self) -> float:
         """
         Expected relative jump size k = E[J - 1].
 
-        For lognormal J: k = exp(mu_j + 0.5*sigma_j^2) - 1
+        For lognormal J: k = exp(alpha_j + 0.5*sigma_j^2) - 1
         """
-        return np.exp(self.mu_j + 0.5 * self.sigma_j ** 2) - 1
+        return np.exp(self.alpha_j + 0.5 * self.sigma_j**2) - 1
 
     @property
     def expected_jump_return(self) -> float:
@@ -279,13 +310,13 @@ class BatesModel(Model):
 
     @property
     def feller_satisfied(self) -> bool:
-        """Check if Feller condition 2*kappa*theta > xi^2 is satisfied."""
-        return 2 * self.kappa * self.theta > self.xi ** 2
+        """Check if Feller condition 2*kappa*theta > alpha^2 is satisfied."""
+        return _feller_satisfied(self.kappa, self.theta, self.alpha)
 
     @property
     def feller_ratio(self) -> float:
-        """Feller ratio: 2*kappa*theta / xi^2."""
-        return (2 * self.kappa * self.theta) / (self.xi ** 2)
+        """Feller ratio: 2*kappa*theta / alpha^2."""
+        return _feller_ratio(self.kappa, self.theta, self.alpha)
 
     @property
     def long_run_volatility(self) -> float:
@@ -299,17 +330,17 @@ class BatesModel(Model):
 
     def expected_jumps_per_year(self) -> float:
         """Expected number of jumps per year."""
-        return self.lambda_j
+        return self.lam
 
     def jump_contribution_to_variance(self) -> float:
         """
         Variance contribution from jumps.
 
-        For Merton-style jumps: lambda_j * (mu_j^2 + sigma_j^2)
+        For Merton-style jumps: lam * (alpha_j^2 + sigma_j^2)
         """
-        return self.lambda_j * (self.mu_j ** 2 + self.sigma_j ** 2)
+        return self.lam * (self.alpha_j**2 + self.sigma_j**2)
 
-    def to_heston(self) -> 'HestonModel':
+    def to_heston(self) -> HestonModel:
         """
         Convert to Heston model (drop jumps).
 
@@ -319,9 +350,9 @@ class BatesModel(Model):
             Equivalent Heston model without jumps
         """
         from backend.models.heston import HestonModel
+
         return HestonModel(
-            v0=self.v0, kappa=self.kappa, theta=self.theta,
-            xi=self.xi, rho=self.rho
+            v0=self.v0, kappa=self.kappa, theta=self.theta, alpha=self.alpha, rho=self.rho
         )
 
     def mean_variance(self, t: float) -> float:
@@ -381,10 +412,13 @@ class BatesModel(Model):
         if abs(self.kappa) < 1e-10:
             sv_var = self.v0 * t
         else:
-            sv_var = self.theta * t + (self.v0 - self.theta) * (1 - np.exp(-self.kappa * t)) / self.kappa
+            sv_var = (
+                self.theta * t
+                + (self.v0 - self.theta) * (1 - np.exp(-self.kappa * t)) / self.kappa
+            )
 
         # Jump contribution (from Merton-style jumps)
-        jump_var = self.lambda_j * t * (self.mu_j ** 2 + self.sigma_j ** 2)
+        jump_var = self.lam * t * (self.alpha_j**2 + self.sigma_j**2)
 
         return sv_var + jump_var
 
@@ -404,7 +438,7 @@ class BatesModel(Model):
         """
         return np.sqrt(self.total_variance(t) / t)
 
-    def create_simulator(self, **kwargs):
+    def create_simulator(self, **kwargs: Any) -> BatesSimulator:
         """
         Create a Bates simulator for Monte Carlo pricing.
 
@@ -419,23 +453,24 @@ class BatesModel(Model):
             Configured simulator instance
         """
         from backend.simulation.models.bates import BatesSimulator
+
         return BatesSimulator(
             v0=self.v0,
             kappa=self.kappa,
             theta=self.theta,
-            xi=self.xi,
+            alpha=self.alpha,
             rho=self.rho,
-            lambda_j=self.lambda_j,
-            mu_j=self.mu_j,
+            lam=self.lam,
+            alpha_j=self.alpha_j,
             sigma_j=self.sigma_j,
-            **kwargs
+            **kwargs,
         )
 
     def __repr__(self) -> str:
         return (
             f"BatesModel(v0={self.v0}, kappa={self.kappa}, theta={self.theta}, "
-            f"xi={self.xi}, rho={self.rho}, lambda_j={self.lambda_j}, "
-            f"mu_j={self.mu_j}, sigma_j={self.sigma_j})"
+            f"alpha={self.alpha}, rho={self.rho}, lam={self.lam}, "
+            f"alpha_j={self.alpha_j}, sigma_j={self.sigma_j})"
         )
 
 
@@ -446,8 +481,14 @@ if __name__ == "__main__":
 
     # Create model
     model = BatesModel(
-        v0=0.04, kappa=2.0, theta=0.04, xi=0.3, rho=-0.7,
-        lambda_j=0.5, mu_j=-0.1, sigma_j=0.2
+        v0=0.04,
+        kappa=2.0,
+        theta=0.04,
+        alpha=0.3,
+        rho=-0.7,
+        lam=0.5,
+        alpha_j=-0.1,
+        sigma_j=0.2,
     )
     print(f"\nModel: {model}")
     print(f"Name: {model.name}")
@@ -495,7 +536,7 @@ if __name__ == "__main__":
     # Test immutability
     print("\n--- Immutability Test ---")
     try:
-        model.lambda_j = 1.0  # type: ignore
+        model.lam = 1.0  # type: ignore
         print("ERROR: Mutation should have failed!")
     except Exception as e:
         print(f"Correctly prevented mutation: {type(e).__name__}")
@@ -504,12 +545,18 @@ if __name__ == "__main__":
     print("\n--- Validation Test ---")
     try:
         bad_model = BatesModel(
-            v0=0.04, kappa=2.0, theta=0.04, xi=0.3, rho=-0.7,
-            lambda_j=-0.5, mu_j=-0.1, sigma_j=0.2
+            v0=0.04,
+            kappa=2.0,
+            theta=0.04,
+            alpha=0.3,
+            rho=-0.7,
+            lam=-0.5,
+            alpha_j=-0.1,
+            sigma_j=0.2,
         )
         print("ERROR: Should have raised ValueError!")
     except ValueError as e:
-        print(f"Correctly rejected invalid lambda_j: {e}")
+        print(f"Correctly rejected invalid lam: {e}")
 
     print("\n" + "=" * 50)
     print("Bates smoke test passed")

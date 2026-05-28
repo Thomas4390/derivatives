@@ -10,12 +10,18 @@ This is the SINGLE implementation used by:
 
 Uses the Gatheral (2006) formulation for numerical stability.
 
-Author: Thomas
-Created: 2025
+Author: Thomas Vaudescal
+Created: 2026
 """
 
+from __future__ import annotations
+
 import numpy as np
-from numba import njit
+from numba import njit, prange
+
+from backend.models.characteristic_functions._heston_core import (
+    heston_cf_with_drift,
+)
 
 
 @njit(cache=True, fastmath=True)
@@ -27,8 +33,8 @@ def heston_characteristic_function(
     r: float,
     kappa: float,
     theta: float,
-    xi: float,
-    rho: float
+    alpha: float,
+    rho: float,
 ) -> complex:
     """
     Heston model characteristic function phi(u) = E^Q[exp(i*u*ln(S_T))].
@@ -52,7 +58,7 @@ def heston_characteristic_function(
         Mean reversion speed
     theta : float
         Long-run variance
-    xi : float
+    alpha : float
         Volatility of volatility
     rho : float
         Correlation
@@ -69,48 +75,7 @@ def heston_characteristic_function(
 
     Where C and D satisfy Riccati ODEs derived from the Heston SDE.
     """
-    i = 1j
-    eps = 1e-10
-
-    # Complex intermediate values
-    d = np.sqrt((rho * xi * i * u - kappa) ** 2 + xi ** 2 * (i * u + u ** 2))
-
-    numerator = kappa - rho * xi * i * u - d
-    denominator = kappa - rho * xi * i * u + d
-
-    # Protect against division by zero in g calculation
-    if np.abs(denominator) < eps:
-        denominator = eps + 0j
-
-    g = numerator / denominator
-
-    exp_dt = np.exp(-d * t)
-
-    # Protect against log singularity and division by zero
-    one_minus_g = 1.0 - g
-    one_minus_g_exp = 1.0 - g * exp_dt
-
-    if np.abs(one_minus_g) < eps:
-        one_minus_g = eps + 0j
-    if np.abs(one_minus_g_exp) < eps:
-        one_minus_g_exp = eps + 0j
-
-    # C coefficient (Gatheral formulation)
-    C = (
-        r * i * u * t +
-        kappa * theta / (xi ** 2) * (
-            numerator * t -
-            2.0 * np.log(one_minus_g_exp / one_minus_g)
-        )
-    )
-
-    # D coefficient
-    D = (
-        numerator / (xi ** 2) *
-        ((1.0 - exp_dt) / one_minus_g_exp)
-    )
-
-    return np.exp(C + D * v0 + i * u * np.log(s0))
+    return heston_cf_with_drift(u, s0, v0, t, r, kappa, theta, alpha, rho)
 
 
 @njit(cache=True, fastmath=True, parallel=True)
@@ -122,8 +87,8 @@ def heston_cf_vectorized(
     r: float,
     kappa: float,
     theta: float,
-    xi: float,
-    rho: float
+    alpha: float,
+    rho: float,
 ) -> np.ndarray:
     """
     Vectorized Heston characteristic function for FFT.
@@ -135,7 +100,7 @@ def heston_cf_vectorized(
     ----------
     u_arr : np.ndarray
         Array of frequency arguments (complex)
-    s0, v0, t, r, kappa, theta, xi, rho : float
+    s0, v0, t, r, kappa, theta, alpha, rho : float
         Model parameters
 
     Returns
@@ -146,9 +111,9 @@ def heston_cf_vectorized(
     n = len(u_arr)
     result = np.empty(n, dtype=np.complex128)
 
-    for i in range(n):
+    for i in prange(n):
         result[i] = heston_characteristic_function(
-            u_arr[i], s0, v0, t, r, kappa, theta, xi, rho
+            u_arr[i], s0, v0, t, r, kappa, theta, alpha, rho
         )
 
     return result
@@ -165,18 +130,20 @@ if __name__ == "__main__":
 
     # Test parameters
     s0, v0, t, r = 100.0, 0.04, 0.5, 0.05
-    kappa, theta, xi, rho = 2.0, 0.04, 0.3, -0.7
+    kappa, theta, alpha, rho = 2.0, 0.04, 0.3, -0.7
 
     # Test scalar CF
     print("\n--- Scalar Characteristic Function ---")
     u = 1.0 + 0.5j
-    cf = heston_characteristic_function(u, s0, v0, t, r, kappa, theta, xi, rho)
+    cf = heston_characteristic_function(u, s0, v0, t, r, kappa, theta, alpha, rho)
     print(f"u = {u}")
     print(f"phi(u) = {cf}")
     print(f"|phi(u)| = {np.abs(cf):.6f}")
 
     # Test at u=0 (should be 1)
-    cf_zero = heston_characteristic_function(0.0 + 0j, s0, v0, t, r, kappa, theta, xi, rho)
+    cf_zero = heston_characteristic_function(
+        0.0 + 0j, s0, v0, t, r, kappa, theta, alpha, rho
+    )
     print(f"\nphi(0) = {cf_zero}")
     assert np.abs(cf_zero - 1.0) < 1e-10, "CF at u=0 should be 1"
     print("phi(0) = 1 ✓")
@@ -184,21 +151,25 @@ if __name__ == "__main__":
     # Test vectorized CF
     print("\n--- Vectorized Characteristic Function ---")
     u_arr = np.array([0.5, 1.0, 1.5, 2.0]) + 0.5j
-    cf_vec = heston_cf_vectorized(u_arr, s0, v0, t, r, kappa, theta, xi, rho)
+    cf_vec = heston_cf_vectorized(u_arr, s0, v0, t, r, kappa, theta, alpha, rho)
     print(f"u_arr = {u_arr}")
     print(f"|phi(u_arr)| = {np.abs(cf_vec)}")
 
     # Verify vectorized matches scalar
     print("\n--- Consistency Check ---")
     for i, ui in enumerate(u_arr):
-        cf_scalar = heston_characteristic_function(ui, s0, v0, t, r, kappa, theta, xi, rho)
+        cf_scalar = heston_characteristic_function(
+            ui, s0, v0, t, r, kappa, theta, alpha, rho
+        )
         assert np.abs(cf_vec[i] - cf_scalar) < 1e-10, f"Mismatch at index {i}"
     print("Vectorized matches scalar: ✓")
 
     # Test with different parameter values
     print("\n--- Parameter Sensitivity ---")
     for rho_test in [-0.9, -0.5, 0.0, 0.5]:
-        cf_test = heston_characteristic_function(1.0 + 0j, s0, v0, t, r, kappa, theta, xi, rho_test)
+        cf_test = heston_characteristic_function(
+            1.0 + 0j, s0, v0, t, r, kappa, theta, alpha, rho_test
+        )
         print(f"rho={rho_test:+.1f}: |phi(1)| = {np.abs(cf_test):.6f}")
 
     print("\n" + "=" * 50)

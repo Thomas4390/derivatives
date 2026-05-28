@@ -8,15 +8,24 @@ This engine wraps the generic Monte Carlo machinery and implements the
 PricingEngine interface, bridging Instrument/Model/Market to the
 underlying simulation infrastructure.
 
-Author: Thomas
-Created: 2025
+Author: Thomas Vaudescal
+Created: 2026
 """
 
+from __future__ import annotations
+
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 
 import numpy as np
 
+logger = logging.getLogger(__name__)
+
+from backend.utils.constants.monte_carlo import (
+    DEFAULT_MC_PATHS,
+    DEFAULT_MC_STEPS_PER_YEAR,
+)
 from backend.core.interfaces import Instrument, Model, PricingEngine
 from backend.core.market import MarketEnvironment
 from backend.core.result_types import (
@@ -27,16 +36,11 @@ from backend.core.result_types import (
 )
 from backend.engines.monte_carlo.mc_base import GenericMCEngine, MCConfig
 from backend.instruments.options import VanillaOption
-from backend.models.bates import BatesModel
-
-# Import model types for type checking
-from backend.models.gbm import GBMModel
-from backend.models.heston import HestonModel
-from backend.models.merton import MertonModel
 
 # =============================================================================
 # MONTE CARLO ENGINE
 # =============================================================================
+
 
 @dataclass
 class MonteCarloEngine(PricingEngine):
@@ -72,25 +76,25 @@ class MonteCarloEngine(PricingEngine):
     engine = MonteCarloEngine(n_paths=100000, seed=42)
 
     option = VanillaOption(strike=100, maturity=0.5, is_call=True)
-    model = HestonModel(v0=0.04, kappa=2.0, theta=0.04, xi=0.3, rho=-0.7)
+    model = HestonModel(v0=0.04, kappa=2.0, theta=0.04, alpha=0.3, rho=-0.7)
     market = MarketEnvironment(spot=100, rate=0.05)
 
     result = engine.price(option, model, market)
     print(f"Price: ${result.price:.4f} ± ${result.error:.4f}")
     """
 
-    n_paths: int = 100_000
-    n_steps: int = 252
+    n_paths: int = DEFAULT_MC_PATHS
+    n_steps: int = DEFAULT_MC_STEPS_PER_YEAR
     seed: int | None = None
     antithetic: bool = True
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         """Initialize the underlying MC engine."""
         self._config = MCConfig(
             n_paths=self.n_paths,
             n_steps=self.n_steps,
             antithetic=self.antithetic,
-            seed=self.seed
+            seed=self.seed,
         )
 
     @property
@@ -110,34 +114,33 @@ class MonteCarloEngine(PricingEngine):
         MonteCarloEngine requires:
         - European exercise style (for now)
         - Vanilla options only (path-dependent exotics need full path simulation)
-        - Model supports Monte Carlo
+        - Model supports Monte Carlo (via create_simulator or drift/diffusion)
         """
         if instrument.exercise_style != ExerciseStyle.EUROPEAN:
             return False
 
-        # Reject path-dependent exotic options — terminal simulation only
-        from backend.instruments.options import (
-            AsianOption,
-            BarrierOption,
-            DigitalOption,
-            LookbackOption,
-        )
-        if isinstance(instrument, (BarrierOption, AsianOption, DigitalOption, LookbackOption)):
-            return False
-
-        # Requires a fixed strike
-        if not hasattr(instrument, 'strike'):
+        # Only supports vanilla options — path-dependent exotics need
+        # full path simulation (not terminal-only MC)
+        if not isinstance(instrument, VanillaOption):
             return False
 
         if PricingCapability.MONTE_CARLO not in model.supported_engines:
             return False
 
-        # Hardcoded models with optimized terminal simulators
-        _SUPPORTED = (GBMModel, HestonModel, BatesModel, MertonModel)
-        if isinstance(model, _SUPPORTED):
-            return True
+        # Accept models that can create their own simulator with simulate_terminal.
+        # Skip models that have create_pricer() — they use their own pricing
+        # pipeline (e.g. GARCH family) and are not compatible with the standard
+        # risk-neutral terminal MC approach.
+        if hasattr(model, "create_pricer"):
+            return False
+        try:
+            sim = model.create_simulator()
+            if hasattr(sim, "simulate_terminal"):
+                return True
+        except NotImplementedError:
+            pass
 
-        # Accept custom models that have drift/diffusion for generic Euler
+        # Accept models with drift/diffusion for generic Euler
         try:
             model.drift(100.0, 0.04, 0.0, 0.05, 0.0)
             model.diffusion(100.0, 0.04, 0.0)
@@ -188,16 +191,21 @@ class MonteCarloEngine(PricingEngine):
         mc_engine = GenericMCEngine(self._config)
         result = mc_engine.price(
             terminal_simulator=terminal_simulator,
-            s0=s0, k=k, t=t, r=r,
+            s0=s0,
+            k=k,
+            t=t,
+            r=r,
             is_call=option.is_call,
-            n_paths=self.n_paths, n_steps=self.n_steps, seed=self.seed
+            n_paths=self.n_paths,
+            n_steps=self.n_steps,
+            seed=self.seed,
         )
 
         return PricingResult(
             price=result.price,
             engine="MonteCarloEngine",
             model=model.name,
-            error=result.std_error
+            error=result.std_error,
         )
 
     def greeks(
@@ -265,7 +273,6 @@ class MonteCarloEngine(PricingEngine):
 
         option = instrument  # type: VanillaOption
         s0 = market.spot
-        k = option.strike
         t = option.maturity
         r = market.rate
         q = market.dividend_yield
@@ -278,11 +285,8 @@ class MonteCarloEngine(PricingEngine):
             s0=s0, t=t, r=r, n_paths=self.n_paths, n_steps=self.n_steps, seed=self.seed
         )
 
-        # Compute payoffs
-        if option.is_call:
-            payoffs = np.maximum(terminals - k, 0.0)
-        else:
-            payoffs = np.maximum(k - terminals, 0.0)
+        # Compute payoffs using instrument's payoff function (DRY)
+        payoffs = option.payoff(terminals)
 
         # Compute price and standard error
         discount = np.exp(-r * t)
@@ -293,7 +297,7 @@ class MonteCarloEngine(PricingEngine):
             price=max(price, 0.0),
             engine="MonteCarloEngine",
             model=model.name,
-            error=std_error
+            error=std_error,
         )
 
         return result, terminals
@@ -345,9 +349,14 @@ class MonteCarloEngine(PricingEngine):
         # Price all strikes
         prices, std_errors = mc_engine.price_strikes(
             terminal_simulator=terminal_simulator,
-            s0=s0, strikes=strikes, t=t, r=r,
+            s0=s0,
+            strikes=strikes,
+            t=t,
+            r=r,
             is_call=option.is_call,
-            n_paths=self.n_paths, n_steps=self.n_steps, seed=self.seed
+            n_paths=self.n_paths,
+            n_steps=self.n_steps,
+            seed=self.seed,
         )
 
         return prices, std_errors
@@ -357,6 +366,9 @@ class MonteCarloEngine(PricingEngine):
     ) -> Callable[[float, float, float, int, int, int | None], np.ndarray]:
         """
         Build a terminal price simulator for the given model.
+
+        Uses model.create_simulator() when available (polymorphic dispatch),
+        falling back to generic Euler-Maruyama for models with drift/diffusion.
 
         Returns a callable with signature:
             simulator(s0, t, r, n_paths, n_steps, seed) -> terminals
@@ -373,85 +385,38 @@ class MonteCarloEngine(PricingEngine):
         Callable
             Terminal price simulator function
         """
-        if isinstance(model, GBMModel):
-            return self._make_gbm_simulator(model, q)
-        if isinstance(model, HestonModel):
-            return self._make_heston_simulator(model, q)
-        if isinstance(model, BatesModel):
-            return self._make_bates_simulator(model, q)
-        if isinstance(model, MertonModel):
-            return self._make_merton_simulator(model, q)
+        # Try the model's own simulator factory (polymorphic dispatch)
+        try:
+            sim = model.create_simulator()
+
+            logger.debug(
+                "Using %s simulator for %s", sim.__class__.__name__, model.name
+            )
+
+            def simulator(
+                s0: float,
+                t: float,
+                r: float,
+                n_paths: int,
+                n_steps: int,
+                seed: int | None = None,
+            ) -> np.ndarray:
+                mu = r - q
+                return sim.simulate_terminal(
+                    s0=s0,
+                    mu=mu,
+                    t=t,
+                    n_paths=n_paths,
+                    n_steps=n_steps,
+                    seed=seed,
+                )
+
+            return simulator
+        except NotImplementedError:
+            pass
+
+        # Fallback: generic Euler-Maruyama for models with drift/diffusion
         return self._make_generic_simulator(model, q)
-
-    def _make_gbm_simulator(
-        self, model: GBMModel, q: float
-    ) -> Callable[[float, float, float, int, int, int | None], np.ndarray]:
-        """Create GBM terminal simulator."""
-        from backend.simulation.models.gbm import GBMSimulator
-
-        sigma = model.sigma
-        antithetic = self.antithetic
-
-        def simulator(s0, t, r, n_paths, n_steps, seed=None):
-            sim = GBMSimulator(sigma=sigma, antithetic=antithetic)
-            mu = r - q  # Risk-neutral drift
-            return sim.simulate_terminal(s0=s0, mu=mu, t=t, n_paths=n_paths, n_steps=n_steps, seed=seed)
-
-        return simulator
-
-    def _make_heston_simulator(
-        self, model: HestonModel, q: float
-    ) -> Callable[[float, float, float, int, int, int | None], np.ndarray]:
-        """Create Heston terminal simulator."""
-        from backend.simulation.models.heston import HestonSimulator
-
-        v0 = model.v0
-        kappa = model.kappa
-        theta = model.theta
-        xi = model.xi
-        rho = model.rho
-
-        def simulator(s0, t, r, n_paths, n_steps, seed=None):
-            sim = HestonSimulator(
-                v0=v0, kappa=kappa, theta=theta, xi=xi, rho=rho
-            )
-            mu = r - q  # Risk-neutral drift
-            return sim.simulate_terminal(s0=s0, mu=mu, t=t, n_paths=n_paths, n_steps=n_steps, seed=seed)
-
-        return simulator
-
-    def _make_bates_simulator(
-        self, model: BatesModel, q: float
-    ) -> Callable[[float, float, float, int, int, int | None], np.ndarray]:
-        """Create Bates terminal simulator."""
-        from backend.simulation.models.bates import BatesSimulator
-
-        def simulator(s0, t, r, n_paths, n_steps, seed=None):
-            sim = BatesSimulator(
-                v0=model.v0, kappa=model.kappa, theta=model.theta,
-                xi=model.xi, rho=model.rho,
-                lambda_j=model.lambda_j, mu_j=model.mu_j, sigma_j=model.sigma_j
-            )
-            mu = r - q  # Risk-neutral drift (jump adjustment in simulator)
-            return sim.simulate_terminal(s0=s0, mu=mu, t=t, n_paths=n_paths, n_steps=n_steps, seed=seed)
-
-        return simulator
-
-    def _make_merton_simulator(
-        self, model: MertonModel, q: float
-    ) -> Callable[[float, float, float, int, int, int | None], np.ndarray]:
-        """Create Merton terminal simulator."""
-        from backend.simulation.models.merton import MertonSimulator
-
-        def simulator(s0, t, r, n_paths, n_steps, seed=None):
-            sim = MertonSimulator(
-                sigma=model.sigma,
-                lambda_j=model.lambda_j, mu_j=model.mu_j, sigma_j=model.sigma_j
-            )
-            mu = r - q  # Risk-neutral drift (jump adjustment in simulator)
-            return sim.simulate_terminal(s0=s0, mu=mu, t=t, n_paths=n_paths, n_steps=n_steps, seed=seed)
-
-        return simulator
 
     def _make_generic_simulator(
         self, model: Model, q: float
@@ -459,11 +424,21 @@ class MonteCarloEngine(PricingEngine):
         """Create generic Euler-Maruyama terminal simulator for custom models."""
         from backend.simulation.models.generic_euler import GenericEulerSimulator
 
+        logger.debug("Using generic Euler-Maruyama for %s", model.name)
         sim = GenericEulerSimulator(model)
 
-        def simulator(s0, t, r, n_paths, n_steps, seed=None):
+        def simulator(
+            s0: float,
+            t: float,
+            r: float,
+            n_paths: int,
+            n_steps: int,
+            seed: int | None = None,
+        ) -> np.ndarray:
             mu = r - q
-            return sim.simulate_terminal(s0=s0, mu=mu, t=t, n_paths=n_paths, n_steps=n_steps, seed=seed)
+            return sim.simulate_terminal(
+                s0=s0, mu=mu, t=t, n_paths=n_paths, n_steps=n_steps, seed=seed
+            )
 
         return simulator
 
@@ -500,11 +475,13 @@ if __name__ == "__main__":
     bs_engine = BSAnalyticEngine()
     bs_result = bs_engine.price(option, gbm, market)
     print(f"BS Price: ${bs_result.price:.4f}")
-    print(f"Difference: ${abs(mc_result.price - bs_result.price):.4f} ({abs(mc_result.price - bs_result.price)/bs_result.price*100:.2f}%)")
+    print(
+        f"Difference: ${abs(mc_result.price - bs_result.price):.4f} ({abs(mc_result.price - bs_result.price) / bs_result.price * 100:.2f}%)"
+    )
 
     # Test with Heston (compare to FFT)
     print("\n--- Heston Model (vs FFT) ---")
-    heston = HestonModel(v0=0.04, kappa=2.0, theta=0.04, xi=0.3, rho=-0.7)
+    heston = HestonModel(v0=0.04, kappa=2.0, theta=0.04, alpha=0.3, rho=-0.7)
     mc_heston = engine.price(option, heston, market)
     print(f"MC Price: ${mc_heston.price:.4f} ± ${mc_heston.error:.4f}")
 
@@ -516,8 +493,14 @@ if __name__ == "__main__":
     # Test with Bates
     print("\n--- Bates Model (vs FFT) ---")
     bates = BatesModel(
-        v0=0.04, kappa=2.0, theta=0.04, xi=0.3, rho=-0.7,
-        lambda_j=0.5, mu_j=-0.1, sigma_j=0.2
+        v0=0.04,
+        kappa=2.0,
+        theta=0.04,
+        alpha=0.3,
+        rho=-0.7,
+        lam=0.5,
+        alpha_j=-0.1,
+        sigma_j=0.2,
     )
     mc_bates = engine.price(option, bates, market)
     print(f"MC Price: ${mc_bates.price:.4f} ± ${mc_bates.error:.4f}")
@@ -528,7 +511,7 @@ if __name__ == "__main__":
 
     # Test with Merton
     print("\n--- Merton Model (vs FFT) ---")
-    merton = MertonModel(sigma=0.20, lambda_j=0.5, mu_j=-0.1, sigma_j=0.2)
+    merton = MertonModel(sigma=0.20, lam=0.5, alpha_j=-0.1, sigma_j=0.2)
     mc_merton = engine.price(option, merton, market)
     print(f"MC Price: ${mc_merton.price:.4f} ± ${mc_merton.error:.4f}")
 

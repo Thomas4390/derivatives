@@ -7,15 +7,17 @@ Auto-registration of engines with the EngineRegistry.
 This module is imported by backend/engines/__init__.py to ensure
 all engines are registered when the engines package is imported.
 
-Author: Thomas
-Created: 2025
+Author: Thomas Vaudescal
+Created: 2026
 """
+
+from __future__ import annotations
 
 from backend.core.registry import EngineRegistry
 from backend.core.result_types import PricingCapability
 
 
-def register_all_engines():
+def register_all_engines() -> None:
     """
     Register all engines with the EngineRegistry.
 
@@ -26,64 +28,41 @@ def register_all_engines():
     from backend.engines.analytic_engine import BSAnalyticEngine
     from backend.engines.fft_engine import FFTEngine
     from backend.engines.mc_engine import MonteCarloEngine
+    from backend.engines.structured_mc_engine import StructuredProductMCEngine
 
     # GBM Model (Geometric Brownian Motion)
     EngineRegistry.register(
-        "Geometric Brownian Motion",
-        PricingCapability.ANALYTICAL,
-        BSAnalyticEngine
+        "Geometric Brownian Motion", PricingCapability.ANALYTICAL, BSAnalyticEngine
     )
     EngineRegistry.register(
-        "Geometric Brownian Motion",
-        PricingCapability.FFT,
-        FFTEngine
+        "Geometric Brownian Motion", PricingCapability.FFT, FFTEngine
     )
     EngineRegistry.register(
-        "Geometric Brownian Motion",
-        PricingCapability.MONTE_CARLO,
-        MonteCarloEngine
+        "Geometric Brownian Motion", PricingCapability.MONTE_CARLO, MonteCarloEngine
     )
-
     # Heston Model
     EngineRegistry.register(
-        "Heston Stochastic Volatility",
-        PricingCapability.FFT,
-        FFTEngine
+        "Heston Stochastic Volatility", PricingCapability.FFT, FFTEngine
     )
     EngineRegistry.register(
-        "Heston Stochastic Volatility",
-        PricingCapability.MONTE_CARLO,
-        MonteCarloEngine
+        "Heston Stochastic Volatility", PricingCapability.MONTE_CARLO, MonteCarloEngine
     )
 
     # Bates Model (Heston + Jumps)
+    EngineRegistry.register("Bates (Heston + Jumps)", PricingCapability.FFT, FFTEngine)
     EngineRegistry.register(
-        "Bates (Heston + Jumps)",
-        PricingCapability.FFT,
-        FFTEngine
-    )
-    EngineRegistry.register(
-        "Bates (Heston + Jumps)",
-        PricingCapability.MONTE_CARLO,
-        MonteCarloEngine
+        "Bates (Heston + Jumps)", PricingCapability.MONTE_CARLO, MonteCarloEngine
     )
 
     # Merton Jump-Diffusion Model
+    EngineRegistry.register("Merton Jump-Diffusion", PricingCapability.FFT, FFTEngine)
     EngineRegistry.register(
-        "Merton Jump-Diffusion",
-        PricingCapability.FFT,
-        FFTEngine
-    )
-    EngineRegistry.register(
-        "Merton Jump-Diffusion",
-        PricingCapability.MONTE_CARLO,
-        MonteCarloEngine
+        "Merton Jump-Diffusion", PricingCapability.MONTE_CARLO, MonteCarloEngine
     )
 
-    # ExoticAnalyticEngine is NOT registered here. It shares the ANALYTICAL
-    # capability key with BSAnalyticEngine for GBM but handles a disjoint set
-    # of instruments (barrier, Asian geometric, digital, lookback).  It is used
-    # via direct instantiation rather than registry lookup.
+    # Structured Product MC Engine — uses can_price() for dispatch,
+    # registered as a fallback engine (not keyed by model name).
+    EngineRegistry.register_fallback(StructuredProductMCEngine)
 
     # GARCH Family Models: not registered with MonteCarloEngine because
     # _get_terminal_simulator() only supports GBM/Heston/Bates/Merton.
@@ -91,10 +70,10 @@ def register_all_engines():
 
 
 # Track if registration has been done
-_registered = False
+_registered: bool = False
 
 
-def ensure_registered():
+def ensure_registered() -> None:
     """
     Ensure engines are registered (idempotent).
 

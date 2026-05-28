@@ -33,6 +33,7 @@ class DistributionStats:
     percentiles : Dict[int, float]
         Dictionary mapping percentile levels to values
     """
+
     mean: float
     std: float
     min_val: float
@@ -43,10 +44,8 @@ class DistributionStats:
 
     @classmethod
     def from_array(
-        cls,
-        values: np.ndarray,
-        percentile_levels: list[int] | None = None
-    ) -> 'DistributionStats':
+        cls, values: np.ndarray, percentile_levels: list[int] | None = None
+    ) -> "DistributionStats":
         """
         Create DistributionStats from a numpy array.
 
@@ -72,7 +71,7 @@ class DistributionStats:
             max_val=float(np.max(values)),
             skewness=float(stats.skew(values)),
             kurtosis=float(stats.kurtosis(values)),
-            percentiles={p: float(np.percentile(values, p)) for p in percentile_levels}
+            percentiles={p: float(np.percentile(values, p)) for p in percentile_levels},
         )
 
     @property
@@ -102,15 +101,15 @@ class DistributionStats:
     def to_dict(self) -> dict:
         """Convert to dictionary representation."""
         return {
-            'mean': self.mean,
-            'std': self.std,
-            'min': self.min_val,
-            'max': self.max_val,
-            'skewness': self.skewness,
-            'kurtosis': self.kurtosis,
-            'median': self.median,
-            'iqr': self.iqr,
-            **{f'p{k}': v for k, v in self.percentiles.items()}
+            "mean": self.mean,
+            "std": self.std,
+            "min": self.min_val,
+            "max": self.max_val,
+            "skewness": self.skewness,
+            "kurtosis": self.kurtosis,
+            "median": self.median,
+            "iqr": self.iqr,
+            **{f"p{k}": v for k, v in self.percentiles.items()},
         }
 
 
@@ -121,6 +120,7 @@ class PnLStats(DistributionStats):
 
     Includes risk metrics like VaR and probability of profit.
     """
+
     var_95: float = 0.0
     var_99: float = 0.0
     cvar_95: float = 0.0
@@ -132,10 +132,8 @@ class PnLStats(DistributionStats):
 
     @classmethod
     def from_pnl_array(
-        cls,
-        pnl: np.ndarray,
-        percentile_levels: list[int] | None = None
-    ) -> 'PnLStats':
+        cls, pnl: np.ndarray, percentile_levels: list[int] | None = None
+    ) -> "PnLStats":
         """
         Create PnLStats from a P&L array.
 
@@ -162,8 +160,12 @@ class PnLStats(DistributionStats):
         var_99 = float(np.percentile(pnl, 1))
 
         # CVaR calculations
-        cvar_95 = float(np.mean(pnl[pnl <= var_95])) if np.any(pnl <= var_95) else var_95
-        cvar_99 = float(np.mean(pnl[pnl <= var_99])) if np.any(pnl <= var_99) else var_99
+        cvar_95 = (
+            float(np.mean(pnl[pnl <= var_95])) if np.any(pnl <= var_95) else var_95
+        )
+        cvar_99 = (
+            float(np.mean(pnl[pnl <= var_99])) if np.any(pnl <= var_99) else var_99
+        )
 
         # Profit/Loss probabilities
         prob_profit = float(np.mean(pnl > 0))
@@ -188,7 +190,7 @@ class PnLStats(DistributionStats):
             prob_profit=prob_profit,
             prob_loss=prob_loss,
             expected_profit=expected_profit,
-            expected_loss=expected_loss
+            expected_loss=expected_loss,
         )
 
     @property
@@ -209,23 +211,27 @@ class PnLStats(DistributionStats):
 
         E[PnL] = P(profit) * E[profit|profit] + P(loss) * E[loss|loss]
         """
-        return (self.prob_profit * self.expected_profit +
-                self.prob_loss * self.expected_loss)
+        return (
+            self.prob_profit * self.expected_profit
+            + self.prob_loss * self.expected_loss
+        )
 
     def to_dict(self) -> dict:
         """Convert to dictionary representation."""
         base_dict = super().to_dict()
-        base_dict.update({
-            'var_95': self.var_95,
-            'var_99': self.var_99,
-            'cvar_95': self.cvar_95,
-            'cvar_99': self.cvar_99,
-            'prob_profit': self.prob_profit,
-            'prob_loss': self.prob_loss,
-            'expected_profit': self.expected_profit,
-            'expected_loss': self.expected_loss,
-            'profit_loss_ratio': self.profit_loss_ratio,
-        })
+        base_dict.update(
+            {
+                "var_95": self.var_95,
+                "var_99": self.var_99,
+                "cvar_95": self.cvar_95,
+                "cvar_99": self.cvar_99,
+                "prob_profit": self.prob_profit,
+                "prob_loss": self.prob_loss,
+                "expected_profit": self.expected_profit,
+                "expected_loss": self.expected_loss,
+                "profit_loss_ratio": self.profit_loss_ratio,
+            }
+        )
         return base_dict
 
 
@@ -233,10 +239,9 @@ class PnLStats(DistributionStats):
 # UTILITY FUNCTIONS
 # =============================================================================
 
+
 def compute_histogram_data(
-    values: np.ndarray,
-    bins: int = 50,
-    density: bool = False
+    values: np.ndarray, bins: int = 50, density: bool = False
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Compute histogram data for visualization.
@@ -261,9 +266,7 @@ def compute_histogram_data(
 
 
 def compute_kde(
-    values: np.ndarray,
-    n_points: int = 200,
-    bandwidth: float | None = None
+    values: np.ndarray, n_points: int = 200, bandwidth: float | None = None
 ) -> tuple[np.ndarray, np.ndarray]:
     """
     Compute kernel density estimate.
@@ -296,9 +299,7 @@ def compute_kde(
         return np.array([]), np.array([])
 
 
-def compute_empirical_cdf(
-    values: np.ndarray
-) -> tuple[np.ndarray, np.ndarray]:
+def compute_empirical_cdf(values: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """
     Compute empirical cumulative distribution function.
 
@@ -318,8 +319,7 @@ def compute_empirical_cdf(
 
 
 def compute_confidence_interval(
-    values: np.ndarray,
-    confidence: float = 0.95
+    values: np.ndarray, confidence: float = 0.95
 ) -> tuple[float, float]:
     """
     Compute confidence interval for the mean.
@@ -348,10 +348,7 @@ def compute_confidence_interval(
     return float(mean - margin), float(mean + margin)
 
 
-def compare_distributions(
-    values1: np.ndarray,
-    values2: np.ndarray
-) -> dict[str, float]:
+def compare_distributions(values1: np.ndarray, values2: np.ndarray) -> dict[str, float]:
     """
     Compare two distributions using various statistical tests.
 
@@ -371,21 +368,21 @@ def compare_distributions(
 
     # Kolmogorov-Smirnov test
     ks_stat, ks_pval = stats.ks_2samp(values1, values2)
-    results['ks_statistic'] = float(ks_stat)
-    results['ks_pvalue'] = float(ks_pval)
+    results["ks_statistic"] = float(ks_stat)
+    results["ks_pvalue"] = float(ks_pval)
 
     # Mann-Whitney U test (non-parametric)
     try:
-        mw_stat, mw_pval = stats.mannwhitneyu(values1, values2, alternative='two-sided')
-        results['mannwhitney_statistic'] = float(mw_stat)
-        results['mannwhitney_pvalue'] = float(mw_pval)
+        mw_stat, mw_pval = stats.mannwhitneyu(values1, values2, alternative="two-sided")
+        results["mannwhitney_statistic"] = float(mw_stat)
+        results["mannwhitney_pvalue"] = float(mw_pval)
     except Exception:
-        results['mannwhitney_statistic'] = np.nan
-        results['mannwhitney_pvalue'] = np.nan
+        results["mannwhitney_statistic"] = np.nan
+        results["mannwhitney_pvalue"] = np.nan
 
     # Welch's t-test
     t_stat, t_pval = stats.ttest_ind(values1, values2, equal_var=False)
-    results['ttest_statistic'] = float(t_stat)
-    results['ttest_pvalue'] = float(t_pval)
+    results["ttest_statistic"] = float(t_stat)
+    results["ttest_pvalue"] = float(t_pval)
 
     return results

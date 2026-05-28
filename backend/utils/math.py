@@ -14,20 +14,28 @@ This module is the SINGLE SOURCE OF TRUTH for:
 IMPORTANT: Do NOT duplicate these formulas elsewhere.
 All other modules should import from here.
 
-Author: Thomas
-Created: 2025
+Author: Thomas Vaudescal
+Created: 2026
 """
+
+from __future__ import annotations
 
 import math
 
 import numpy as np
 from numba import njit, prange
 
+from backend.utils.constants.time import DAYS_PER_YEAR  # noqa: F401
+from backend.utils.constants.numerical import (
+    IV_SIGMA_MIN,
+    IV_VEGA_FLOOR,
+    VOLATILITY_MAX,
+)
+
 # =============================================================================
 # Constants
 # =============================================================================
 
-DAYS_PER_YEAR = 365.0
 SQRT_2PI = math.sqrt(2.0 * math.pi)
 SQRT_2 = math.sqrt(2.0)
 
@@ -35,6 +43,7 @@ SQRT_2 = math.sqrt(2.0)
 # =============================================================================
 # Normal Distribution Functions
 # =============================================================================
+
 
 @njit(fastmath=True, cache=True)
 def norm_cdf(x: float) -> float:
@@ -95,30 +104,30 @@ def norm_inv_cdf(p: float) -> float:
         return 1e10
 
     # Rational approximation constants
-    a1 = -3.969683028665376e+01
-    a2 = 2.209460984245205e+02
-    a3 = -2.759285104469687e+02
-    a4 = 1.383577518672690e+02
-    a5 = -3.066479806614716e+01
-    a6 = 2.506628277459239e+00
+    a1 = -3.969683028665376e01
+    a2 = 2.209460984245205e02
+    a3 = -2.759285104469687e02
+    a4 = 1.383577518672690e02
+    a5 = -3.066479806614716e01
+    a6 = 2.506628277459239e00
 
-    b1 = -5.447609879822406e+01
-    b2 = 1.615858368580409e+02
-    b3 = -1.556989798598866e+02
-    b4 = 6.680131188771972e+01
-    b5 = -1.328068155288572e+01
+    b1 = -5.447609879822406e01
+    b2 = 1.615858368580409e02
+    b3 = -1.556989798598866e02
+    b4 = 6.680131188771972e01
+    b5 = -1.328068155288572e01
 
     c1 = -7.784894002430293e-03
     c2 = -3.223964580411365e-01
-    c3 = -2.400758277161838e+00
-    c4 = -2.549732539343734e+00
-    c5 = 4.374664141464968e+00
-    c6 = 2.938163982698783e+00
+    c3 = -2.400758277161838e00
+    c4 = -2.549732539343734e00
+    c5 = 4.374664141464968e00
+    c6 = 2.938163982698783e00
 
     d1 = 7.784695709041462e-03
     d2 = 3.224671290700398e-01
-    d3 = 2.445134137142996e+00
-    d4 = 3.754408661907416e+00
+    d3 = 2.445134137142996e00
+    d4 = 3.754408661907416e00
 
     p_low = 0.02425
     p_high = 1.0 - p_low
@@ -126,23 +135,29 @@ def norm_inv_cdf(p: float) -> float:
     if p < p_low:
         # Lower tail
         q = math.sqrt(-2.0 * math.log(p))
-        return (((((c1*q + c2)*q + c3)*q + c4)*q + c5)*q + c6) / \
-               ((((d1*q + d2)*q + d3)*q + d4)*q + 1.0)
+        return (((((c1 * q + c2) * q + c3) * q + c4) * q + c5) * q + c6) / (
+            (((d1 * q + d2) * q + d3) * q + d4) * q + 1.0
+        )
     if p <= p_high:
         # Central region
         q = p - 0.5
         r = q * q
-        return (((((a1*r + a2)*r + a3)*r + a4)*r + a5)*r + a6) * q / \
-               (((((b1*r + b2)*r + b3)*r + b4)*r + b5)*r + 1.0)
+        return (
+            (((((a1 * r + a2) * r + a3) * r + a4) * r + a5) * r + a6)
+            * q
+            / (((((b1 * r + b2) * r + b3) * r + b4) * r + b5) * r + 1.0)
+        )
     # Upper tail
     q = math.sqrt(-2.0 * math.log(1.0 - p))
-    return -(((((c1*q + c2)*q + c3)*q + c4)*q + c5)*q + c6) / \
-            ((((d1*q + d2)*q + d3)*q + d4)*q + 1.0)
+    return -(((((c1 * q + c2) * q + c3) * q + c4) * q + c5) * q + c6) / (
+        (((d1 * q + d2) * q + d3) * q + d4) * q + 1.0
+    )
 
 
 # =============================================================================
 # Vectorized Normal Distribution Functions
 # =============================================================================
+
 
 @njit(fastmath=True, cache=True, parallel=True)
 def norm_cdf_vec(x: np.ndarray) -> np.ndarray:
@@ -166,6 +181,7 @@ def norm_pdf_vec(x: np.ndarray) -> np.ndarray:
 # Black-Scholes d1/d2 Parameters
 # =============================================================================
 
+
 @njit(fastmath=True, cache=True)
 def d1_d2(
     spot: float,
@@ -173,7 +189,7 @@ def d1_d2(
     time_to_expiry: float,
     risk_free_rate: float,
     volatility: float,
-    dividend_yield: float = 0.0
+    dividend_yield: float = 0.0,
 ) -> tuple[float, float]:
     """
     Calculate d1 and d2 parameters for Black-Scholes model.
@@ -221,8 +237,9 @@ def d1_d2(
 
     sqrt_t = math.sqrt(time_to_expiry)
     d1 = (
-        math.log(spot / strike) +
-        (risk_free_rate - dividend_yield + 0.5 * volatility * volatility) * time_to_expiry
+        math.log(spot / strike)
+        + (risk_free_rate - dividend_yield + 0.5 * volatility * volatility)
+        * time_to_expiry
     ) / (volatility * sqrt_t)
     d2 = d1 - volatility * sqrt_t
 
@@ -233,6 +250,7 @@ def d1_d2(
 # Black-Scholes Pricing
 # =============================================================================
 
+
 @njit(fastmath=True, cache=True)
 def bs_price(
     spot: float,
@@ -241,7 +259,7 @@ def bs_price(
     rate: float,
     volatility: float,
     is_call: bool,
-    dividend_yield: float = 0.0
+    dividend_yield: float = 0.0,
 ) -> float:
     """
     Calculate Black-Scholes option price.
@@ -280,14 +298,12 @@ def bs_price(
     forward_discount = math.exp(-dividend_yield * time_to_expiry)
 
     if is_call:
-        price = (
-            spot * forward_discount * norm_cdf(d1)
-            - strike * discount * norm_cdf(d2)
+        price = spot * forward_discount * norm_cdf(d1) - strike * discount * norm_cdf(
+            d2
         )
     else:
-        price = (
-            strike * discount * norm_cdf(-d2)
-            - spot * forward_discount * norm_cdf(-d1)
+        price = strike * discount * norm_cdf(-d2) - spot * forward_discount * norm_cdf(
+            -d1
         )
 
     return max(price, 0.0)
@@ -297,6 +313,7 @@ def bs_price(
 # First-Order Greeks
 # =============================================================================
 
+
 @njit(fastmath=True, cache=True)
 def bs_delta(
     spot: float,
@@ -305,7 +322,7 @@ def bs_delta(
     rate: float,
     volatility: float,
     is_call: bool,
-    dividend_yield: float = 0.0
+    dividend_yield: float = 0.0,
 ) -> float:
     """
     Calculate Black-Scholes delta.
@@ -335,7 +352,7 @@ def bs_gamma(
     time_to_expiry: float,
     rate: float,
     volatility: float,
-    dividend_yield: float = 0.0
+    dividend_yield: float = 0.0,
 ) -> float:
     """
     Calculate Black-Scholes gamma.
@@ -362,7 +379,7 @@ def bs_vega(
     time_to_expiry: float,
     rate: float,
     volatility: float,
-    dividend_yield: float = 0.0
+    dividend_yield: float = 0.0,
 ) -> float:
     """
     Calculate Black-Scholes vega.
@@ -391,7 +408,7 @@ def bs_theta(
     rate: float,
     volatility: float,
     is_call: bool,
-    dividend_yield: float = 0.0
+    dividend_yield: float = 0.0,
 ) -> float:
     """
     Calculate Black-Scholes theta.
@@ -438,7 +455,7 @@ def bs_rho(
     rate: float,
     volatility: float,
     is_call: bool,
-    dividend_yield: float = 0.0
+    dividend_yield: float = 0.0,
 ) -> float:
     """
     Calculate Black-Scholes rho.
@@ -467,6 +484,7 @@ def bs_rho(
 # Combined First-Order Greeks
 # =============================================================================
 
+
 @njit(fastmath=True, cache=True)
 def bs_greeks(
     spot: float,
@@ -475,7 +493,7 @@ def bs_greeks(
     rate: float,
     volatility: float,
     is_call: bool,
-    dividend_yield: float = 0.0
+    dividend_yield: float = 0.0,
 ) -> tuple[float, float, float, float, float, float]:
     """
     Calculate all first-order Black-Scholes Greeks in one call.
@@ -499,8 +517,12 @@ def bs_greeks(
         return intrinsic, delta, 0.0, 0.0, 0.0, 0.0
 
     if volatility <= 0:
-        price = bs_price(spot, strike, time_to_expiry, rate, volatility, is_call, dividend_yield)
-        delta = bs_delta(spot, strike, time_to_expiry, rate, volatility, is_call, dividend_yield)
+        price = bs_price(
+            spot, strike, time_to_expiry, rate, volatility, is_call, dividend_yield
+        )
+        delta = bs_delta(
+            spot, strike, time_to_expiry, rate, volatility, is_call, dividend_yield
+        )
         return price, delta, 0.0, 0.0, 0.0, 0.0
 
     # Calculate d1, d2 once
@@ -518,7 +540,9 @@ def bs_greeks(
     if is_call:
         price = spot * forward_discount * n_d1 - strike * discount * n_d2
     else:
-        price = strike * discount * norm_cdf(-d2) - spot * forward_discount * norm_cdf(-d1)
+        price = strike * discount * norm_cdf(-d2) - spot * forward_discount * norm_cdf(
+            -d1
+        )
     price = max(price, 0.0)
 
     # Delta
@@ -562,6 +586,7 @@ def bs_greeks(
 # Second-Order Greeks
 # =============================================================================
 
+
 @njit(fastmath=True, cache=True)
 def bs_second_order_greeks(
     spot: float,
@@ -569,7 +594,7 @@ def bs_second_order_greeks(
     t: float,
     r: float,
     sigma: float,
-    dividend_yield: float = 0.0
+    dividend_yield: float = 0.0,
 ) -> tuple[float, float, float, float]:
     """
     Calculate second-order Greeks for Black-Scholes.
@@ -614,14 +639,23 @@ def bs_second_order_greeks(
     volga = vega_base * d1 * d2 / sigma / 10000.0
 
     # Charm - d²V/dSdt (per day)
-    charm = -forward_discount * n_prime_d1 * (
-        2 * (r - dividend_yield) * t - d2 * sigma * sqrt_t
-    ) / (2 * t * sigma * sqrt_t) / DAYS_PER_YEAR
+    charm = (
+        -forward_discount
+        * n_prime_d1
+        * (2 * (r - dividend_yield) * t - d2 * sigma * sqrt_t)
+        / (2 * t * sigma * sqrt_t)
+        / DAYS_PER_YEAR
+    )
 
     # Veta - d²V/dσdt (per day per 1% vol)
-    veta = spot * forward_discount * n_prime_d1 * sqrt_t * (
-        (r - dividend_yield) * d1 / (sigma * sqrt_t) - (1 + d1 * d2) / (2 * t)
-    ) / (DAYS_PER_YEAR * 100.0)
+    veta = (
+        spot
+        * forward_discount
+        * n_prime_d1
+        * sqrt_t
+        * ((r - dividend_yield) * d1 / (sigma * sqrt_t) - (1 + d1 * d2) / (2 * t))
+        / (DAYS_PER_YEAR * 100.0)
+    )
 
     return vanna, volga, charm, veta
 
@@ -630,6 +664,7 @@ def bs_second_order_greeks(
 # Third-Order Greeks
 # =============================================================================
 
+
 @njit(fastmath=True, cache=True)
 def bs_third_order_greeks(
     spot: float,
@@ -637,7 +672,7 @@ def bs_third_order_greeks(
     t: float,
     r: float,
     sigma: float,
-    dividend_yield: float = 0.0
+    dividend_yield: float = 0.0,
 ) -> tuple[float, float, float, float]:
     """
     Calculate third-order Greeks for Black-Scholes.
@@ -684,16 +719,25 @@ def bs_third_order_greeks(
     zomma = gamma * (d1 * d2 - 1) / sigma / 100.0
 
     # Color - d³V/dS²dt (per day)
-    color = -forward_discount * n_prime_d1 / (2 * spot * t * sigma * sqrt_t) * (
-        2 * (r - dividend_yield) * t - 1 +
-        d1 * (2 * (r - dividend_yield) * t - d2 * sigma * sqrt_t) / (sigma * sqrt_t)
-    ) / DAYS_PER_YEAR
+    color = (
+        -forward_discount
+        * n_prime_d1
+        / (2 * spot * t * sigma * sqrt_t)
+        * (
+            2 * (r - dividend_yield) * t
+            - 1
+            + d1
+            * (2 * (r - dividend_yield) * t - d2 * sigma * sqrt_t)
+            / (sigma * sqrt_t)
+        )
+        / DAYS_PER_YEAR
+    )
 
     # Ultima - d³V/dσ³ (per 1% vol change cubed)
     vega = spot * forward_discount * n_prime_d1 * sqrt_t
-    ultima = -vega / (sigma ** 3) * (
-        d1 * d2 * (1 - d1 * d2) + d1 * d1 + d2 * d2
-    ) / 1000000.0
+    ultima = (
+        -vega / (sigma**3) * (d1 * d2 * (1 - d1 * d2) + d1 * d1 + d2 * d2) / 1000000.0
+    )
 
     return speed, zomma, color, ultima
 
@@ -701,6 +745,7 @@ def bs_third_order_greeks(
 # =============================================================================
 # Implied Volatility (Newton-Raphson)
 # =============================================================================
+
 
 @njit(fastmath=True, cache=True)
 def implied_volatility(
@@ -712,7 +757,7 @@ def implied_volatility(
     is_call: bool,
     dividend_yield: float = 0.0,
     tol: float = 1e-8,
-    max_iter: int = 100
+    max_iter: int = 100,
 ) -> float:
     """
     Calculate implied volatility using Newton-Raphson method.
@@ -741,46 +786,87 @@ def implied_volatility(
     Returns
     -------
     float
-        Implied volatility (returns -1.0 if no convergence)
+        Implied volatility. Returns ``nan`` only when there is no real IV —
+        i.e. ``time_to_expiry <= 0`` or the price violates the no-arbitrage
+        bounds. Any in-bounds price always inverts to a finite volatility:
+        the solver is a safeguarded Newton (rtsafe) bracketed on
+        ``[IV_SIGMA_MIN, VOLATILITY_MAX]``, which converges for deep
+        ITM/OTM inputs where a bare Newton step overshoots and oscillates.
     """
     if time_to_expiry <= 0:
-        return -1.0
+        return math.nan
 
-    # Initial guess using Brenner-Subrahmanyam approximation
+    # No-arbitrage bounds: a European price outside [intrinsic, forward
+    # bound] has no real implied volatility. Reject early instead of letting
+    # Newton flail and return a misleading (previously negative) sentinel.
+    disc_spot = spot * math.exp(-dividend_yield * time_to_expiry)
+    disc_strike = strike * math.exp(-rate * time_to_expiry)
+    if is_call:
+        lower_bound = disc_spot - disc_strike
+        upper_bound = disc_spot
+    else:
+        lower_bound = disc_strike - disc_spot
+        upper_bound = disc_strike
+    if lower_bound < 0.0:
+        lower_bound = 0.0
+    if price <= 0.0 or price < lower_bound - tol or price > upper_bound + tol:
+        return math.nan
+
+    # Safeguarded Newton (rtsafe). ``f(sigma) = bs_price(sigma) - price`` is
+    # increasing in sigma, and the no-arbitrage check above guarantees a root in
+    # ``[IV_SIGMA_MIN, VOLATILITY_MAX]``. Take the Newton step only when it lands
+    # strictly inside the current bracket (and vega is usable); otherwise bisect.
+    # This converges for deep ITM/OTM inputs where a bare Newton step has a tiny
+    # vega, overshoots to the clamp and oscillates — the regime that previously
+    # returned NaN and tore holes in the model-implied IV surfaces.
+    lo = IV_SIGMA_MIN
+    hi = VOLATILITY_MAX
+    # Brenner-Subrahmanyam ATM seed, kept inside the bracket.
     sigma = math.sqrt(2 * math.pi / time_to_expiry) * price / spot
-
-    # Bound the initial guess
-    sigma = max(0.001, min(sigma, 5.0))
+    if sigma <= lo or sigma >= hi:
+        sigma = 0.5 * (lo + hi)
 
     for _ in range(max_iter):
-        bs_p = bs_price(spot, strike, time_to_expiry, rate, sigma, is_call, dividend_yield)
+        bs_p = bs_price(
+            spot, strike, time_to_expiry, rate, sigma, is_call, dividend_yield
+        )
         diff = bs_p - price
 
         if abs(diff) < tol:
             return sigma
 
-        # Vega for Newton step (unscaled)
-        d1, _ = d1_d2(spot, strike, time_to_expiry, rate, sigma, dividend_yield)
-        vega_raw = spot * math.exp(-dividend_yield * time_to_expiry) * norm_pdf(d1) * math.sqrt(time_to_expiry)
-
-        if vega_raw < 1e-10:
-            # Vega too small, bisection fallback
-            if diff > 0:
-                sigma *= 0.9
-            else:
-                sigma *= 1.1
+        # Narrow the bracket from the sign of the residual (f is increasing).
+        if diff < 0.0:
+            lo = sigma
         else:
-            sigma = sigma - diff / vega_raw
+            hi = sigma
 
-        # Keep sigma in reasonable bounds
-        sigma = max(0.001, min(sigma, 5.0))
+        # Newton step, accepted only if it stays strictly inside the bracket.
+        d1, _ = d1_d2(spot, strike, time_to_expiry, rate, sigma, dividend_yield)
+        vega_raw = (
+            spot
+            * math.exp(-dividend_yield * time_to_expiry)
+            * norm_pdf(d1)
+            * math.sqrt(time_to_expiry)
+        )
+        if vega_raw > IV_VEGA_FLOOR:
+            candidate = sigma - diff / vega_raw
+        else:
+            candidate = lo - 1.0  # unusable vega -> force a bisection step
+        if candidate <= lo or candidate >= hi:
+            sigma = 0.5 * (lo + hi)
+        else:
+            sigma = candidate
 
-    return -1.0  # No convergence
+    # Bracketed root, iterations exhausted: the midpoint is the best estimate
+    # (the bracket has narrowed far below any practical tolerance by now).
+    return 0.5 * (lo + hi)
 
 
 # =============================================================================
 # Discount Factor Utilities
 # =============================================================================
+
 
 @njit(fastmath=True, cache=True)
 def discount_factor(rate: float, time: float) -> float:
@@ -804,10 +890,7 @@ def discount_factor(rate: float, time: float) -> float:
 
 @njit(fastmath=True, cache=True)
 def forward_price(
-    spot: float,
-    rate: float,
-    dividend_yield: float,
-    time: float
+    spot: float, rate: float, dividend_yield: float, time: float
 ) -> float:
     """
     Calculate forward price.
@@ -835,6 +918,7 @@ def forward_price(
 # Moneyness Utilities
 # =============================================================================
 
+
 @njit(fastmath=True, cache=True)
 def log_moneyness(spot: float, strike: float) -> float:
     """
@@ -850,11 +934,7 @@ def log_moneyness(spot: float, strike: float) -> float:
 
 @njit(fastmath=True, cache=True)
 def forward_log_moneyness(
-    spot: float,
-    strike: float,
-    rate: float,
-    dividend_yield: float,
-    time: float
+    spot: float, strike: float, rate: float, dividend_yield: float, time: float
 ) -> float:
     """
     Calculate forward log-moneyness.
@@ -876,7 +956,7 @@ def delta_to_strike(
     rate: float,
     volatility: float,
     is_call: bool,
-    dividend_yield: float = 0.0
+    dividend_yield: float = 0.0,
 ) -> float:
     """
     Convert delta to strike price.
@@ -912,7 +992,9 @@ def delta_to_strike(
         d1 = norm_inv_cdf((delta / forward_discount) + 1.0)
 
     fwd = forward_price(spot, rate, dividend_yield, time_to_expiry)
-    strike = fwd * math.exp(-d1 * volatility * sqrt_t + 0.5 * volatility * volatility * time_to_expiry)
+    strike = fwd * math.exp(
+        -d1 * volatility * sqrt_t + 0.5 * volatility * volatility * time_to_expiry
+    )
 
     return strike
 
@@ -949,7 +1031,9 @@ if __name__ == "__main__":
     d1, d2 = d1_d2(s, k, t, r, sigma)
     print(f"  d1 = {d1:.6f}")
     print(f"  d2 = {d2:.6f}")
-    print(f"  d1 - d2 = {d1 - d2:.6f} (should equal sigma*sqrt(t) = {sigma * math.sqrt(t):.6f})")
+    print(
+        f"  d1 - d2 = {d1 - d2:.6f} (should equal sigma*sqrt(t) = {sigma * math.sqrt(t):.6f})"
+    )
 
     # --- Test 3: Black-Scholes pricing ---
     print("\n--- Test 3: Black-Scholes Pricing ---")
@@ -961,7 +1045,9 @@ if __name__ == "__main__":
     # Put-call parity check
     parity_lhs = call_price - put_price
     parity_rhs = s - k * math.exp(-r * t)
-    print(f"  Put-call parity: C - P = {parity_lhs:.4f}, S - K*e^(-rT) = {parity_rhs:.4f}")
+    print(
+        f"  Put-call parity: C - P = {parity_lhs:.4f}, S - K*e^(-rT) = {parity_rhs:.4f}"
+    )
     assert abs(parity_lhs - parity_rhs) < 0.01, "Put-call parity violated"
 
     # --- Test 4: First-order Greeks ---
@@ -1000,7 +1086,9 @@ if __name__ == "__main__":
     recovered_iv = implied_volatility(target_price, s, k, t, r, is_call=True)
     print(f"  Original sigma: {sigma:.4f}")
     print(f"  Recovered IV:   {recovered_iv:.4f}")
-    assert abs(recovered_iv - sigma) < 0.001, f"IV recovery failed: {recovered_iv} vs {sigma}"
+    assert abs(recovered_iv - sigma) < 0.001, (
+        f"IV recovery failed: {recovered_iv} vs {sigma}"
+    )
 
     # --- Test 8: Utility functions ---
     print("\n--- Test 8: Utility Functions ---")

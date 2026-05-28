@@ -12,9 +12,11 @@ Exact solution:
 
 For Q-measure (risk-neutral pricing), set μ = r (risk-free rate).
 
-Author: Thomas
-Created: 2025
+Author: Thomas Vaudescal
+Created: 2026
 """
+
+from __future__ import annotations
 
 import time
 import warnings
@@ -29,6 +31,7 @@ from backend.simulation.base import BaseSimulator, SimulationResult
 # Numba-Optimized Kernels
 # =============================================================================
 
+
 @njit(parallel=True, cache=True, fastmath=True)
 def _simulate_gbm_paths(
     s0: float,
@@ -37,7 +40,7 @@ def _simulate_gbm_paths(
     t: float,
     n_paths: int,
     n_steps: int,
-    antithetic: bool = True
+    antithetic: bool = True,
 ) -> np.ndarray:
     """
     Numba kernel for GBM path simulation.
@@ -68,7 +71,9 @@ def _simulate_gbm_paths(
 
                 # Antithetic path (use -z)
                 log_return_anti = drift - diffusion * z
-                paths[i + half_paths, j + 1] = paths[i + half_paths, j] * np.exp(log_return_anti)
+                paths[i + half_paths, j + 1] = paths[i + half_paths, j] * np.exp(
+                    log_return_anti
+                )
     else:
         paths = np.empty((n_paths, n_steps + 1), dtype=np.float64)
 
@@ -91,7 +96,7 @@ def _simulate_gbm_terminal(
     t: float,
     n_paths: int,
     n_steps: int,
-    antithetic: bool = True
+    antithetic: bool = True,
 ) -> np.ndarray:
     """
     Numba kernel for terminal-only GBM simulation.
@@ -135,6 +140,7 @@ def _simulate_gbm_terminal(
 # GBM Simulator Class
 # =============================================================================
 
+
 class GBMSimulator(BaseSimulator):
     """
     Geometric Brownian Motion simulator.
@@ -155,7 +161,7 @@ class GBMSimulator(BaseSimulator):
     print(f"Terminal mean: ${result.terminal_mean:.2f}")
     """
 
-    def __init__(self, sigma: float, antithetic: bool = True):
+    def __init__(self, sigma: float, antithetic: bool = True) -> None:
         super().__init__()
         self._model_name = "Geometric Brownian Motion"
         self._sigma = sigma
@@ -189,7 +195,7 @@ class GBMSimulator(BaseSimulator):
         t: float,
         n_paths: int,
         n_steps: int,
-        seed: int | None = None
+        seed: int | None = None,
     ) -> SimulationResult:
         """
         Simulate full GBM price paths.
@@ -223,7 +229,7 @@ class GBMSimulator(BaseSimulator):
                 warnings.warn(
                     f"Antithetic sampling requires even n_paths. "
                     f"Using {adjusted_paths} instead of {n_paths}.",
-                    UserWarning
+                    UserWarning,
                 )
                 n_paths = adjusted_paths
 
@@ -247,7 +253,7 @@ class GBMSimulator(BaseSimulator):
             n_paths=n_paths,
             n_steps=n_steps,
             volatility_paths=None,
-            parameters=self.get_parameters() | {"s0": s0, "mu": mu, "t": t}
+            parameters=self.get_parameters() | {"s0": s0, "mu": mu, "t": t},
         )
 
     def simulate_terminal(
@@ -257,7 +263,7 @@ class GBMSimulator(BaseSimulator):
         t: float,
         n_paths: int,
         n_steps: int,
-        seed: int | None = None
+        seed: int | None = None,
     ) -> np.ndarray:
         """
         Simulate only terminal values S(T).
@@ -293,7 +299,7 @@ class GBMSimulator(BaseSimulator):
                 warnings.warn(
                     f"Antithetic sampling requires even n_paths. "
                     f"Using {adjusted_paths} instead of {n_paths}.",
-                    UserWarning
+                    UserWarning,
                 )
                 n_paths = adjusted_paths
 
@@ -309,6 +315,7 @@ class GBMSimulator(BaseSimulator):
 # Convenience Function
 # =============================================================================
 
+
 def simulate_gbm(
     s0: float,
     mu: float,
@@ -318,8 +325,8 @@ def simulate_gbm(
     n_steps: int = 252,
     seed: int | None = None,
     antithetic: bool = True,
-    terminal_only: bool = False
-):
+    terminal_only: bool = False,
+) -> SimulationResult | np.ndarray:
     """
     Convenience function for GBM simulation.
 
@@ -384,6 +391,6 @@ if __name__ == "__main__":
         elapsed = time.perf_counter() - start
 
         paths_per_sec = n_paths / elapsed
-        print(f"{n_paths:>12,} {elapsed*1000:>12.2f} {paths_per_sec:>15,.0f}")
+        print(f"{n_paths:>12,} {elapsed * 1000:>12.2f} {paths_per_sec:>15,.0f}")
 
     print()

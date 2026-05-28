@@ -38,34 +38,38 @@ def render_sidebar() -> dict[str, Any]:
         # =================================================================
         # SIMULATION MODE
         # =================================================================
-        st.markdown('<div class="sidebar-header">Simulation Mode</div>', unsafe_allow_html=True)
+        st.markdown(
+            '<div class="sidebar-header">Simulation Mode</div>', unsafe_allow_html=True
+        )
 
         simulation_mode_display = st.radio(
             "Choose simulation type",
             options=["Price Paths", "Volatility Paths", "Option P&L"],
             horizontal=True,
-            label_visibility="collapsed"
+            label_visibility="collapsed",
         )
 
         # Map display names to internal keys
         mode_map = {
             "Price Paths": "price",
             "Volatility Paths": "volatility",
-            "Option P&L": "option_pnl"
+            "Option P&L": "option_pnl",
         }
         simulation_mode = mode_map.get(simulation_mode_display, "price")
 
         # =================================================================
         # MODEL SELECTION
         # =================================================================
-        st.markdown('<div class="sidebar-header">Model Selection</div>', unsafe_allow_html=True)
+        st.markdown(
+            '<div class="sidebar-header">Model Selection</div>', unsafe_allow_html=True
+        )
 
         if simulation_mode == "price":
             price_model = st.selectbox(
                 "Price Model",
                 options=list(PRICE_MODELS.keys()),
                 format_func=lambda x: PRICE_MODELS[x],
-                key="price_model_select"
+                key="price_model_select",
             )
 
             # Show model description in expander
@@ -78,7 +82,7 @@ def render_sidebar() -> dict[str, Any]:
                 "Volatility Model",
                 options=list(VOLATILITY_MODELS.keys()),
                 format_func=lambda x: VOLATILITY_MODELS[x],
-                key="vol_model_select"
+                key="vol_model_select",
             )
 
             # Show model description
@@ -93,7 +97,7 @@ def render_sidebar() -> dict[str, Any]:
                 "Underlying Model",
                 options=list(PRICE_MODELS.keys()),
                 format_func=lambda x: PRICE_MODELS[x],
-                key="pnl_price_model_select"
+                key="pnl_price_model_select",
             )
 
             # Show model description in expander
@@ -104,7 +108,10 @@ def render_sidebar() -> dict[str, Any]:
         # =================================================================
         # COMMON PARAMETERS
         # =================================================================
-        st.markdown('<div class="sidebar-header">Common Parameters</div>', unsafe_allow_html=True)
+        st.markdown(
+            '<div class="sidebar-header">Common Parameters</div>',
+            unsafe_allow_html=True,
+        )
 
         col1, col2 = st.columns(2)
 
@@ -115,7 +122,7 @@ def render_sidebar() -> dict[str, Any]:
                 max_value=10000.0,
                 value=DEFAULT_SPOT_PRICE,
                 step=1.0,
-                format="%.2f"
+                format="%.2f",
             )
 
         with col2:
@@ -125,7 +132,7 @@ def render_sidebar() -> dict[str, Any]:
                 max_value=0.20,
                 value=DEFAULT_RISK_FREE_RATE,
                 step=0.005,
-                format="%.3f"
+                format="%.3f",
             )
 
         col1, col2 = st.columns(2)
@@ -137,7 +144,7 @@ def render_sidebar() -> dict[str, Any]:
                 max_value=1.0,
                 value=DEFAULT_VOLATILITY,
                 step=0.01,
-                format="%.2f"
+                format="%.2f",
             )
 
         with col2:
@@ -147,13 +154,16 @@ def render_sidebar() -> dict[str, Any]:
                 max_value=10.0,
                 value=DEFAULT_TIME_HORIZON,
                 step=0.1,
-                format="%.1f"
+                format="%.1f",
             )
 
         # =================================================================
         # SIMULATION SETTINGS
         # =================================================================
-        st.markdown('<div class="sidebar-header">Simulation Settings</div>', unsafe_allow_html=True)
+        st.markdown(
+            '<div class="sidebar-header">Simulation Settings</div>',
+            unsafe_allow_html=True,
+        )
 
         col1, col2 = st.columns(2)
 
@@ -163,7 +173,7 @@ def render_sidebar() -> dict[str, Any]:
                 min_value=10,
                 max_value=100000,
                 value=DEFAULT_NUM_PATHS,
-                step=100
+                step=100,
             )
 
         with col2:
@@ -172,14 +182,16 @@ def render_sidebar() -> dict[str, Any]:
                 min_value=10,
                 max_value=1000,
                 value=DEFAULT_NUM_STEPS,
-                step=10
+                step=10,
             )
 
         # Memory validation warning
         total_samples = num_paths * (num_steps + 1)
         memory_mb = total_samples * 8 / (1024 * 1024)  # 8 bytes per float64
         if total_samples > 50_000_000:  # 50M samples ~400MB
-            st.warning(f"⚠️ High memory usage: ~{memory_mb:.0f} MB for {total_samples/1e6:.0f}M samples")
+            st.warning(
+                f"⚠️ High memory usage: ~{memory_mb:.0f} MB for {total_samples / 1e6:.0f}M samples"
+            )
         elif total_samples > 20_000_000:  # 20M samples ~160MB
             st.info(f"ℹ️ Memory estimate: ~{memory_mb:.0f} MB")
 
@@ -188,29 +200,32 @@ def render_sidebar() -> dict[str, Any]:
             min_value=0,
             max_value=99999,
             value=42,
-            step=1
+            step=1,
         )
 
         # =================================================================
         # MODEL-SPECIFIC PARAMETERS
         # =================================================================
         params = {
-            'simulation_mode': simulation_mode,
-            'price_model': price_model,
-            'vol_model': vol_model,
-            'spot_price': spot_price,
-            'risk_free_rate': risk_free_rate,
-            'volatility': volatility,
-            'time_horizon': time_horizon,
-            'num_paths': int(num_paths),
-            'num_steps': int(num_steps),
-            'seed': int(seed)
+            "simulation_mode": simulation_mode,
+            "price_model": price_model,
+            "vol_model": vol_model,
+            "spot_price": spot_price,
+            "risk_free_rate": risk_free_rate,
+            "volatility": volatility,
+            "time_horizon": time_horizon,
+            "num_paths": int(num_paths),
+            "num_steps": int(num_steps),
+            "seed": int(seed),
         }
 
         # Model-specific parameters based on simulation mode
         if simulation_mode == "price":
             # Expected return for P-measure simulation
-            st.markdown('<div class="sidebar-header">Expected Return</div>', unsafe_allow_html=True)
+            st.markdown(
+                '<div class="sidebar-header">Expected Return</div>',
+                unsafe_allow_html=True,
+            )
             expected_return = st.number_input(
                 "Expected Return (μ)",
                 min_value=-0.20,
@@ -219,36 +234,39 @@ def render_sidebar() -> dict[str, Any]:
                 step=0.01,
                 format="%.2f",
                 help="Annual expected return under P-measure",
-                key="price_expected_return"
+                key="price_expected_return",
             )
-            params['expected_return'] = expected_return
+            params["expected_return"] = expected_return
 
             params.update(_render_price_model_params(price_model, volatility))
         elif simulation_mode == "volatility":
             params.update(_render_volatility_model_params(vol_model, volatility))
         else:  # option_pnl mode
             params.update(_render_price_model_params(price_model, volatility))
-            params.update(_render_option_pnl_params(spot_price, risk_free_rate, time_horizon, volatility))
+            params.update(
+                _render_option_pnl_params(
+                    spot_price, risk_free_rate, time_horizon, volatility
+                )
+            )
 
         # =================================================================
         # VISUALIZATION OPTIONS
         # =================================================================
-        st.markdown('<div class="sidebar-header">Visualization Options</div>', unsafe_allow_html=True)
+        st.markdown(
+            '<div class="sidebar-header">Visualization Options</div>',
+            unsafe_allow_html=True,
+        )
 
         show_percentiles = st.checkbox("Show percentile bands (5%-95%)", value=True)
         show_mean = st.checkbox("Show mean path", value=True)
 
         max_display = st.slider(
-            "Max paths to display",
-            min_value=10,
-            max_value=200,
-            value=50,
-            step=10
+            "Max paths to display", min_value=10, max_value=200, value=50, step=10
         )
 
-        params['show_percentiles'] = show_percentiles
-        params['show_mean'] = show_mean
-        params['max_display_paths'] = max_display
+        params["show_percentiles"] = show_percentiles
+        params["show_mean"] = show_mean
+        params["max_display_paths"] = max_display
 
         # =================================================================
         # ACTION BUTTONS
@@ -259,20 +277,14 @@ def render_sidebar() -> dict[str, Any]:
 
         with col1:
             run_simulation = st.button(
-                "Run Simulation",
-                type="primary",
-                width="stretch"
+                "Run Simulation", type="primary", width="stretch"
             )
 
         with col2:
-            reset = st.button(
-                "Reset Defaults",
-                type="secondary",
-                width="stretch"
-            )
+            reset = st.button("Reset Defaults", type="secondary", width="stretch")
 
-        params['run_simulation'] = run_simulation
-        params['reset'] = reset
+        params["run_simulation"] = run_simulation
+        params["reset"] = reset
 
         return params
 
@@ -282,7 +294,10 @@ def _render_price_model_params(model: str, base_volatility: float) -> dict[str, 
     params = {}
 
     if model == "heston":
-        st.markdown('<div class="sidebar-header">Heston Parameters</div>', unsafe_allow_html=True)
+        st.markdown(
+            '<div class="sidebar-header">Heston Parameters</div>',
+            unsafe_allow_html=True,
+        )
 
         col1, col2 = st.columns(2)
 
@@ -291,9 +306,9 @@ def _render_price_model_params(model: str, base_volatility: float) -> dict[str, 
                 "Initial Variance (V0)",
                 min_value=0.001,
                 max_value=1.0,
-                value=base_volatility ** 2,
+                value=base_volatility**2,
                 step=0.01,
-                format="%.4f"
+                format="%.4f",
             )
             kappa = st.number_input(
                 "Mean Reversion (kappa)",
@@ -301,68 +316,69 @@ def _render_price_model_params(model: str, base_volatility: float) -> dict[str, 
                 max_value=10.0,
                 value=2.0,
                 step=0.1,
-                format="%.2f"
+                format="%.2f",
             )
 
         with col2:
             theta = st.number_input(
-                "Long-term Var (theta)",
+                "Long-term Var (σ²)",
                 min_value=0.001,
                 max_value=1.0,
-                value=base_volatility ** 2,
+                value=base_volatility**2,
                 step=0.01,
-                format="%.4f"
+                format="%.4f",
             )
-            xi = st.number_input(
-                "Vol of Vol (xi)",
+            alpha = st.number_input(
+                "Vol of Vol (alpha)",
                 min_value=0.01,
                 max_value=1.0,
                 value=0.3,
                 step=0.05,
-                format="%.2f"
+                format="%.2f",
             )
 
         rho = st.slider(
-            "Correlation (rho)",
-            min_value=-0.99,
-            max_value=0.99,
-            value=-0.7,
-            step=0.01
+            "Correlation (rho)", min_value=-0.99, max_value=0.99, value=-0.7, step=0.01
         )
 
         # Feller condition check
-        feller = 2 * kappa * theta / (xi ** 2)
+        feller = 2 * kappa * theta / (alpha**2)
         if feller < 1:
-            st.warning(f"Feller condition not satisfied ({feller:.2f} < 1). Variance may reach zero.")
+            st.warning(
+                f"Feller condition not satisfied ({feller:.2f} < 1). Variance may reach zero."
+            )
 
-        params['heston_v0'] = v0
-        params['heston_kappa'] = kappa
-        params['heston_theta'] = theta
-        params['heston_xi'] = xi
-        params['heston_rho'] = rho
+        params["heston_v0"] = v0
+        params["heston_kappa"] = kappa
+        params["heston_theta"] = theta
+        params["heston_xi"] = alpha
+        params["heston_rho"] = rho
 
     elif model == "merton":
-        st.markdown('<div class="sidebar-header">Merton Jump Parameters</div>', unsafe_allow_html=True)
+        st.markdown(
+            '<div class="sidebar-header">Merton Jump Parameters</div>',
+            unsafe_allow_html=True,
+        )
 
         col1, col2 = st.columns(2)
 
         with col1:
-            lambda_j = st.number_input(
+            lam = st.number_input(
                 "Jump Intensity (lambda)",
                 min_value=0.0,
                 max_value=5.0,
                 value=0.5,
                 step=0.1,
                 format="%.2f",
-                help="Expected number of jumps per year"
+                help="Expected number of jumps per year",
             )
-            mu_j = st.number_input(
-                "Mean Log-Jump (mu_j)",
+            alpha_j = st.number_input(
+                "Mean Log-Jump (alpha_j)",
                 min_value=-0.5,
                 max_value=0.5,
                 value=-0.1,
                 step=0.01,
-                format="%.3f"
+                format="%.3f",
             )
 
         with col2:
@@ -372,15 +388,18 @@ def _render_price_model_params(model: str, base_volatility: float) -> dict[str, 
                 max_value=0.5,
                 value=0.2,
                 step=0.01,
-                format="%.2f"
+                format="%.2f",
             )
 
-        params['merton_lambda'] = lambda_j
-        params['merton_mu_j'] = mu_j
-        params['merton_sigma_j'] = sigma_j
+        params["merton_lambda"] = lam
+        params["merton_mu_j"] = alpha_j
+        params["merton_sigma_j"] = sigma_j
 
     elif model == "bates":
-        st.markdown('<div class="sidebar-header">Bates Model Parameters</div>', unsafe_allow_html=True)
+        st.markdown(
+            '<div class="sidebar-header">Bates Model Parameters</div>',
+            unsafe_allow_html=True,
+        )
 
         # Heston (stochastic volatility) parameters
         st.markdown("**Stochastic Volatility**")
@@ -391,10 +410,10 @@ def _render_price_model_params(model: str, base_volatility: float) -> dict[str, 
                 "Initial Variance (V0)",
                 min_value=0.001,
                 max_value=1.0,
-                value=base_volatility ** 2,
+                value=base_volatility**2,
                 step=0.01,
                 format="%.4f",
-                key="bates_v0"
+                key="bates_v0",
             )
             kappa = st.number_input(
                 "Mean Reversion (kappa)",
@@ -403,27 +422,27 @@ def _render_price_model_params(model: str, base_volatility: float) -> dict[str, 
                 value=2.0,
                 step=0.1,
                 format="%.2f",
-                key="bates_kappa"
+                key="bates_kappa",
             )
 
         with col2:
             theta = st.number_input(
-                "Long-term Var (theta)",
+                "Long-term Var (σ²)",
                 min_value=0.001,
                 max_value=1.0,
-                value=base_volatility ** 2,
+                value=base_volatility**2,
                 step=0.01,
                 format="%.4f",
-                key="bates_theta"
+                key="bates_theta",
             )
-            xi = st.number_input(
-                "Vol of Vol (xi)",
+            alpha = st.number_input(
+                "Vol of Vol (alpha)",
                 min_value=0.01,
                 max_value=1.0,
                 value=0.3,
                 step=0.05,
                 format="%.2f",
-                key="bates_xi"
+                key="bates_xi",
             )
 
         rho = st.slider(
@@ -432,20 +451,22 @@ def _render_price_model_params(model: str, base_volatility: float) -> dict[str, 
             max_value=0.99,
             value=-0.7,
             step=0.01,
-            key="bates_rho"
+            key="bates_rho",
         )
 
         # Feller condition check
-        feller = 2 * kappa * theta / (xi ** 2)
+        feller = 2 * kappa * theta / (alpha**2)
         if feller < 1:
-            st.warning(f"⚠️ Feller condition not satisfied ({feller:.2f} < 1). Variance may reach zero.")
+            st.warning(
+                f"⚠️ Feller condition not satisfied ({feller:.2f} < 1). Variance may reach zero."
+            )
 
         # Jump parameters
         st.markdown("**Jump Component**")
         col1, col2 = st.columns(2)
 
         with col1:
-            lambda_j = st.number_input(
+            lam = st.number_input(
                 "Jump Intensity (lambda)",
                 min_value=0.0,
                 max_value=5.0,
@@ -453,16 +474,16 @@ def _render_price_model_params(model: str, base_volatility: float) -> dict[str, 
                 step=0.1,
                 format="%.2f",
                 help="Expected number of jumps per year",
-                key="bates_lambda"
+                key="bates_lambda",
             )
-            mu_j = st.number_input(
-                "Mean Log-Jump (mu_j)",
+            alpha_j = st.number_input(
+                "Mean Log-Jump (alpha_j)",
                 min_value=-0.5,
                 max_value=0.5,
                 value=-0.1,
                 step=0.01,
                 format="%.3f",
-                key="bates_mu_j"
+                key="bates_mu_j",
             )
 
         with col2:
@@ -473,20 +494,22 @@ def _render_price_model_params(model: str, base_volatility: float) -> dict[str, 
                 value=0.2,
                 step=0.01,
                 format="%.2f",
-                key="bates_sigma_j"
+                key="bates_sigma_j",
             )
 
-        params['bates_v0'] = v0
-        params['bates_kappa'] = kappa
-        params['bates_theta'] = theta
-        params['bates_xi'] = xi
-        params['bates_rho'] = rho
-        params['bates_lambda'] = lambda_j
-        params['bates_mu_j'] = mu_j
-        params['bates_sigma_j'] = sigma_j
+        params["bates_v0"] = v0
+        params["bates_kappa"] = kappa
+        params["bates_theta"] = theta
+        params["bates_xi"] = alpha
+        params["bates_rho"] = rho
+        params["bates_lambda"] = lam
+        params["bates_mu_j"] = alpha_j
+        params["bates_sigma_j"] = sigma_j
 
     elif model == "sabr":
-        st.markdown('<div class="sidebar-header">SABR Parameters</div>', unsafe_allow_html=True)
+        st.markdown(
+            '<div class="sidebar-header">SABR Parameters</div>', unsafe_allow_html=True
+        )
 
         beta = st.slider(
             "CEV Exponent (beta)",
@@ -494,7 +517,7 @@ def _render_price_model_params(model: str, base_volatility: float) -> dict[str, 
             max_value=1.0,
             value=0.5,
             step=0.1,
-            help="0=Normal, 1=Lognormal"
+            help="0=Normal, 1=Lognormal",
         )
 
         col1, col2 = st.columns(2)
@@ -506,7 +529,7 @@ def _render_price_model_params(model: str, base_volatility: float) -> dict[str, 
                 max_value=1.0,
                 value=0.4,
                 step=0.05,
-                format="%.2f"
+                format="%.2f",
             )
 
         with col2:
@@ -516,21 +539,26 @@ def _render_price_model_params(model: str, base_volatility: float) -> dict[str, 
                 max_value=0.99,
                 value=-0.3,
                 step=0.01,
-                key="sabr_rho"
+                key="sabr_rho",
             )
 
-        params['sabr_beta'] = beta
-        params['sabr_nu'] = nu
-        params['sabr_rho'] = rho
+        params["sabr_beta"] = beta
+        params["sabr_nu"] = nu
+        params["sabr_rho"] = rho
 
     return params
 
 
-def _render_volatility_model_params(model: str, base_volatility: float) -> dict[str, Any]:
+def _render_volatility_model_params(
+    model: str, base_volatility: float
+) -> dict[str, Any]:
     """Render parameters specific to volatility models."""
     params = {}
 
-    st.markdown(f'<div class="sidebar-header">{VOLATILITY_MODELS[model]} Parameters</div>', unsafe_allow_html=True)
+    st.markdown(
+        f'<div class="sidebar-header">{VOLATILITY_MODELS[model]} Parameters</div>',
+        unsafe_allow_html=True,
+    )
 
     col1, col2 = st.columns(2)
 
@@ -542,7 +570,7 @@ def _render_volatility_model_params(model: str, base_volatility: float) -> dict[
             value=0.05,
             step=0.01,
             format="%.3f",
-            help="Reaction to past shocks"
+            help="Reaction to past shocks",
         )
 
     with col2:
@@ -553,29 +581,31 @@ def _render_volatility_model_params(model: str, base_volatility: float) -> dict[
             value=0.90,
             step=0.01,
             format="%.3f",
-            help="Persistence of variance"
+            help="Persistence of variance",
         )
 
-    params['garch_alpha'] = alpha
-    params['garch_beta'] = beta
+    params["garch_alpha"] = alpha
+    params["garch_beta"] = beta
 
     # Model-specific additional parameters
     if model == "ngarch":
         theta = st.number_input(
-            "Leverage (theta)",
+            "Leverage (γ)",
             min_value=0.0,
             max_value=2.0,
             value=0.5,
             step=0.1,
             format="%.2f",
-            help="Asymmetry parameter"
+            help="Asymmetry parameter",
         )
-        params['ngarch_theta'] = theta
+        params["ngarch_theta"] = theta
 
         # Check stationarity
-        persistence = alpha * (1 + theta ** 2) + beta
+        persistence = alpha * (1 + theta**2) + beta
         if persistence >= 1:
-            st.error(f"Non-stationary! alpha(1+theta^2) + beta = {persistence:.3f} >= 1")
+            st.error(
+                f"Non-stationary! alpha(1+theta^2) + beta = {persistence:.3f} >= 1"
+            )
         else:
             st.success(f"Stationary: persistence = {persistence:.3f}")
 
@@ -587,9 +617,9 @@ def _render_volatility_model_params(model: str, base_volatility: float) -> dict[
             value=0.05,
             step=0.01,
             format="%.3f",
-            help="Additional weight for negative shocks"
+            help="Additional weight for negative shocks",
         )
-        params['gjr_gamma'] = gamma
+        params["gjr_gamma"] = gamma
 
         # Check stationarity
         persistence = alpha + beta + 0.5 * gamma
@@ -606,9 +636,9 @@ def _render_volatility_model_params(model: str, base_volatility: float) -> dict[
             value=-0.1,
             step=0.01,
             format="%.3f",
-            help="Negative for leverage effect"
+            help="Negative for leverage effect",
         )
-        params['egarch_gamma'] = gamma
+        params["egarch_gamma"] = gamma
 
         if abs(beta) >= 1:
             st.error(f"Non-stationary! |beta| = {abs(beta):.3f} >= 1")
@@ -625,19 +655,16 @@ def _render_volatility_model_params(model: str, base_volatility: float) -> dict[
     # Compute long-run variance/volatility
     if model == "garch":
         if alpha + beta < 1:
-            omega = base_volatility ** 2 * (1 - alpha - beta)
+            omega = base_volatility**2 * (1 - alpha - beta)
             long_run_var = omega / (1 - alpha - beta)
-            st.info(f"Long-run volatility: {100*long_run_var**0.5:.1f}%")
-            params['garch_omega'] = omega
+            st.info(f"Long-run volatility: {100 * long_run_var**0.5:.1f}%")
+            params["garch_omega"] = omega
 
     return params
 
 
 def _render_option_pnl_params(
-    spot_price: float,
-    risk_free_rate: float,
-    time_horizon: float,
-    volatility: float
+    spot_price: float, risk_free_rate: float, time_horizon: float, volatility: float
 ) -> dict[str, Any]:
     """Render parameters specific to Option P&L simulation."""
     from components.strategy_builder import (
@@ -648,7 +675,9 @@ def _render_option_pnl_params(
     params = {}
 
     # Expected return for P-measure simulation
-    st.markdown('<div class="sidebar-header">Expected Return</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="sidebar-header">Expected Return</div>', unsafe_allow_html=True
+    )
 
     expected_return = st.number_input(
         "Expected Return (mu)",
@@ -657,10 +686,10 @@ def _render_option_pnl_params(
         value=DEFAULT_EXPECTED_RETURN,
         step=0.01,
         format="%.2f",
-        help="Annual expected return under P-measure for realistic scenarios"
+        help="Annual expected return under P-measure for realistic scenarios",
     )
 
-    params['expected_return'] = expected_return
+    params["expected_return"] = expected_return
 
     st.info(
         "💡 **P-measure simulation**: Uses expected return (μ) as drift for realistic "
@@ -669,24 +698,38 @@ def _render_option_pnl_params(
 
     # Strategy Builder
     st.markdown("---")
+    st.markdown(
+        """
+<div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem;">
+    <span style="font-size: 1rem;">🎯</span>
+    <span style="font-size: 0.75rem; font-weight: 700; color: #475569; text-transform: uppercase; letter-spacing: 0.05em;">Strategy Builder</span>
+</div>
+""",
+        unsafe_allow_html=True,
+    )
 
     def bs_price(s, k, r, t, sigma, opt_type):
         """Black-Scholes pricing wrapper."""
-        return _bs_price(s, k, t, r, sigma, is_call=(opt_type == 'call'))
+        return _bs_price(s, k, t, r, sigma, is_call=(opt_type == "call"))
 
     positions, stock_position = render_strategy_builder(
         spot_price=spot_price,
         risk_free_rate=risk_free_rate,
         time_to_expiry=time_horizon,
         volatility=volatility,
-        bs_price_function=bs_price
+        bs_price_function=bs_price,
     )
 
     # Export positions for Numba engine
-    position_arrays = export_positions_for_pnl_engine(positions, stock_position)
+    position_arrays = export_positions_for_pnl_engine(
+        positions,
+        stock_position,
+        risk_free_rate=risk_free_rate,
+        maturity=time_horizon,
+    )
 
-    params['option_positions'] = positions
-    params['stock_position'] = stock_position
-    params['position_arrays'] = position_arrays
+    params["option_positions"] = positions
+    params["stock_position"] = stock_position
+    params["position_arrays"] = position_arrays
 
     return params

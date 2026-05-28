@@ -13,8 +13,8 @@ Contains:
 Note: The high-level MonteCarloEngine wrapper is in backend.engines.mc_engine
 and is exported from backend.engines directly.
 
-Author: Thomas
-Created: 2025
+Author: Thomas Vaudescal
+Created: 2026
 """
 
 # Import low-level engine and config from mc_base

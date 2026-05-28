@@ -15,8 +15,8 @@ Main Components:
 - Models: GBMModel, HestonModel, BatesModel, MertonModel, GARCH variants
 - Simulation: GBMSimulator, HestonSimulator, MertonSimulator, BatesSimulator
 
-Author: Thomas
-Created: 2025
+Author: Thomas Vaudescal
+Created: 2026
 Version: 5.0.0
 """
 
@@ -40,6 +40,15 @@ from backend.core import (
     PricingResult,
 )
 
+# Structured product infrastructure
+from backend.core.market import EnrichedMarketEnvironment, YieldCurve
+from backend.core.result_types import StructuredProductResult
+from backend.core.structured_product import (
+    ObservationSchedule,
+    ProductComponent,
+    StructuredProduct,
+)
+
 # BaseModel is an alias for Model from core.interfaces
 from backend.core.interfaces import Model as BaseModel
 
@@ -48,7 +57,6 @@ from backend.core.interfaces import Model as BaseModel
 # =============================================================================
 from backend.engines import (
     BSAnalyticEngine,
-    ExoticAnalyticEngine,
     FFTEngine,
     MonteCarloEngine,
 )
@@ -96,33 +104,12 @@ from backend.greeks import (
 from backend.instruments import (
     AmericanCall,
     AmericanPut,
-    # Exotic factories
-    AsianCall,
-    AsianGeometricCall,
-    AsianGeometricPut,
-    AsianOption,
-    AsianPut,
-    BarrierDownInCall,
-    BarrierDownInPut,
-    BarrierDownOutCall,
-    BarrierDownOutPut,
-    # Exotic options
-    BarrierOption,
-    BarrierUpInCall,
-    BarrierUpInPut,
-    BarrierUpOutCall,
-    BarrierUpOutPut,
     Butterfly,
     CompositePayoff,
     DigitalOption,
     EuropeanCall,
     EuropeanPut,
     IronCondor,
-    LookbackCall,
-    LookbackFixedCall,
-    LookbackFixedPut,
-    LookbackOption,
-    LookbackPut,
     # Strategies
     OptionStrategy,
     Straddle,
@@ -165,6 +152,7 @@ from backend.portfolio import (
     # Position classes
     PortfolioPosition,
     StockPosition,
+    StructuredProductPosition,
     find_breakevens,
     find_breakevens_from_portfolio,
     # Factory functions
@@ -175,6 +163,26 @@ from backend.portfolio import (
     short_put,
     short_stock,
 )
+
+# =============================================================================
+# Structured Products
+# =============================================================================
+from backend.instruments.structured import (
+    # Components
+    AutocallTrigger,
+    BondFloor,
+    ConditionalCoupon,
+    FixedCoupon,
+    KnockInPut,
+    UpsideParticipation,
+    # Products
+    Autocallable,
+    CapitalProtectedNote,
+    ReverseConvertible,
+)
+
+# Structured product engine
+from backend.engines.structured_mc_engine import StructuredProductMCEngine
 
 # =============================================================================
 # Simulation
@@ -312,28 +320,7 @@ __all__ = [
     "EuropeanPut",
     "AmericanCall",
     "AmericanPut",
-    # Exotic options
-    "BarrierOption",
-    "AsianOption",
     "DigitalOption",
-    "LookbackOption",
-    # Exotic factories
-    "AsianCall",
-    "AsianPut",
-    "AsianGeometricCall",
-    "AsianGeometricPut",
-    "BarrierUpOutCall",
-    "BarrierUpInCall",
-    "BarrierDownOutCall",
-    "BarrierDownInCall",
-    "BarrierUpOutPut",
-    "BarrierUpInPut",
-    "BarrierDownOutPut",
-    "BarrierDownInPut",
-    "LookbackCall",
-    "LookbackPut",
-    "LookbackFixedCall",
-    "LookbackFixedPut",
     # Payoffs
     "VanillaCallPayoff",
     "VanillaPutPayoff",
@@ -347,9 +334,32 @@ __all__ = [
     # Engines
     # =========================================================================
     "BSAnalyticEngine",
-    "ExoticAnalyticEngine",
     "FFTEngine",
     "MonteCarloEngine",
+    "StructuredProductMCEngine",
+    # =========================================================================
+    # Structured Products
+    # =========================================================================
+    # Core
+    "StructuredProduct",
+    "ProductComponent",
+    "ObservationSchedule",
+    "StructuredProductResult",
+    "StructuredProductPosition",
+    # Market extensions
+    "YieldCurve",
+    "EnrichedMarketEnvironment",
+    # Components
+    "BondFloor",
+    "UpsideParticipation",
+    "FixedCoupon",
+    "ConditionalCoupon",
+    "AutocallTrigger",
+    "KnockInPut",
+    # Products
+    "Autocallable",
+    "CapitalProtectedNote",
+    "ReverseConvertible",
     # =========================================================================
     # Greeks Calculation
     # =========================================================================

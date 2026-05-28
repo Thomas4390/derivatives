@@ -12,8 +12,8 @@ This module provides:
 
 Uses the Model/Engine/Market architecture for pricing.
 
-Author: Thomas
-Created: 2025
+Author: Thomas Vaudescal
+Created: 2026
 """
 
 # =============================================================================
@@ -88,6 +88,7 @@ from backend.portfolio.positions import (
     # Classes
     PortfolioPosition,
     StockPosition,
+    StructuredProductPosition,
     # Factory functions
     long_call,
     long_put,
@@ -115,6 +116,7 @@ __all__ = [
     # Position classes
     "PortfolioPosition",
     "StockPosition",
+    "StructuredProductPosition",
     # Factory functions
     "long_call",
     "short_call",

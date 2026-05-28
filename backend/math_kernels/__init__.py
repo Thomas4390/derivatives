@@ -54,8 +54,8 @@ Example
     # Evaluate payoffs
     payoffs = call_payoff_vec(paths[:, -1], 100.0)
 
-Author: Thomas
-Created: 2025
+Author: Thomas Vaudescal
+Created: 2026
 """
 
 from backend.math_kernels.payoff_kernels import (

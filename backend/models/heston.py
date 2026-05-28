@@ -6,32 +6,47 @@ Heston (1993) stochastic volatility model.
 
 Model:
     dS = (r - q) * S * dt + sqrt(V) * S * dW_S
-    dV = kappa * (theta - V) * dt + xi * sqrt(V) * dW_V
+    dV = kappa * (theta - V) * dt + alpha * sqrt(V) * dW_V
     Corr(dW_S, dW_V) = rho
+
+Notation: the long-run variance ``theta``
+is written ``σ²`` and the vol-of-vol ``alpha`` is written ``α``. The Python
+identifier ``theta`` is kept (displayed as σ²) to avoid colliding with the
+option Greek θ (= ∂V/∂t).
 
 The Heston model captures the volatility smile through stochastic variance.
 The correlation parameter rho captures the leverage effect (typically negative
 for equities - stock drops -> volatility increases).
 
-Author: Thomas
-Created: 2025
+Author: Thomas Vaudescal
+Created: 2026
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
 from backend.core.interfaces import Model
 from backend.core.result_types import PricingCapability
+from backend.utils.validation import (
+    feller_ratio as _feller_ratio,
+    feller_satisfied as _feller_satisfied,
+)
 from backend.models.characteristic_functions.heston_cf import (
     heston_cf_vectorized,
     heston_characteristic_function,
 )
 
+if TYPE_CHECKING:
+    from backend.simulation.models.heston import HestonSimulator
+
 # =============================================================================
 # HESTON MODEL
 # =============================================================================
+
 
 @dataclass(frozen=True)
 class HestonModel(Model):
@@ -43,7 +58,7 @@ class HestonModel(Model):
 
     Model:
         dS = (r - q) * S * dt + sqrt(V) * S * dW_S
-        dV = kappa * (theta - V) * dt + xi * sqrt(V) * dW_V
+        dV = kappa * (theta - V) * dt + alpha * sqrt(V) * dW_V
         Corr(dW_S, dW_V) = rho
 
     Parameters
@@ -54,17 +69,17 @@ class HestonModel(Model):
         Mean reversion speed of variance (typical: 1-5)
     theta : float
         Long-run variance level (e.g., 0.04 for 20% long-run vol)
-    xi : float
+    alpha : float
         Volatility of volatility (vol-of-vol)
     rho : float
         Correlation between price and variance (-1 to 1)
 
     Examples
     --------
-    model = HestonModel(v0=0.04, kappa=2.0, theta=0.04, xi=0.3, rho=-0.7)
+    model = HestonModel(v0=0.04, kappa=2.0, theta=0.04, alpha=0.3, rho=-0.7)
 
     # Check Feller condition
-    model.feller_satisfied  # True if 2*kappa*theta > xi^2
+    model.feller_satisfied  # True if 2*kappa*theta > alpha^2
 
     # Characteristic function for FFT pricing
     cf = model.characteristic_function(u=1+0.5j, s0=100, t=0.5, r=0.05)
@@ -74,19 +89,19 @@ class HestonModel(Model):
 
     Notes
     -----
-    - Feller condition: 2*kappa*theta > xi^2 ensures V stays strictly positive
+    - Feller condition: 2*kappa*theta > alpha^2 ensures V stays strictly positive
     - Typical equity: rho < 0 (leverage effect: stock drops -> vol increases)
     - kappa controls how fast variance reverts to theta
-    - xi controls the "volatility of volatility"
+    - alpha controls the "volatility of volatility"
     """
 
     v0: float
     kappa: float
     theta: float
-    xi: float
+    alpha: float
     rho: float
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         """Validate parameters."""
         if self.v0 < 0:
             raise ValueError(f"v0 must be non-negative, got {self.v0}")
@@ -94,8 +109,8 @@ class HestonModel(Model):
             raise ValueError(f"kappa must be positive, got {self.kappa}")
         if self.theta < 0:
             raise ValueError(f"theta must be non-negative, got {self.theta}")
-        if self.xi <= 0:
-            raise ValueError(f"xi must be positive, got {self.xi}")
+        if self.alpha <= 0:
+            raise ValueError(f"alpha must be positive, got {self.alpha}")
         if not -1 <= self.rho <= 1:
             raise ValueError(f"rho must be in [-1, 1], got {self.rho}")
 
@@ -118,7 +133,7 @@ class HestonModel(Model):
             "v0": self.v0,
             "kappa": self.kappa,
             "theta": self.theta,
-            "xi": self.xi,
+            "alpha": self.alpha,
             "rho": self.rho,
         }
 
@@ -151,8 +166,7 @@ class HestonModel(Model):
         # Adjust for dividend yield via forward price
         s0_adj = s0 * np.exp(-q * t)
         return heston_characteristic_function(
-            u, s0_adj, self.v0, t, r,
-            self.kappa, self.theta, self.xi, self.rho
+            u, s0_adj, self.v0, t, r, self.kappa, self.theta, self.alpha, self.rho
         )
 
     def characteristic_function_vectorized(
@@ -181,8 +195,7 @@ class HestonModel(Model):
         """
         s0_adj = s0 * np.exp(-q * t)
         return heston_cf_vectorized(
-            u_arr, s0_adj, self.v0, t, r,
-            self.kappa, self.theta, self.xi, self.rho
+            u_arr, s0_adj, self.v0, t, r, self.kappa, self.theta, self.alpha, self.rho
         )
 
     def drift(self, s: float, v: float, t: float, r: float, q: float) -> float:
@@ -255,7 +268,7 @@ class HestonModel(Model):
         """
         Diffusion of the variance process.
 
-        dV = ... + xi * sqrt(V) * dW_V
+        dV = ... + alpha * sqrt(V) * dW_V
 
         Parameters
         ----------
@@ -267,27 +280,27 @@ class HestonModel(Model):
         float
             Variance diffusion
         """
-        return self.xi * np.sqrt(max(v, 0.0))
+        return self.alpha * np.sqrt(max(v, 0.0))
 
     @property
     def feller_satisfied(self) -> bool:
         """
-        Check if Feller condition 2*kappa*theta > xi^2 is satisfied.
+        Check if Feller condition 2*kappa*theta > alpha^2 is satisfied.
 
         When satisfied, variance process stays strictly positive.
         If violated, variance can touch zero (need boundary handling).
         """
-        return 2 * self.kappa * self.theta > self.xi ** 2
+        return _feller_satisfied(self.kappa, self.theta, self.alpha)
 
     @property
     def feller_ratio(self) -> float:
         """
-        Feller ratio: 2*kappa*theta / xi^2.
+        Feller ratio: 2*kappa*theta / alpha^2.
 
         > 1: Feller satisfied (variance stays positive)
         < 1: Feller violated (variance can touch zero)
         """
-        return (2 * self.kappa * self.theta) / (self.xi ** 2)
+        return _feller_ratio(self.kappa, self.theta, self.alpha)
 
     @property
     def long_run_volatility(self) -> float:
@@ -355,7 +368,10 @@ class HestonModel(Model):
         # Integral of E[V_s] = theta*t + (v0 - theta)*(1 - exp(-kappa*t))/kappa
         if abs(self.kappa) < 1e-10:
             return self.v0 * t
-        return self.theta * t + (self.v0 - self.theta) * (1 - np.exp(-self.kappa * t)) / self.kappa
+        return (
+            self.theta * t
+            + (self.v0 - self.theta) * (1 - np.exp(-self.kappa * t)) / self.kappa
+        )
 
     def total_volatility(self, t: float = 1.0) -> float:
         """
@@ -375,7 +391,7 @@ class HestonModel(Model):
         """
         return np.sqrt(self.total_variance(t) / t)
 
-    def create_simulator(self, **kwargs):
+    def create_simulator(self, **kwargs: Any) -> HestonSimulator:
         """
         Create a Heston simulator for Monte Carlo pricing.
 
@@ -390,19 +406,20 @@ class HestonModel(Model):
             Configured simulator instance
         """
         from backend.simulation.models.heston import HestonSimulator
+
         return HestonSimulator(
             v0=self.v0,
             kappa=self.kappa,
             theta=self.theta,
-            xi=self.xi,
+            alpha=self.alpha,
             rho=self.rho,
-            **kwargs
+            **kwargs,
         )
 
     def __repr__(self) -> str:
         return (
             f"HestonModel(v0={self.v0}, kappa={self.kappa}, "
-            f"theta={self.theta}, xi={self.xi}, rho={self.rho})"
+            f"theta={self.theta}, alpha={self.alpha}, rho={self.rho})"
         )
 
 
@@ -412,7 +429,7 @@ if __name__ == "__main__":
     print("=" * 50)
 
     # Create model
-    model = HestonModel(v0=0.04, kappa=2.0, theta=0.04, xi=0.3, rho=-0.7)
+    model = HestonModel(v0=0.04, kappa=2.0, theta=0.04, alpha=0.3, rho=-0.7)
     print(f"\nModel: {model}")
     print(f"Name: {model.name}")
     print(f"Parameters: {model.get_parameters()}")
@@ -453,7 +470,9 @@ if __name__ == "__main__":
     # Expected variance
     print("\n--- Variance Evolution ---")
     for t in [0.0, 0.5, 1.0, 5.0]:
-        print(f"E[V_{t}] = {model.mean_variance(t):.4f} (vol = {np.sqrt(model.mean_variance(t)):.1%})")
+        print(
+            f"E[V_{t}] = {model.mean_variance(t):.4f} (vol = {np.sqrt(model.mean_variance(t)):.1%})"
+        )
 
     # Test immutability
     print("\n--- Immutability Test ---")
@@ -466,13 +485,13 @@ if __name__ == "__main__":
     # Test validation
     print("\n--- Validation Test ---")
     try:
-        bad_model = HestonModel(v0=0.04, kappa=-1.0, theta=0.04, xi=0.3, rho=-0.7)
+        bad_model = HestonModel(v0=0.04, kappa=-1.0, theta=0.04, alpha=0.3, rho=-0.7)
         print("ERROR: Should have raised ValueError!")
     except ValueError as e:
         print(f"Correctly rejected invalid kappa: {e}")
 
     try:
-        bad_model = HestonModel(v0=0.04, kappa=2.0, theta=0.04, xi=0.3, rho=-1.5)
+        bad_model = HestonModel(v0=0.04, kappa=2.0, theta=0.04, alpha=0.3, rho=-1.5)
         print("ERROR: Should have raised ValueError!")
     except ValueError as e:
         print(f"Correctly rejected invalid rho: {e}")

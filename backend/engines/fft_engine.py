@@ -8,10 +8,13 @@ This engine wraps the generic CarrMadanFFTEngine and implements the
 PricingEngine interface, bridging Instrument/Model/Market to the
 underlying FFT machinery.
 
-Author: Thomas
-Created: 2025
+Author: Thomas Vaudescal
+Created: 2026
 """
 
+from __future__ import annotations
+
+from collections.abc import Callable
 from dataclasses import dataclass
 
 import numpy as np
@@ -30,6 +33,7 @@ from backend.instruments.options import VanillaOption
 # =============================================================================
 # FFT ENGINE
 # =============================================================================
+
 
 @dataclass
 class FFTEngine(PricingEngine):
@@ -60,19 +64,19 @@ class FFTEngine(PricingEngine):
 
     # Works with any model that has characteristic function
     option = VanillaOption(strike=100, maturity=0.5, is_call=True)
-    model = HestonModel(v0=0.04, kappa=2.0, theta=0.04, xi=0.3, rho=-0.7)
+    model = HestonModel(v0=0.04, kappa=2.0, theta=0.04, alpha=0.3, rho=-0.7)
     market = MarketEnvironment(spot=100, rate=0.05)
 
     result = engine.price(option, model, market)
     """
 
-    config: FFTConfig = None
+    config: FFTConfig | None = None
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         """Initialize the underlying FFT engine."""
         if self.config is None:
             self.config = FFTConfig()
-        self._fft_engine = CarrMadanFFTEngine(self.config)
+        self._fft_engine: CarrMadanFFTEngine = CarrMadanFFTEngine(self.config)
 
     @property
     def capability(self) -> PricingCapability:
@@ -157,11 +161,7 @@ class FFTEngine(PricingEngine):
                 characteristic_fn=cf, s0=s0, k=k, t=t, r=r, q=q
             )
 
-        return PricingResult(
-            price=price,
-            engine="FFTEngine",
-            model=model.name
-        )
+        return PricingResult(price=price, engine="FFTEngine", model=model.name)
 
     def price_strikes(
         self,
@@ -207,8 +207,13 @@ class FFTEngine(PricingEngine):
 
         # Price all strikes with single FFT
         return self._fft_engine.price_strikes(
-            characteristic_fn=cf, s0=s0, strikes=strikes, t=t, r=r,
-            is_call=option.is_call, q=q
+            characteristic_fn=cf,
+            s0=s0,
+            strikes=strikes,
+            t=t,
+            r=r,
+            is_call=option.is_call,
+            q=q,
         )
 
     def greeks(
@@ -286,14 +291,20 @@ class FFTEngine(PricingEngine):
         q = market.dividend_yield
 
         # Factory that creates CF for each maturity
-        def cf_factory(t: float):
+        def cf_factory(t: float) -> Callable[[np.ndarray], np.ndarray]:
             def cf(u: np.ndarray) -> np.ndarray:
                 return model.characteristic_function_vectorized(u, s0, t, r, q)
+
             return cf
 
         return self._fft_engine.price_surface(
-            characteristic_fn_factory=cf_factory, s0=s0, strikes=strikes,
-            maturities=maturities, r=r, is_call=is_call, q=q
+            characteristic_fn_factory=cf_factory,
+            s0=s0,
+            strikes=strikes,
+            maturities=maturities,
+            r=r,
+            is_call=is_call,
+            q=q,
         )
 
 
@@ -332,7 +343,7 @@ if __name__ == "__main__":
 
     # Test with Heston
     print("\n--- Heston Model ---")
-    heston = HestonModel(v0=0.04, kappa=2.0, theta=0.04, xi=0.3, rho=-0.7)
+    heston = HestonModel(v0=0.04, kappa=2.0, theta=0.04, alpha=0.3, rho=-0.7)
     heston_result = engine.price(option, heston, market)
     print(f"Heston Price: ${heston_result.price:.4f}")
     print(f"Model: {heston_result.model}")
@@ -340,15 +351,21 @@ if __name__ == "__main__":
     # Test with Bates
     print("\n--- Bates Model ---")
     bates = BatesModel(
-        v0=0.04, kappa=2.0, theta=0.04, xi=0.3, rho=-0.7,
-        lambda_j=0.5, mu_j=-0.1, sigma_j=0.2
+        v0=0.04,
+        kappa=2.0,
+        theta=0.04,
+        alpha=0.3,
+        rho=-0.7,
+        lam=0.5,
+        alpha_j=-0.1,
+        sigma_j=0.2,
     )
     bates_result = engine.price(option, bates, market)
     print(f"Bates Price: ${bates_result.price:.4f}")
 
     # Test with Merton
     print("\n--- Merton Model ---")
-    merton = MertonModel(sigma=0.20, lambda_j=0.5, mu_j=-0.1, sigma_j=0.2)
+    merton = MertonModel(sigma=0.20, lam=0.5, alpha_j=-0.1, sigma_j=0.2)
     merton_result = engine.price(option, merton, market)
     print(f"Merton Price: ${merton_result.price:.4f}")
 

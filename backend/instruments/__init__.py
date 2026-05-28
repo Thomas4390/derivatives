@@ -39,8 +39,8 @@ Examples
     # Butterfly spread
     butterfly = Butterfly(k1=90, k2=100, k3=110, maturity=0.5)
 
-Author: Thomas
-Created: 2025
+Author: Thomas Vaudescal
+Created: 2026
 """
 
 # Payoffs
@@ -55,63 +55,25 @@ from backend.instruments.exercise import (
     create_exercise,
 )
 
-# Options
+# Options (vanilla + digital)
 from backend.instruments.options import (
     AmericanCall,
     AmericanPut,
-    # Exotic factories
-    AsianCall,
-    AsianGeometricCall,
-    AsianGeometricPut,
-    # Exotic options
-    AsianOption,
-    AsianPut,
-    AssetOrNothingCall,
-    AssetOrNothingOption,
-    AssetOrNothingPut,
-    BarrierDownInCall,
-    BarrierDownInPut,
-    BarrierDownOutCall,
-    BarrierDownOutPut,
-    BarrierOption,
-    BarrierUpInCall,
-    BarrierUpInPut,
-    BarrierUpOutCall,
-    BarrierUpOutPut,
     BermudanCall,
     BermudanPut,
-    Chooser,
-    ChooserOption,
     DigitalOption,
     # Convenience factories
     EuropeanCall,
     EuropeanPut,
-    GapCall,
-    GapOption,
-    GapPut,
-    LookbackCall,
-    LookbackFixedCall,
-    LookbackFixedPut,
-    LookbackOption,
-    LookbackPut,
-    PowerCall,
-    PowerOption,
-    PowerPut,
     VanillaOption,
     # Generic factory
     create_vanilla_option,
 )
+
 from backend.instruments.payoffs import (
-    # Exotic payoffs
-    AsianCallPayoff,
-    AsianPutPayoff,
-    BarrierDownOutPutPayoff,
-    BarrierUpOutCallPayoff,
     CompositePayoff,
     DigitalCallPayoff,
     DigitalPutPayoff,
-    LookbackFloatingCallPayoff,
-    LookbackFloatingPutPayoff,
     VanillaCallPayoff,
     VanillaPutPayoff,
 )
@@ -136,13 +98,6 @@ __all__ = [
     "DigitalCallPayoff",
     "DigitalPutPayoff",
     "CompositePayoff",
-    # Exotic payoffs
-    "AsianCallPayoff",
-    "AsianPutPayoff",
-    "BarrierUpOutCallPayoff",
-    "BarrierDownOutPutPayoff",
-    "LookbackFloatingCallPayoff",
-    "LookbackFloatingPutPayoff",
     # Options
     "VanillaOption",
     "DigitalOption",
@@ -155,38 +110,6 @@ __all__ = [
     "AmericanPut",
     "BermudanCall",
     "BermudanPut",
-    # Exotic options
-    "AsianOption",
-    "BarrierOption",
-    "LookbackOption",
-    "ChooserOption",
-    "AssetOrNothingOption",
-    "PowerOption",
-    "GapOption",
-    # Exotic factories
-    "AsianCall",
-    "AsianPut",
-    "AsianGeometricCall",
-    "AsianGeometricPut",
-    "BarrierUpOutCall",
-    "BarrierUpInCall",
-    "BarrierDownOutCall",
-    "BarrierDownInCall",
-    "BarrierUpOutPut",
-    "BarrierUpInPut",
-    "BarrierDownOutPut",
-    "BarrierDownInPut",
-    "LookbackCall",
-    "LookbackPut",
-    "LookbackFixedCall",
-    "LookbackFixedPut",
-    "Chooser",
-    "AssetOrNothingCall",
-    "AssetOrNothingPut",
-    "PowerCall",
-    "PowerPut",
-    "GapCall",
-    "GapPut",
     # Strategies
     "StrategyLeg",
     "OptionStrategy",
@@ -199,7 +122,7 @@ __all__ = [
     "PutSpread",
     # Exercise schedules
     "ExerciseStyle",  # Primary enum
-    "ExerciseType",   # Backward compatibility alias
+    "ExerciseType",  # Backward compatibility alias
     "EuropeanExercise",
     "AmericanExercise",
     "BermudanExercise",

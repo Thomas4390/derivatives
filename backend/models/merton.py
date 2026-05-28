@@ -5,20 +5,21 @@ Merton Jump-Diffusion Model
 Merton (1976) jump-diffusion model.
 
 Model:
-    dS = (r - q - lambda_j * k) * S * dt + sigma * S * dW + (J - 1) * S * dN
+    dS = (r - q - lam * k) * S * dt + sigma * S * dW + (J - 1) * S * dN
 
 Where:
-    - dN is a Poisson process with intensity lambda_j
-    - J is lognormal: ln(J) ~ N(mu_j, sigma_j^2)
-    - k = E[J - 1] = exp(mu_j + 0.5*sigma_j^2) - 1
+    - dN is a Poisson process with intensity lam
+    - J is lognormal: ln(J) ~ N(alpha_j, sigma_j^2)
+    - k = E[J - 1] = exp(alpha_j + 0.5*sigma_j^2) - 1
 
 The Merton model extends GBM with jumps, capturing fat tails and
 crash risk better than pure diffusion models.
 
-Author: Thomas
-Created: 2025
+Author: Thomas Vaudescal
+Created: 2026
 """
 
+from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -27,6 +28,7 @@ import numpy as np
 
 if TYPE_CHECKING:
     from backend.models.gbm import GBMModel
+    from backend.simulation.models.merton import MertonSimulator
 
 from backend.core.interfaces import Model
 from backend.core.result_types import PricingCapability
@@ -39,6 +41,7 @@ from backend.models.characteristic_functions.merton_cf import (
 # MERTON MODEL
 # =============================================================================
 
+
 @dataclass(frozen=True)
 class MertonModel(Model):
     """
@@ -48,7 +51,7 @@ class MertonModel(Model):
     Captures crash risk and fat tails.
 
     Model:
-        dS = (r - q - lambda_j * k) * S * dt + sigma * S * dW + (J - 1) * S * dN
+        dS = (r - q - lam * k) * S * dt + sigma * S * dW + (J - 1) * S * dN
 
     Diffusion Parameters
     --------------------
@@ -57,16 +60,16 @@ class MertonModel(Model):
 
     Jump Parameters
     ---------------
-    lambda_j : float
+    lam : float
         Jump intensity (expected number of jumps per year)
-    mu_j : float
+    alpha_j : float
         Mean of log-jump size (e.g., -0.1 for 10% negative mean jump)
     sigma_j : float
         Volatility of log-jump size
 
     Examples
     --------
-    model = MertonModel(sigma=0.20, lambda_j=0.5, mu_j=-0.1, sigma_j=0.2)
+    model = MertonModel(sigma=0.20, lam=0.5, alpha_j=-0.1, sigma_j=0.2)
 
     # Expected jump size
     model.expected_jump_size  # E[J - 1]
@@ -76,25 +79,25 @@ class MertonModel(Model):
 
     Notes
     -----
-    - When lambda_j = 0, reduces to GBM
+    - When lam = 0, reduces to GBM
     - Jumps add fat tails and negative skewness
     - The Merton formula has a semi-closed form solution as a
       weighted sum of Black-Scholes prices (but FFT is faster)
     """
 
     sigma: float
-    lambda_j: float
-    mu_j: float
+    lam: float
+    alpha_j: float
     sigma_j: float
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         """Validate parameters."""
         if self.sigma <= 0:
             raise ValueError(f"sigma must be positive, got {self.sigma}")
-        if self.lambda_j < 0:
-            raise ValueError(f"lambda_j must be non-negative, got {self.lambda_j}")
-        if not -1.0 <= self.mu_j <= 1.0:
-            raise ValueError(f"mu_j should be in [-1, 1], got {self.mu_j}")
+        if self.lam < 0:
+            raise ValueError(f"lam must be non-negative, got {self.lam}")
+        if not -1.0 <= self.alpha_j <= 1.0:
+            raise ValueError(f"alpha_j should be in [-1, 1], got {self.alpha_j}")
         if self.sigma_j < 0:
             raise ValueError(f"sigma_j must be non-negative, got {self.sigma_j}")
 
@@ -115,8 +118,8 @@ class MertonModel(Model):
         """Return model parameters as dictionary."""
         return {
             "sigma": self.sigma,
-            "lambda_j": self.lambda_j,
-            "mu_j": self.mu_j,
+            "lam": self.lam,
+            "alpha_j": self.alpha_j,
             "sigma_j": self.sigma_j,
         }
 
@@ -146,8 +149,7 @@ class MertonModel(Model):
         """
         s0_adj = s0 * np.exp(-q * t)
         return merton_characteristic_function(
-            u, s0_adj, t, r,
-            self.sigma, self.lambda_j, self.mu_j, self.sigma_j
+            u, s0_adj, t, r, self.sigma, self.lam, self.alpha_j, self.sigma_j
         )
 
     def characteristic_function_vectorized(
@@ -156,15 +158,14 @@ class MertonModel(Model):
         """Vectorized characteristic function for FFT."""
         s0_adj = s0 * np.exp(-q * t)
         return merton_cf_vectorized(
-            u_arr, s0_adj, t, r,
-            self.sigma, self.lambda_j, self.mu_j, self.sigma_j
+            u_arr, s0_adj, t, r, self.sigma, self.lam, self.alpha_j, self.sigma_j
         )
 
     def drift(self, s: float, v: float, t: float, r: float, q: float) -> float:
         """
         Drift coefficient for SDE discretization.
 
-        For Merton: drift = (r - q - lambda_j * k) * S
+        For Merton: drift = (r - q - lam * k) * S
         where k = E[J - 1] is the expected jump size.
 
         Parameters
@@ -186,7 +187,7 @@ class MertonModel(Model):
             Drift value
         """
         k = self.expected_jump_size
-        return (r - q - self.lambda_j * k) * s
+        return (r - q - self.lam * k) * s
 
     def diffusion(self, s: float, v: float, t: float) -> float:
         """
@@ -215,9 +216,9 @@ class MertonModel(Model):
         """
         Expected relative jump size k = E[J - 1].
 
-        For lognormal J: k = exp(mu_j + 0.5*sigma_j^2) - 1
+        For lognormal J: k = exp(alpha_j + 0.5*sigma_j^2) - 1
         """
-        return np.exp(self.mu_j + 0.5 * self.sigma_j ** 2) - 1
+        return np.exp(self.alpha_j + 0.5 * self.sigma_j**2) - 1
 
     @property
     def expected_jump_return(self) -> float:
@@ -226,21 +227,21 @@ class MertonModel(Model):
 
     def expected_jumps_per_year(self) -> float:
         """Expected number of jumps per year."""
-        return self.lambda_j
+        return self.lam
 
     @property
     def variance(self) -> float:
         """Annualized variance sigma^2."""
-        return self.sigma ** 2
+        return self.sigma**2
 
     def total_variance(self, t: float = 1.0) -> float:
         """
         Total variance over period t, including jump contribution.
 
-        Var[ln(S_T/S_0)] = sigma^2 * t + lambda_j * t * (mu_j^2 + sigma_j^2)
+        Var[ln(S_T/S_0)] = sigma^2 * t + lam * t * (alpha_j^2 + sigma_j^2)
         """
         diffusion_var = self.variance * t
-        jump_var = self.lambda_j * t * (self.mu_j ** 2 + self.sigma_j ** 2)
+        jump_var = self.lam * t * (self.alpha_j**2 + self.sigma_j**2)
         return diffusion_var + jump_var
 
     def total_volatility(self, t: float = 1.0) -> float:
@@ -251,11 +252,11 @@ class MertonModel(Model):
         """
         Variance contribution from jumps (annualized).
 
-        For Merton: lambda_j * (mu_j^2 + sigma_j^2)
+        For Merton: lam * (alpha_j^2 + sigma_j^2)
         """
-        return self.lambda_j * (self.mu_j ** 2 + self.sigma_j ** 2)
+        return self.lam * (self.alpha_j**2 + self.sigma_j**2)
 
-    def to_gbm(self) -> 'GBMModel':
+    def to_gbm(self) -> GBMModel:
         """
         Convert to GBM model (drop jumps).
 
@@ -265,9 +266,10 @@ class MertonModel(Model):
             Equivalent GBM model without jumps
         """
         from backend.models.gbm import GBMModel
+
         return GBMModel(sigma=self.sigma)
 
-    def create_simulator(self, **kwargs):
+    def create_simulator(self, **kwargs: Any) -> MertonSimulator:
         """
         Create a Merton simulator for Monte Carlo pricing.
 
@@ -282,18 +284,19 @@ class MertonModel(Model):
             Configured simulator instance
         """
         from backend.simulation.models.merton import MertonSimulator
+
         return MertonSimulator(
             sigma=self.sigma,
-            lambda_j=self.lambda_j,
-            mu_j=self.mu_j,
+            lam=self.lam,
+            alpha_j=self.alpha_j,
             sigma_j=self.sigma_j,
-            **kwargs
+            **kwargs,
         )
 
     def __repr__(self) -> str:
         return (
-            f"MertonModel(sigma={self.sigma}, lambda_j={self.lambda_j}, "
-            f"mu_j={self.mu_j}, sigma_j={self.sigma_j})"
+            f"MertonModel(sigma={self.sigma}, lam={self.lam}, "
+            f"alpha_j={self.alpha_j}, sigma_j={self.sigma_j})"
         )
 
 
@@ -303,7 +306,7 @@ if __name__ == "__main__":
     print("=" * 50)
 
     # Create model
-    model = MertonModel(sigma=0.20, lambda_j=0.5, mu_j=-0.1, sigma_j=0.2)
+    model = MertonModel(sigma=0.20, lam=0.5, alpha_j=-0.1, sigma_j=0.2)
     print(f"\nModel: {model}")
     print(f"Name: {model.name}")
     print(f"Supported engines: {model.supported_engines}")
@@ -365,7 +368,7 @@ if __name__ == "__main__":
     # Test validation
     print("\n--- Validation Test ---")
     try:
-        bad_model = MertonModel(sigma=-0.1, lambda_j=0.5, mu_j=-0.1, sigma_j=0.2)
+        bad_model = MertonModel(sigma=-0.1, lam=0.5, alpha_j=-0.1, sigma_j=0.2)
         print("ERROR: Should have raised ValueError!")
     except ValueError as e:
         print(f"Correctly rejected invalid sigma: {e}")

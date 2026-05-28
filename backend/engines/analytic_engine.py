@@ -8,14 +8,19 @@ This engine provides closed-form solutions for European vanilla options
 under the GBM (Black-Scholes) model. It's the fastest and most accurate
 method when applicable.
 
-Author: Thomas
-Created: 2025
+Author: Thomas Vaudescal
+Created: 2026
 """
+
+from __future__ import annotations
 
 from dataclasses import dataclass
 
 import numpy as np
 from scipy.stats import norm
+
+from backend.utils.math import bs_price as _bs_price_canonical
+from backend.utils.math import d1_d2 as _d1_d2_canonical
 
 from backend.core.interfaces import Instrument, Model, PricingEngine
 from backend.core.market import MarketEnvironment
@@ -31,6 +36,7 @@ from backend.models.gbm import GBMModel
 # =============================================================================
 # BLACK-SCHOLES ANALYTICAL ENGINE
 # =============================================================================
+
 
 @dataclass(frozen=True)
 class BSAnalyticEngine(PricingEngine):
@@ -134,13 +140,11 @@ class BSAnalyticEngine(PricingEngine):
         sigma = gbm.sigma
 
         # Black-Scholes formula
-        price = self._bs_price(s0=s0, k=k, t=t, r=r, q=q, sigma=sigma, is_call=option.is_call)
-
-        return PricingResult(
-            price=price,
-            engine="BSAnalyticEngine",
-            model=model.name
+        price = self._bs_price(
+            s0=s0, k=k, t=t, r=r, q=q, sigma=sigma, is_call=option.is_call
         )
+
+        return PricingResult(price=price, engine="BSAnalyticEngine", model=model.name)
 
     def greeks(
         self,
@@ -187,9 +191,20 @@ class BSAnalyticEngine(PricingEngine):
 
         g = bs_all_greeks(s=s0, k=k, t=t, r=r, q=q, sigma=sigma, is_call=is_call)
         return GreeksResult(
-            delta=g[1], gamma=g[2], vega=g[3], theta=g[4], rho=g[5],
-            vanna=g[6], volga=g[7], charm=g[8], veta=g[9],
-            speed=g[10], zomma=g[11], color=g[12], ultima=g[13],
+            price=g[0],
+            delta=g[1],
+            gamma=g[2],
+            vega=g[3],
+            theta=g[4],
+            rho=g[5],
+            vanna=g[6],
+            volga=g[7],
+            charm=g[8],
+            veta=g[9],
+            speed=g[10],
+            zomma=g[11],
+            color=g[12],
+            ultima=g[13],
         )
 
     def implied_volatility(
@@ -241,10 +256,12 @@ class BSAnalyticEngine(PricingEngine):
         is_call = option.is_call
 
         sigma = initial_guess
-        diff = float('nan')
+        diff = float("nan")
 
         for i in range(max_iter):
-            bs_price = self._bs_price(s0=s0, k=k, t=t, r=r, q=q, sigma=sigma, is_call=is_call)
+            bs_price = self._bs_price(
+                s0=s0, k=k, t=t, r=r, q=q, sigma=sigma, is_call=is_call
+            )
             vega = self._bs_vega(s0=s0, k=k, t=t, r=r, q=q, sigma=sigma)
 
             if vega < 1e-12:
@@ -256,7 +273,7 @@ class BSAnalyticEngine(PricingEngine):
 
             sigma = sigma - diff / vega
             sigma = max(sigma, 0.001)  # Keep positive
-            sigma = min(sigma, 10.0)   # Cap at 1000% vol
+            sigma = min(sigma, 10.0)  # Cap at 1000% vol
 
         raise ValueError(
             f"IV did not converge after {max_iter} iterations. "
@@ -269,43 +286,22 @@ class BSAnalyticEngine(PricingEngine):
 
     def _d1_d2(
         self, s0: float, k: float, t: float, r: float, q: float, sigma: float
-    ) -> tuple:
-        """Compute d1 and d2 parameters."""
-        if t <= 0 or sigma <= 0:
-            return 0.0, 0.0
-
-        sqrt_t = np.sqrt(t)
-        d1 = (np.log(s0 / k) + (r - q + 0.5 * sigma ** 2) * t) / (sigma * sqrt_t)
-        d2 = d1 - sigma * sqrt_t
-        return d1, d2
+    ) -> tuple[float, float]:
+        """Compute d1 and d2 parameters.  Delegates to canonical ``d1_d2``."""
+        return _d1_d2_canonical(s0, k, t, r, sigma, q)
 
     def _bs_price(
-        self, s0: float, k: float, t: float, r: float, q: float,
-        sigma: float, is_call: bool
+        self,
+        s0: float,
+        k: float,
+        t: float,
+        r: float,
+        q: float,
+        sigma: float,
+        is_call: bool,
     ) -> float:
-        """Black-Scholes price formula."""
-        if t <= 0:
-            # At expiry
-            if is_call:
-                return max(s0 - k, 0.0)
-            return max(k - s0, 0.0)
-
-        d1, d2 = self._d1_d2(s0=s0, k=k, t=t, r=r, q=q, sigma=sigma)
-        discount = np.exp(-r * t)
-        forward_discount = np.exp(-q * t)
-
-        if is_call:
-            price = (
-                s0 * forward_discount * norm.cdf(d1)
-                - k * discount * norm.cdf(d2)
-            )
-        else:
-            price = (
-                k * discount * norm.cdf(-d2)
-                - s0 * forward_discount * norm.cdf(-d1)
-            )
-
-        return max(price, 0.0)
+        """Black-Scholes price formula.  Delegates to canonical ``bs_price``."""
+        return _bs_price_canonical(s0, k, t, r, sigma, is_call, q)
 
     def _bs_vega(
         self, s0: float, k: float, t: float, r: float, q: float, sigma: float
@@ -314,7 +310,7 @@ class BSAnalyticEngine(PricingEngine):
         if t <= 0:
             return 0.0
 
-        d1, _ = self._d1_d2(s0=s0, k=k, t=t, r=r, q=q, sigma=sigma)
+        d1, _ = _d1_d2_canonical(s0, k, t, r, sigma, q)
         forward_discount = np.exp(-q * t)
         return s0 * forward_discount * norm.pdf(d1) * np.sqrt(t)
 
@@ -369,7 +365,9 @@ if __name__ == "__main__":
     print("\n--- Put-Call Parity Check ---")
     call_price = result.price
     put_price = put_result.price
-    parity_rhs = market.spot * np.exp(-market.dividend_yield * option.maturity) - option.strike * np.exp(-market.rate * option.maturity)
+    parity_rhs = market.spot * np.exp(
+        -market.dividend_yield * option.maturity
+    ) - option.strike * np.exp(-market.rate * option.maturity)
     parity_lhs = call_price - put_price
     print(f"C - P = {parity_lhs:.4f}")
     print(f"S*e^(-qT) - K*e^(-rT) = {parity_rhs:.4f}")
@@ -388,7 +386,8 @@ if __name__ == "__main__":
     print(f"Can price European call with GBM: {engine.can_price(option, model)}")
 
     from backend.models.heston import HestonModel
-    heston = HestonModel(v0=0.04, kappa=2.0, theta=0.04, xi=0.3, rho=-0.7)
+
+    heston = HestonModel(v0=0.04, kappa=2.0, theta=0.04, alpha=0.3, rho=-0.7)
     print(f"Can price European call with Heston: {engine.can_price(option, heston)}")
 
     print("\n" + "=" * 50)

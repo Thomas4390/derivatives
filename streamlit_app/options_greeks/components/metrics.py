@@ -5,14 +5,14 @@ Modern card-based metrics with professional styling.
 """
 
 import streamlit as st
-from config.styles import metric_card_html
+from config.templates import metric_card_html
 
 
 def render_metrics_row(
     breakeven_count: int,
     max_profit: float,
     max_loss: float,
-    breakeven_points: list[float] | None
+    breakeven_points: list[float] | None,
 ) -> None:
     """
     Render the main metrics row with breakeven, max profit/loss info.
@@ -30,13 +30,13 @@ def render_metrics_row(
             metric_card_html(
                 label="Breakeven Points",
                 value=str(breakeven_count),
-                subtext="price levels"
+                subtext="price levels",
             ),
-            unsafe_allow_html=True
+            unsafe_allow_html=True,
         )
 
     with col2:
-        if max_profit == float('inf'):
+        if max_profit == float("inf"):
             profit_text = "Unlimited"
             value_class = "unlimited"
             subtext = "theoretically infinite"
@@ -50,13 +50,13 @@ def render_metrics_row(
                 label="Maximum Profit",
                 value=profit_text,
                 value_class=value_class,
-                subtext=subtext
+                subtext=subtext,
             ),
-            unsafe_allow_html=True
+            unsafe_allow_html=True,
         )
 
     with col3:
-        if max_loss == float('-inf'):
+        if max_loss == float("-inf"):
             loss_text = "Unlimited"
             value_class = "unlimited-loss"
             subtext = "theoretically infinite"
@@ -70,20 +70,18 @@ def render_metrics_row(
                 label="Maximum Loss",
                 value=loss_text,
                 value_class=value_class,
-                subtext=subtext
+                subtext=subtext,
             ),
-            unsafe_allow_html=True
+            unsafe_allow_html=True,
         )
 
     with col4:
         be_text = _format_breakeven_points(breakeven_points)
         st.markdown(
             metric_card_html(
-                label="Breakeven Prices",
-                value=be_text,
-                subtext="at expiration"
+                label="Breakeven Prices", value=be_text, subtext="at expiration"
             ),
-            unsafe_allow_html=True
+            unsafe_allow_html=True,
         )
 
 
@@ -102,9 +100,7 @@ def _format_breakeven_points(breakeven_points: list[float] | None) -> str:
 
 
 def render_position_info_banner(
-    positions: list,
-    stock_position,
-    default_premium: float
+    positions: list, stock_position, default_premium: float
 ) -> None:
     """
     Render an info banner about the current position.
@@ -115,7 +111,8 @@ def render_position_info_banner(
         default_premium: Default premium for display
     """
     if not positions and not stock_position:
-        st.markdown("""
+        st.markdown(
+            """
         <div style="
             background: linear-gradient(135deg, #e0f2fe 0%, #f0f9ff 100%);
             border: 1px solid #7dd3fc;
@@ -132,9 +129,12 @@ def render_position_info_banner(
                 <div style="color: #0369a1; font-size: 0.8rem;">Add positions using the sidebar to begin analysis</div>
             </div>
         </div>
-        """, unsafe_allow_html=True)
+        """,
+            unsafe_allow_html=True,
+        )
     elif stock_position and not positions:
-        st.markdown(f"""
+        st.markdown(
+            f"""
         <div style="
             background: linear-gradient(135deg, #e0f2fe 0%, #f0f9ff 100%);
             border: 1px solid #7dd3fc;
@@ -148,19 +148,21 @@ def render_position_info_banner(
             <div style="font-size: 1.25rem;">📈</div>
             <div>
                 <div style="font-weight: 600; color: #0c4a6e; font-size: 0.9rem;">
-                    {stock_position['quantity']:,} shares {stock_position['position_type'].upper()} @ ${stock_position['entry_price']:,.2f}
+                    {stock_position["quantity"]:,} shares {stock_position["position_type"].upper()} @ ${stock_position["entry_price"]:,.2f}
                 </div>
                 <div style="color: #0369a1; font-size: 0.8rem;">Stock position only - add options to create a strategy</div>
             </div>
         </div>
-        """, unsafe_allow_html=True)
+        """,
+            unsafe_allow_html=True,
+        )
 
 
 def render_chart_controls(
     slider_key: str,
     default_dte: bool = True,
     is_single_leg: bool = False,
-    spot_price: float = 100.0
+    spot_price: float = 100.0,
 ) -> str:
     """
     Render chart parameter controls with styled toggle buttons.
@@ -182,7 +184,8 @@ def render_chart_controls(
         st.session_state[state_key] = "DTE" if default_dte else "IV"
 
     # Create button-based toggle with professional styling
-    st.markdown("""
+    st.markdown(
+        """
     <div style="
         display: flex;
         align-items: center;
@@ -197,7 +200,9 @@ def render_chart_controls(
             letter-spacing: 0.05em;
         ">Vary By</span>
     </div>
-    """, unsafe_allow_html=True)
+    """,
+        unsafe_allow_html=True,
+    )
 
     # Create columns for buttons
     cols = st.columns(len(options) + 2)  # Extra columns for spacing
@@ -217,14 +222,14 @@ def render_chart_controls(
                 icon = "🎯"
                 label = "Strike"
 
-            is_selected = (selected == option)
+            is_selected = selected == option
 
             # Use button with custom key
             if st.button(
                 f"{icon} {label}",
                 key=f"{slider_key}_{option}",
                 type="primary" if is_selected else "secondary",
-                width="stretch"
+                width="stretch",
             ):
                 st.session_state[state_key] = option
                 st.rerun()
@@ -233,7 +238,8 @@ def render_chart_controls(
     selected = st.session_state[state_key]
 
     if selected == "DTE":
-        st.markdown("""
+        st.markdown(
+            """
         <div style="
             background: linear-gradient(135deg, #eff6ff 0%, #f0f9ff 100%);
             padding: 0.75rem 1rem;
@@ -252,9 +258,12 @@ def render_chart_controls(
                 <span style="color: #3b82f6; margin-left: 0.5rem;">· Fixed IV: 25%</span>
             </div>
         </div>
-        """, unsafe_allow_html=True)
+        """,
+            unsafe_allow_html=True,
+        )
     elif selected == "IV":
-        st.markdown("""
+        st.markdown(
+            """
         <div style="
             background: linear-gradient(135deg, #f5f3ff 0%, #faf5ff 100%);
             padding: 0.75rem 1rem;
@@ -273,9 +282,12 @@ def render_chart_controls(
                 <span style="color: #8b5cf6; margin-left: 0.5rem;">· Fixed DTE: 31 days</span>
             </div>
         </div>
-        """, unsafe_allow_html=True)
+        """,
+            unsafe_allow_html=True,
+        )
     else:  # Strike
-        st.markdown(f"""
+        st.markdown(
+            f"""
         <div style="
             background: linear-gradient(135deg, #fef3c7 0%, #fffbeb 100%);
             padding: 0.75rem 1rem;
@@ -294,15 +306,14 @@ def render_chart_controls(
                 <span style="color: #d97706; margin-left: 0.5rem;">· Range: ${spot_price * 0.8:.0f} - ${spot_price * 1.2:.0f}</span>
             </div>
         </div>
-        """, unsafe_allow_html=True)
+        """,
+            unsafe_allow_html=True,
+        )
 
     return selected
 
 
-def render_risk_summary(
-    unlimited_profit: bool,
-    unlimited_loss: bool
-) -> None:
+def render_risk_summary(unlimited_profit: bool, unlimited_loss: bool) -> None:
     """
     Render a risk summary box.
 
@@ -311,7 +322,8 @@ def render_risk_summary(
         unlimited_loss: Whether loss is unlimited
     """
     if unlimited_loss:
-        st.markdown("""
+        st.markdown(
+            """
         <div style="
             background: #fef2f2;
             border: 1px solid #fecaca;
@@ -328,9 +340,12 @@ def render_risk_summary(
                 This position has theoretically unlimited loss potential. Consider adding protective positions.
             </div>
         </div>
-        """, unsafe_allow_html=True)
+        """,
+            unsafe_allow_html=True,
+        )
     elif unlimited_profit:
-        st.markdown("""
+        st.markdown(
+            """
         <div style="
             background: #f0fdf4;
             border: 1px solid #bbf7d0;
@@ -347,4 +362,6 @@ def render_risk_summary(
                 This position has unlimited profit potential with limited, defined risk.
             </div>
         </div>
-        """, unsafe_allow_html=True)
+        """,
+            unsafe_allow_html=True,
+        )

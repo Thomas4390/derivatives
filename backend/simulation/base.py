@@ -14,9 +14,11 @@ All concrete simulators must inherit from BaseSimulator and implement:
 - simulate_paths(): Full path simulation
 - simulate_terminal(): Memory-efficient terminal-only simulation
 
-Author: Thomas
-Created: 2025
+Author: Thomas Vaudescal
+Created: 2026
 """
+
+from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -27,6 +29,7 @@ import numpy as np
 # =============================================================================
 # Result Containers
 # =============================================================================
+
 
 @dataclass
 class SimulationResult:
@@ -52,6 +55,7 @@ class SimulationResult:
     parameters : dict
         Model parameters used for simulation
     """
+
     price_paths: np.ndarray
     time_grid: np.ndarray
     model_name: str
@@ -105,7 +109,7 @@ class SimulationResult:
             return np.mean(self.volatility_paths, axis=0)
         return None
 
-    def percentile_paths(self, percentiles: list) -> np.ndarray:
+    def percentile_paths(self, percentiles: list[float]) -> np.ndarray:
         """
         Compute percentile paths across simulations.
 
@@ -132,7 +136,9 @@ class SimulationResult:
         """
         return np.diff(np.log(self.price_paths), axis=1)
 
-    def realized_volatility(self, annualization_factor: float = np.sqrt(252)) -> np.ndarray:
+    def realized_volatility(
+        self, annualization_factor: float = np.sqrt(252)
+    ) -> np.ndarray:
         """
         Compute realized volatility for each path.
 
@@ -159,13 +165,14 @@ class SimulationResult:
         return (
             f"SimulationResult(model='{self.model_name}', "
             f"n_paths={self.n_paths:,}, n_steps={self.n_steps}, "
-            f"time={self.computation_time*1000:.1f}ms{vol_info})"
+            f"time={self.computation_time * 1000:.1f}ms{vol_info})"
         )
 
 
 # =============================================================================
 # Abstract Base Class
 # =============================================================================
+
 
 class BaseSimulator(ABC):
     """
@@ -193,7 +200,7 @@ class BaseSimulator(ABC):
         Return current model parameters
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._model_name: str = "BaseSimulator"
 
     @property
@@ -209,7 +216,7 @@ class BaseSimulator(ABC):
         t: float,
         n_paths: int,
         n_steps: int,
-        seed: int | None = None
+        seed: int | None = None,
     ) -> SimulationResult:
         """
         Simulate full price paths under the P-measure (physical measure).
@@ -244,7 +251,7 @@ class BaseSimulator(ABC):
         t: float,
         n_paths: int,
         n_steps: int,
-        seed: int | None = None
+        seed: int | None = None,
     ) -> np.ndarray:
         """
         Simulate only terminal values S(T).
@@ -287,12 +294,7 @@ class BaseSimulator(ABC):
         pass
 
     def validate_inputs(
-        self,
-        s0: float,
-        mu: float,
-        t: float,
-        n_paths: int,
-        n_steps: int
+        self, s0: float, mu: float, t: float, n_paths: int, n_steps: int
     ) -> None:
         """
         Validate common simulation inputs.
@@ -334,6 +336,7 @@ class BaseSimulator(ABC):
 # Mixin for Stochastic Volatility Models
 # =============================================================================
 
+
 class StochasticVolatilityMixin:
     """
     Mixin providing additional methods for stochastic volatility models.
@@ -368,14 +371,16 @@ class StochasticVolatilityMixin:
         """
         Check if the Feller condition is satisfied (for CIR-type variance).
 
-        The Feller condition (2*kappa*theta > xi^2) ensures variance stays positive.
+        The Feller condition (2*kappa*theta > alpha^2) ensures variance stays positive.
 
         Returns
         -------
         bool
             True if Feller condition is satisfied
         """
-        raise NotImplementedError("Subclass must implement feller_condition_satisfied()")
+        raise NotImplementedError(
+            "Subclass must implement feller_condition_satisfied()"
+        )
 
 
 # =============================================================================
@@ -419,7 +424,7 @@ if __name__ == "__main__":
         n_paths=n_paths,
         n_steps=n_steps,
         volatility_paths=vol_paths,
-        parameters={"sigma": 0.2}
+        parameters={"sigma": 0.2},
     )
 
     print(f"Result: {result}")
@@ -460,7 +465,7 @@ if __name__ == "__main__":
         model_name="NoVolModel",
         computation_time=0.05,
         n_paths=n_paths,
-        n_steps=n_steps
+        n_steps=n_steps,
     )
     print(f"Has volatility: {result_no_vol.has_volatility}")
     assert result_no_vol.terminal_volatility is None, "Should be None"
@@ -472,17 +477,34 @@ if __name__ == "__main__":
 
     class DummySimulator(BaseSimulator):
         """Minimal concrete implementation for testing."""
-        def __init__(self):
+
+        def __init__(self) -> None:
             super().__init__()
             self._model_name = "DummySimulator"
 
-        def simulate_paths(self, s0, mu, t, n_paths, n_steps, seed=None):
+        def simulate_paths(
+            self,
+            s0: float,
+            mu: float,
+            t: float,
+            n_paths: int,
+            n_steps: int,
+            seed: int | None = None,
+        ) -> None:  # type: ignore[override]
             return None
 
-        def simulate_terminal(self, s0, mu, t, n_paths, n_steps, seed=None):
+        def simulate_terminal(
+            self,
+            s0: float,
+            mu: float,
+            t: float,
+            n_paths: int,
+            n_steps: int,
+            seed: int | None = None,
+        ) -> None:  # type: ignore[override]
             return None
 
-        def get_parameters(self):
+        def get_parameters(self) -> dict[str, Any]:
             return {"test": 1}
 
     simulator = DummySimulator()
@@ -515,23 +537,40 @@ if __name__ == "__main__":
 
     class VolSimulator(BaseSimulator, StochasticVolatilityMixin):
         """Test stochastic volatility simulator."""
-        def __init__(self):
+
+        def __init__(self) -> None:
             super().__init__()
             self._model_name = "VolSimulator"
 
-        def simulate_paths(self, s0, mu, t, n_paths, n_steps, seed=None):
+        def simulate_paths(
+            self,
+            s0: float,
+            mu: float,
+            t: float,
+            n_paths: int,
+            n_steps: int,
+            seed: int | None = None,
+        ) -> None:  # type: ignore[override]
             return None
 
-        def simulate_terminal(self, s0, mu, t, n_paths, n_steps, seed=None):
+        def simulate_terminal(
+            self,
+            s0: float,
+            mu: float,
+            t: float,
+            n_paths: int,
+            n_steps: int,
+            seed: int | None = None,
+        ) -> None:  # type: ignore[override]
             return None
 
-        def get_parameters(self):
+        def get_parameters(self) -> dict[str, Any]:
             return {"v0": 0.04}
 
-        def long_run_variance(self):
+        def long_run_variance(self) -> float:
             return 0.04
 
-        def feller_condition_satisfied(self):
+        def feller_condition_satisfied(self) -> bool:
             return True
 
     vol_sim = VolSimulator()

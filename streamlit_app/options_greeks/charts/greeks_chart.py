@@ -7,6 +7,7 @@ Professional visualization for first, second, and third-order Greeks.
 import numpy as np
 import plotly.graph_objects as go
 import streamlit as st
+from .slider_factory import create_param_slider, find_default_param_value
 from config.chart_theme import (
     CHART_COLORS,
     GREEK_COLORS,
@@ -26,14 +27,14 @@ from plotly.subplots import make_subplots
 
 # Colors for individual legs (distinct from aggregate)
 LEG_COLORS = [
-    '#ef4444',  # Red
-    '#3b82f6',  # Blue
-    '#22c55e',  # Green
-    '#f59e0b',  # Amber
-    '#8b5cf6',  # Purple
-    '#ec4899',  # Pink
-    '#06b6d4',  # Cyan
-    '#84cc16',  # Lime
+    "#ef4444",  # Red
+    "#3b82f6",  # Blue
+    "#22c55e",  # Green
+    "#f59e0b",  # Amber
+    "#8b5cf6",  # Purple
+    "#ec4899",  # Pink
+    "#06b6d4",  # Cyan
+    "#84cc16",  # Lime
 ]
 
 
@@ -48,7 +49,7 @@ def create_greeks_subplot(
     subplot_rows: int = 2,
     subplot_cols: int = 2,
     all_leg_greeks: dict = None,
-    show_individual_legs: bool = False
+    show_individual_legs: bool = False,
 ) -> tuple[go.Figure, dict]:
     """
     Create a subplot figure with multiple Greeks.
@@ -70,7 +71,7 @@ def create_greeks_subplot(
         Tuple of (Figure, slider_dict)
     """
     # Create subplot titles
-    titles = [GREEK_TITLES[g] for g in greeks_list[:subplot_rows * subplot_cols]]
+    titles = [GREEK_TITLES[g] for g in greeks_list[: subplot_rows * subplot_cols]]
 
     fig = make_subplots(
         rows=subplot_rows,
@@ -78,10 +79,18 @@ def create_greeks_subplot(
         subplot_titles=titles,
         vertical_spacing=0.18 if subplot_rows == 2 else 0.10,
         horizontal_spacing=0.10,
-        shared_xaxes='all'  # Share ALL x-axes for synchronized crosshair
+        shared_xaxes="all",  # Share ALL x-axes for synchronized crosshair
     )
 
-    positions = [(r + 1, c + 1) for r in range(subplot_rows) for c in range(subplot_cols)]
+    positions = [
+        (r + 1, c + 1) for r in range(subplot_rows) for c in range(subplot_cols)
+    ]
+
+    # Determine default DTE/IV for visibility based on the provided ranges
+    default_dte, _ = (
+        find_default_param_value("DTE", dte_values) if dte_values else (31, 0)
+    )
+    default_iv, _ = find_default_param_value("IV", iv_values) if iv_values else (25, 0)
 
     # Add traces for each Greek
     for greek_idx, greek_name in enumerate(greeks_list):
@@ -90,29 +99,38 @@ def create_greeks_subplot(
 
         row, col = positions[greek_idx]
         _add_greek_traces(
-            fig, greek_name, greeks_data, slider_type,
-            dte_values, iv_values, spot_range, row, col,
+            fig,
+            greek_name,
+            greeks_data,
+            slider_type,
+            dte_values,
+            iv_values,
+            spot_range,
+            row,
+            col,
             all_leg_greeks=all_leg_greeks,
             show_individual_legs=show_individual_legs,
-            is_first_greek=(greek_idx == 0)
+            is_first_greek=(greek_idx == 0),
+            default_dte=default_dte,
+            default_iv=default_iv,
         )
 
         # Add reference lines with theme colors
         fig.add_hline(
             y=0,
             line_dash="dot",
-            line_color=CHART_COLORS['neutral'],
+            line_color=CHART_COLORS["neutral"],
             opacity=0.4,
             row=row,
-            col=col
+            col=col,
         )
         fig.add_vline(
             x=spot_price,
             line_dash="dot",
-            line_color=CHART_COLORS['accent'],
+            line_color=CHART_COLORS["accent"],
             opacity=0.5,
             row=row,
-            col=col
+            col=col,
         )
 
     # Calculate number of leg traces per slider step
@@ -124,24 +142,34 @@ def create_greeks_subplot(
             num_legs = len(all_leg_greeks[first_key])
 
     # Create slider
-    slider_dict = _create_greeks_slider(slider_type, greeks_list, positions, num_legs)
+    param_values = dte_values if slider_type == "DTE" else iv_values
+    num_greeks = min(len(greeks_list), len(positions))
+    traces_per_step_per_greek = 1 + num_legs
+    default_value, _ = find_default_param_value(slider_type, param_values)
+    slider_dict = create_param_slider(
+        slider_type,
+        param_values,
+        default_value,
+        traces_per_step=traces_per_step_per_greek,
+        num_subplots=num_greeks,
+    )
 
     # Configure spikelines for crosshair effect
     fig.update_xaxes(
         showspikes=True,
-        spikemode='across',
-        spikesnap='cursor',
+        spikemode="across",
+        spikesnap="cursor",
         spikethickness=1.5,
-        spikecolor='#6366f1',
-        spikedash='solid'
+        spikecolor="#6366f1",
+        spikedash="solid",
     )
     fig.update_yaxes(
         showspikes=True,
-        spikemode='across',
-        spikesnap='cursor',
+        spikemode="across",
+        spikesnap="cursor",
         spikethickness=1,
-        spikecolor='#a5b4fc',
-        spikedash='dot'
+        spikecolor="#a5b4fc",
+        spikedash="dot",
     )
 
     return fig, slider_dict
@@ -159,83 +187,101 @@ def _add_greek_traces(
     col: int,
     all_leg_greeks: dict = None,
     show_individual_legs: bool = False,
-    is_first_greek: bool = False
+    is_first_greek: bool = False,
+    default_dte: int = 31,
+    default_iv: int = 25,
 ) -> None:
     """Add traces for a single Greek to the figure.
 
     Args:
         all_leg_greeks: Dictionary keyed by "DTE_IV" with leg Greeks for each combination
+        default_dte: DTE value to show by default (visible trace)
+        default_iv: IV value to show by default (visible trace)
     """
-    greek_color = GREEK_COLORS.get(greek_name, CHART_COLORS['primary'])
+    greek_color = GREEK_COLORS.get(greek_name, CHART_COLORS["primary"])
     greek_title = GREEK_TITLES.get(greek_name, greek_name.capitalize())
 
     if slider_type == "DTE":
-        fixed_iv = 25
+        fixed_iv = default_iv
         for dte in dte_values:
             key = f"{dte}_{fixed_iv}"
-            visible = (dte == 31)
+            visible = dte == default_dte
 
             # Add aggregate trace
             fig.add_trace(
                 go.Scatter(
                     x=spot_range,
                     y=greeks_data[key][greek_name],
-                    mode='lines',
-                    name=f'{greek_name}: DTE={dte}',
+                    mode="lines",
+                    name=f"{greek_name}: DTE={dte}",
                     visible=visible,
                     line=dict(width=2.5, color=greek_color),
                     showlegend=False,
                     hovertemplate=(
-                        '<b>Underlying:</b> $%{x:,.2f}<br>' +
-                        f'<b>DTE:</b> {dte} days<br>' +
-                        f'<b>{greek_title}:</b> %{{y:.4f}}<br>' +
-                        '<extra></extra>'
-                    )
+                        "<b>Underlying:</b> $%{x:,.2f}<br>"
+                        + f"<b>DTE:</b> {dte} days<br>"
+                        + f"<b>{greek_title}:</b> %{{y:.4f}}<br>"
+                        + "<extra></extra>"
+                    ),
                 ),
-                row=row, col=col
+                row=row,
+                col=col,
             )
 
             # Add individual leg traces for this specific DTE/IV combination
             if show_individual_legs and all_leg_greeks and key in all_leg_greeks:
                 show_in_legend = is_first_greek and visible
                 _add_individual_leg_traces(
-                    fig, greek_name, all_leg_greeks[key], spot_range, row, col,
-                    param_label=f"DTE={dte}", visible=visible,
-                    show_in_legend=show_in_legend
+                    fig,
+                    greek_name,
+                    all_leg_greeks[key],
+                    spot_range,
+                    row,
+                    col,
+                    param_label=f"DTE={dte}",
+                    visible=visible,
+                    show_in_legend=show_in_legend,
                 )
     else:  # IV mode
-        fixed_dte = 31
+        fixed_dte = default_dte
         for iv in iv_values:
             key = f"{fixed_dte}_{iv}"
-            visible = (iv == 25)
+            visible = iv == default_iv
 
             # Add aggregate trace
             fig.add_trace(
                 go.Scatter(
                     x=spot_range,
                     y=greeks_data[key][greek_name],
-                    mode='lines',
-                    name=f'{greek_name}: IV={iv}%',
+                    mode="lines",
+                    name=f"{greek_name}: IV={iv}%",
                     visible=visible,
                     line=dict(width=2.5, color=greek_color),
                     showlegend=False,
                     hovertemplate=(
-                        '<b>Underlying:</b> $%{x:,.2f}<br>' +
-                        f'<b>IV:</b> {iv}%<br>' +
-                        f'<b>{greek_title}:</b> %{{y:.4f}}<br>' +
-                        '<extra></extra>'
-                    )
+                        "<b>Underlying:</b> $%{x:,.2f}<br>"
+                        + f"<b>IV:</b> {iv}%<br>"
+                        + f"<b>{greek_title}:</b> %{{y:.4f}}<br>"
+                        + "<extra></extra>"
+                    ),
                 ),
-                row=row, col=col
+                row=row,
+                col=col,
             )
 
             # Add individual leg traces for this specific DTE/IV combination
             if show_individual_legs and all_leg_greeks and key in all_leg_greeks:
                 show_in_legend = is_first_greek and visible
                 _add_individual_leg_traces(
-                    fig, greek_name, all_leg_greeks[key], spot_range, row, col,
-                    param_label=f"IV={iv}%", visible=visible,
-                    show_in_legend=show_in_legend
+                    fig,
+                    greek_name,
+                    all_leg_greeks[key],
+                    spot_range,
+                    row,
+                    col,
+                    param_label=f"IV={iv}%",
+                    visible=visible,
+                    show_in_legend=show_in_legend,
                 )
 
 
@@ -248,7 +294,7 @@ def _add_individual_leg_traces(
     col: int,
     param_label: str = "",
     visible: bool = True,
-    show_in_legend: bool = False
+    show_in_legend: bool = False,
 ) -> None:
     """Add individual leg traces for a Greek (with transparency).
 
@@ -259,43 +305,44 @@ def _add_individual_leg_traces(
 
     leg_idx = 0
     for leg_key, leg_data in leg_greeks.items():
-        if leg_key == 'stock':
+        if leg_key == "stock":
             # Stock position
             leg_label = f"Stock ({leg_data['position_type'].capitalize()})"
-            leg_color = '#94a3b8'  # Gray for stock
+            leg_color = "#94a3b8"  # Gray for stock
         else:
             # Option leg
-            pos_type = leg_data['position_type'].capitalize()
-            opt_type = leg_data['option_type'].capitalize()
-            strike = leg_data['strike']
-            qty = leg_data['quantity']
+            pos_type = leg_data["position_type"].capitalize()
+            opt_type = leg_data["option_type"].capitalize()
+            strike = leg_data["strike"]
+            qty = leg_data["quantity"]
             leg_label = f"{pos_type} {opt_type} K=${strike:.0f}"
             if qty > 1:
                 leg_label = f"{qty}x {leg_label}"
             leg_color = LEG_COLORS[leg_idx % len(LEG_COLORS)]
             leg_idx += 1
 
-        greeks_values = leg_data['greeks'][greek_name]
+        greeks_values = leg_data["greeks"][greek_name]
 
         fig.add_trace(
             go.Scatter(
                 x=spot_range,
                 y=greeks_values,
-                mode='lines',
+                mode="lines",
                 name=leg_label,
                 visible=visible,
-                line=dict(width=1.5, color=leg_color, dash='dot'),
+                line=dict(width=1.5, color=leg_color, dash="dot"),
                 opacity=0.6,
                 showlegend=show_in_legend,
                 legendgroup=leg_key,
                 hovertemplate=(
-                    f'<b>{leg_label}</b><br>' +
-                    '<b>Underlying:</b> $%{x:,.2f}<br>' +
-                    f'<b>{greek_title}:</b> %{{y:.4f}}<br>' +
-                    '<extra></extra>'
-                )
+                    f"<b>{leg_label}</b><br>"
+                    + "<b>Underlying:</b> $%{x:,.2f}<br>"
+                    + f"<b>{greek_title}:</b> %{{y:.4f}}<br>"
+                    + "<extra></extra>"
+                ),
             ),
-            row=row, col=col
+            row=row,
+            col=col,
         )
 
 
@@ -305,7 +352,7 @@ def create_greeks_subplot_strike(
     spot_range: np.ndarray,
     spot_price: float,
     subplot_rows: int = 2,
-    subplot_cols: int = 2
+    subplot_cols: int = 2,
 ) -> tuple[go.Figure, dict]:
     """
     Create a subplot figure with multiple Greeks for strike variation.
@@ -321,7 +368,7 @@ def create_greeks_subplot_strike(
     Returns:
         Tuple of (Figure, slider_dict)
     """
-    titles = [GREEK_TITLES[g] for g in greeks_list[:subplot_rows * subplot_cols]]
+    titles = [GREEK_TITLES[g] for g in greeks_list[: subplot_rows * subplot_cols]]
 
     fig = make_subplots(
         rows=subplot_rows,
@@ -329,10 +376,12 @@ def create_greeks_subplot_strike(
         subplot_titles=titles,
         vertical_spacing=0.18 if subplot_rows == 2 else 0.10,
         horizontal_spacing=0.10,
-        shared_xaxes=True  # Share x-axes for synchronized crosshair
+        shared_xaxes=True,  # Share x-axes for synchronized crosshair
     )
 
-    positions = [(r + 1, c + 1) for r in range(subplot_rows) for c in range(subplot_cols)]
+    positions = [
+        (r + 1, c + 1) for r in range(subplot_rows) for c in range(subplot_cols)
+    ]
     num_greeks = min(len(greeks_list), len(positions))
 
     # Add traces for each Greek and each strike
@@ -341,49 +390,50 @@ def create_greeks_subplot_strike(
             break
 
         row, col = positions[greek_idx]
-        greek_color = GREEK_COLORS.get(greek_name, CHART_COLORS['primary'])
+        greek_color = GREEK_COLORS.get(greek_name, CHART_COLORS["primary"])
         greek_title = GREEK_TITLES.get(greek_name, greek_name.capitalize())
 
         for strike_idx, strike_factor in enumerate(STRIKE_RANGE_FACTORS):
             key = f"strike_{int(strike_factor * 100)}"
             strike_price = spot_price * strike_factor
-            visible = (strike_factor == 1.0)  # ATM is default visible
+            visible = strike_factor == 1.0  # ATM is default visible
 
             fig.add_trace(
                 go.Scatter(
                     x=spot_range,
                     y=greeks_data[key][greek_name],
-                    mode='lines',
-                    name=f'{greek_name}: K=${strike_price:.0f}',
+                    mode="lines",
+                    name=f"{greek_name}: K=${strike_price:.0f}",
                     visible=visible,
                     line=dict(width=2.5, color=greek_color),
                     showlegend=False,
                     hovertemplate=(
-                        '<b>Underlying:</b> $%{x:,.2f}<br>' +
-                        f'<b>Strike:</b> ${strike_price:.0f}<br>' +
-                        f'<b>{greek_title}:</b> %{{y:.4f}}<br>' +
-                        '<extra></extra>'
-                    )
+                        "<b>Underlying:</b> $%{x:,.2f}<br>"
+                        + f"<b>Strike:</b> ${strike_price:.0f}<br>"
+                        + f"<b>{greek_title}:</b> %{{y:.4f}}<br>"
+                        + "<extra></extra>"
+                    ),
                 ),
-                row=row, col=col
+                row=row,
+                col=col,
             )
 
         # Add reference lines
         fig.add_hline(
             y=0,
             line_dash="dot",
-            line_color=CHART_COLORS['neutral'],
+            line_color=CHART_COLORS["neutral"],
             opacity=0.4,
             row=row,
-            col=col
+            col=col,
         )
         fig.add_vline(
             x=spot_price,
             line_dash="dot",
-            line_color=CHART_COLORS['accent'],
+            line_color=CHART_COLORS["accent"],
             opacity=0.5,
             row=row,
-            col=col
+            col=col,
         )
 
     # Create slider for strike
@@ -392,19 +442,19 @@ def create_greeks_subplot_strike(
     # Configure spikelines for crosshair effect
     fig.update_xaxes(
         showspikes=True,
-        spikemode='across',
-        spikesnap='cursor',
+        spikemode="across",
+        spikesnap="cursor",
         spikethickness=1.5,
-        spikecolor='#6366f1',
-        spikedash='solid'
+        spikecolor="#6366f1",
+        spikedash="solid",
     )
     fig.update_yaxes(
         showspikes=True,
-        spikemode='across',
-        spikesnap='cursor',
+        spikemode="across",
+        spikesnap="cursor",
         spikethickness=1,
-        spikecolor='#a5b4fc',
-        spikedash='dot'
+        spikecolor="#a5b4fc",
+        spikedash="dot",
     )
 
     return fig, slider_dict
@@ -420,7 +470,7 @@ def _create_greeks_strike_slider(spot_price: float, num_greeks: int) -> dict:
         step = dict(
             method="update",
             args=[{"visible": [False] * (num_greeks * num_strikes)}],
-            label=f"${strike:.0f}"
+            label=f"${strike:.0f}",
         )
         # Make this strike visible for all Greeks
         for greek_idx in range(num_greeks):
@@ -429,69 +479,18 @@ def _create_greeks_strike_slider(spot_price: float, num_greeks: int) -> dict:
         steps.append(step)
 
     slider = SLIDER_DEFAULTS.copy()
-    slider.update({
-        'active': STRIKE_RANGE_FACTORS.index(1.0) if 1.0 in STRIKE_RANGE_FACTORS else 10,
-        'currentvalue': {
-            **SLIDER_DEFAULTS['currentvalue'],
-            'prefix': 'Strike Price: '
-        },
-        'steps': steps
-    })
-
-    return slider
-
-
-def _create_greeks_slider(
-    slider_type: str,
-    greeks_list: list[str],
-    positions: list[tuple[int, int]],
-    num_legs: int = 0
-) -> dict:
-    """Create slider configuration for Greeks charts.
-
-    Args:
-        slider_type: "DTE" or "IV"
-        greeks_list: List of Greek names
-        positions: List of subplot positions
-        num_legs: Number of individual leg traces per Greek per slider step
-    """
-    param_values = DTE_RANGE if slider_type == "DTE" else IV_RANGE
-    num_greeks = min(len(greeks_list), len(positions))
-
-    # Each slider step has: 1 aggregate trace + num_legs traces per Greek
-    traces_per_step_per_greek = 1 + num_legs
-    total_traces = num_greeks * len(param_values) * traces_per_step_per_greek
-
-    steps = []
-    for idx, value in enumerate(param_values):
-        step = dict(
-            method="update",
-            args=[{"visible": [False] * total_traces}],
-            label=str(value) if slider_type == "DTE" else f"{value}%"
-        )
-        # Make traces for this slider step visible for all Greeks
-        for greek_idx in range(num_greeks):
-            # Base index for this Greek's traces
-            base_idx = greek_idx * len(param_values) * traces_per_step_per_greek
-            # Index within this Greek's traces for this slider step
-            step_base = base_idx + idx * traces_per_step_per_greek
-            # Make aggregate trace visible
-            step["args"][0]["visible"][step_base] = True
-            # Make individual leg traces visible
-            for leg_idx in range(num_legs):
-                step["args"][0]["visible"][step_base + 1 + leg_idx] = True
-        steps.append(step)
-
-    prefix = "Days to Expiration: " if slider_type == "DTE" else "Implied Volatility: "
-
-    slider = SLIDER_DEFAULTS.copy()
-    slider.update({
-        'currentvalue': {
-            **SLIDER_DEFAULTS['currentvalue'],
-            'prefix': prefix
-        },
-        'steps': steps
-    })
+    slider.update(
+        {
+            "active": STRIKE_RANGE_FACTORS.index(1.0)
+            if 1.0 in STRIKE_RANGE_FACTORS
+            else 10,
+            "currentvalue": {
+                **SLIDER_DEFAULTS["currentvalue"],
+                "prefix": "Strike Price: ",
+            },
+            "steps": steps,
+        }
+    )
 
     return slider
 
@@ -512,6 +511,9 @@ def render_greeks_tab(
     calculate_pnl_at_expiry_func=None,
     portfolio_json: str = None,
     calculate_exotic_greeks_func=None,
+    sp_mode: bool = False,
+    dte_range=None,
+    iv_range=None,
 ) -> None:
     """
     Render a complete Greeks tab.
@@ -535,8 +537,9 @@ def render_greeks_tab(
     from components.metrics import render_chart_controls
     from services.portfolio_calculator import calculate_strike_surfaces
 
-    if not positions and not stock_position:
-        st.markdown("""
+    if not sp_mode and not positions and not stock_position:
+        st.markdown(
+            """
         <div style="
             background: linear-gradient(135deg, #e0f2fe 0%, #f0f9ff 100%);
             border: 1px solid #7dd3fc;
@@ -553,22 +556,27 @@ def render_greeks_tab(
                 <div style="color: #0369a1; font-size: 0.8rem;">Add positions using the sidebar to begin analysis</div>
             </div>
         </div>
-        """, unsafe_allow_html=True)
+        """,
+            unsafe_allow_html=True,
+        )
 
     from services.portfolio_calculator import calculate_all_individual_leg_greeks
 
-    # Detect single-leg position
-    is_single_leg = (
-        len(positions) == 1 and stock_position is None
-    ) or (
-        len(positions) == 0 and stock_position is None
+    # Detect single-leg position (structured products are never single-leg)
+    is_single_leg = not sp_mode and (
+        (len(positions) == 1 and stock_position is None)
+        or (len(positions) == 0 and stock_position is None)
     )
 
     # Detect multi-leg position
-    is_multi_leg = (len(positions) > 1) or (len(positions) >= 1 and stock_position is not None)
+    is_multi_leg = not sp_mode and (
+        (len(positions) > 1) or (len(positions) >= 1 and stock_position is not None)
+    )
 
     # Chart controls with Strike option for single-leg
-    slider_type = render_chart_controls(slider_key, is_single_leg=is_single_leg, spot_price=spot_price)
+    slider_type = render_chart_controls(
+        slider_key, is_single_leg=is_single_leg, spot_price=spot_price
+    )
 
     # Toggle for showing individual legs (only for multi-leg positions)
     all_leg_greeks = None
@@ -589,16 +597,18 @@ def render_greeks_tab(
             show_individual_legs = st.toggle(
                 "Show Legs",
                 key=show_legs_key,
-                help="Display Greeks for each leg separately (dotted lines) alongside the aggregate (solid line)"
+                help="Display Greeks for each leg separately (dotted lines) alongside the aggregate (solid line)",
             )
 
         # Calculate individual leg Greeks for ALL DTE/IV combinations if needed
         if show_individual_legs and portfolio_json and calculate_all_greeks_func:
+            effective_dte = dte_range or DTE_RANGE
+            effective_iv = iv_range or IV_RANGE
             all_leg_greeks = calculate_all_individual_leg_greeks(
                 portfolio_json=portfolio_json,
                 spot_range=tuple(spot_range),
-                dte_values=tuple(DTE_RANGE),
-                iv_values=tuple(IV_RANGE),
+                dte_values=tuple(effective_dte),
+                iv_values=tuple(effective_iv),
                 risk_free_rate=risk_free_rate,
                 _calculate_all_greeks_func=calculate_all_greeks_func,
                 _calculate_exotic_greeks_func=calculate_exotic_greeks_func,
@@ -609,13 +619,13 @@ def render_greeks_tab(
         # Get position details
         if positions:
             pos = positions[0]
-            option_type = pos['option_type']
-            position_type = pos['position_type']
-            quantity = pos['quantity']
-            base_strike = pos['strike']
+            option_type = pos["option_type"]
+            position_type = pos["position_type"]
+            quantity = pos["quantity"]
+            base_strike = pos["strike"]
         else:
-            option_type = 'call'
-            position_type = 'long'
+            option_type = "call"
+            position_type = "long"
             quantity = 1
             base_strike = spot_price
 
@@ -629,7 +639,7 @@ def render_greeks_tab(
             base_strike=base_strike,
             risk_free_rate=risk_free_rate,
             _calculate_all_greeks_func=calculate_all_greeks_func,
-            _calculate_pnl_at_expiry_func=calculate_pnl_at_expiry_func
+            _calculate_pnl_at_expiry_func=calculate_pnl_at_expiry_func,
         )
 
         fig, slider_dict = create_greeks_subplot_strike(
@@ -638,22 +648,24 @@ def render_greeks_tab(
             spot_range=spot_range,
             spot_price=spot_price,
             subplot_rows=subplot_rows,
-            subplot_cols=subplot_cols
+            subplot_cols=subplot_cols,
         )
     else:
         # Create figure (DTE or IV)
+        effective_dte = dte_range or DTE_RANGE
+        effective_iv = iv_range or IV_RANGE
         fig, slider_dict = create_greeks_subplot(
             greeks_list=greeks_list,
             greeks_data=greeks_data,
             slider_type=slider_type,
-            dte_values=DTE_RANGE,
-            iv_values=IV_RANGE,
+            dte_values=effective_dte,
+            iv_values=effective_iv,
             spot_range=spot_range,
             spot_price=spot_price,
             subplot_rows=subplot_rows,
             subplot_cols=subplot_cols,
             all_leg_greeks=all_leg_greeks,
-            show_individual_legs=show_individual_legs
+            show_individual_legs=show_individual_legs,
         )
 
     # Determine height based on grid size
@@ -661,47 +673,56 @@ def render_greeks_tab(
 
     # Apply professional layout
     layout = get_layout_config(height=height)
-    layout.update({
-        'sliders': [slider_dict],
-        'showlegend': show_individual_legs,  # Show legend when individual legs are displayed
-        'margin': {'l': 60, 'r': 40, 't': 60, 'b': 100 if subplot_rows == 2 else 120},
-        'hovermode': 'x',  # Synchronized hover across subplots
-        'hoversubplots': 'axis',  # Sync hover across subplots with shared axes
-        'hoverlabel': {
-            'bgcolor': 'rgba(255, 255, 255, 0.95)',
-            'bordercolor': '#e2e8f0',
-            'font': {'family': 'Inter, sans-serif', 'size': 12, 'color': '#1e293b'}
-        },
-        'spikedistance': -1,  # Enable spikes for all points
-    })
+    layout.update(
+        {
+            "sliders": [slider_dict],
+            "showlegend": show_individual_legs,  # Show legend when individual legs are displayed
+            "margin": {
+                "l": 60,
+                "r": 40,
+                "t": 60,
+                "b": 100 if subplot_rows == 2 else 120,
+            },
+            "hovermode": "x",  # Synchronized hover across subplots
+            "hoversubplots": "axis",  # Sync hover across subplots with shared axes
+            "hoverlabel": {
+                "bgcolor": "rgba(255, 255, 255, 0.95)",
+                "bordercolor": "#e2e8f0",
+                "font": {"family": "Inter, sans-serif", "size": 12, "color": "#1e293b"},
+            },
+            "spikedistance": -1,  # Enable spikes for all points
+        }
+    )
 
     # Add legend configuration if showing individual legs
     if show_individual_legs:
-        layout.update({
-            'legend': {
-                'orientation': 'h',
-                'yanchor': 'bottom',
-                'y': 1.02,
-                'xanchor': 'center',
-                'x': 0.5,
-                'font': {'size': 10},
-                'bgcolor': 'rgba(255,255,255,0.9)',
-                'bordercolor': '#e2e8f0',
-                'borderwidth': 1
+        layout.update(
+            {
+                "legend": {
+                    "orientation": "h",
+                    "yanchor": "bottom",
+                    "y": 1.02,
+                    "xanchor": "center",
+                    "x": 0.5,
+                    "font": {"size": 10},
+                    "bgcolor": "rgba(255,255,255,0.9)",
+                    "bordercolor": "#e2e8f0",
+                    "borderwidth": 1,
+                }
             }
-        })
+        )
 
     fig.update_layout(**layout)
 
     # Style subplot titles
-    for annotation in fig['layout']['annotations']:
-        annotation['font'] = {
-            'family': 'Inter, -apple-system, BlinkMacSystemFont, sans-serif',
-            'size': 13,
-            'color': '#1e293b'
+    for annotation in fig["layout"]["annotations"]:
+        annotation["font"] = {
+            "family": "Inter, -apple-system, BlinkMacSystemFont, sans-serif",
+            "size": 13,
+            "color": "#1e293b",
         }
 
-    st.plotly_chart(fig, width="stretch", config={'displayModeBar': False})
+    st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
 
 
 def render_first_order_greeks(
@@ -715,6 +736,9 @@ def render_first_order_greeks(
     calculate_pnl_at_expiry_func=None,
     portfolio_json: str = None,
     calculate_exotic_greeks_func=None,
+    sp_mode: bool = False,
+    dte_range=None,
+    iv_range=None,
 ) -> None:
     """Render the first-order Greeks tab."""
     render_greeks_tab(
@@ -733,6 +757,9 @@ def render_first_order_greeks(
         calculate_pnl_at_expiry_func=calculate_pnl_at_expiry_func,
         portfolio_json=portfolio_json,
         calculate_exotic_greeks_func=calculate_exotic_greeks_func,
+        sp_mode=sp_mode,
+        dte_range=dte_range,
+        iv_range=iv_range,
     )
 
 
@@ -748,10 +775,16 @@ def render_second_order_greeks(
     portfolio_json: str = None,
     has_exotic_legs: bool = False,
     calculate_exotic_greeks_func=None,
+    sp_mode: bool = False,
+    dte_range=None,
+    iv_range=None,
 ) -> None:
     """Render the second-order Greeks tab."""
     if has_exotic_legs:
-        st.info("Higher-order Greeks for exotic legs are computed via numerical finite differences and may be less precise than the analytic vanilla Greeks.", icon="ℹ️")
+        st.info(
+            "Higher-order Greeks for exotic legs are computed via numerical finite differences and may be less precise than the analytic vanilla Greeks.",
+            icon="ℹ️",
+        )
     render_greeks_tab(
         greeks_list=SECOND_ORDER,
         greeks_data=greeks_data,
@@ -768,6 +801,9 @@ def render_second_order_greeks(
         calculate_pnl_at_expiry_func=calculate_pnl_at_expiry_func,
         portfolio_json=portfolio_json,
         calculate_exotic_greeks_func=calculate_exotic_greeks_func,
+        sp_mode=sp_mode,
+        dte_range=dte_range,
+        iv_range=iv_range,
     )
 
 
@@ -783,10 +819,16 @@ def render_third_order_greeks(
     portfolio_json: str = None,
     has_exotic_legs: bool = False,
     calculate_exotic_greeks_func=None,
+    sp_mode: bool = False,
+    dte_range=None,
+    iv_range=None,
 ) -> None:
     """Render the third-order Greeks tab."""
     if has_exotic_legs:
-        st.info("Higher-order Greeks for exotic legs are computed via numerical finite differences and may be less precise than the analytic vanilla Greeks.", icon="ℹ️")
+        st.info(
+            "Higher-order Greeks for exotic legs are computed via numerical finite differences and may be less precise than the analytic vanilla Greeks.",
+            icon="ℹ️",
+        )
     render_greeks_tab(
         greeks_list=THIRD_ORDER,
         greeks_data=greeks_data,
@@ -803,4 +845,7 @@ def render_third_order_greeks(
         calculate_pnl_at_expiry_func=calculate_pnl_at_expiry_func,
         portfolio_json=portfolio_json,
         calculate_exotic_greeks_func=calculate_exotic_greeks_func,
+        sp_mode=sp_mode,
+        dte_range=dte_range,
+        iv_range=iv_range,
     )

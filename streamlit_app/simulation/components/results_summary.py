@@ -25,9 +25,7 @@ from backend.simulation.base import SimulationResult
 
 
 def render_results_summary(
-    result: SimulationResult,
-    model_key: str,
-    params: dict[str, Any]
+    result: SimulationResult, model_key: str, params: dict[str, Any]
 ):
     """
     Render comprehensive results summary.
@@ -49,9 +47,7 @@ def render_results_summary(
 
 
 def _render_key_metrics(
-    result: SimulationResult,
-    model_key: str,
-    params: dict[str, Any]
+    result: SimulationResult, model_key: str, params: dict[str, Any]
 ):
     """Render key simulation metrics."""
     col1, col2, col3, col4 = st.columns(4)
@@ -62,27 +58,16 @@ def _render_key_metrics(
     with col1:
         mean_terminal = np.mean(terminal_prices)
         expected_return = (mean_terminal / initial_price - 1) * 100
-        st.metric(
-            "Mean Terminal",
-            f"${mean_terminal:.2f}",
-            f"{expected_return:+.1f}%"
-        )
+        st.metric("Mean Terminal", f"${mean_terminal:.2f}", f"{expected_return:+.1f}%")
 
     with col2:
         median_terminal = np.median(terminal_prices)
-        st.metric(
-            "Median Terminal",
-            f"${median_terminal:.2f}"
-        )
+        st.metric("Median Terminal", f"${median_terminal:.2f}")
 
     with col3:
         std_terminal = np.std(terminal_prices)
         cv = std_terminal / mean_terminal
-        st.metric(
-            "Std Dev",
-            f"${std_terminal:.2f}",
-            f"CV: {cv:.2%}"
-        )
+        st.metric("Std Dev", f"${std_terminal:.2f}", f"CV: {cv:.2%}")
 
     with col4:
         # Realized volatility
@@ -93,15 +78,11 @@ def _render_key_metrics(
             st.metric(
                 "Realized Vol (ann.)",
                 f"{realized_vol * 100:.1f}%",
-                f"vs {initial_vol * 100:.1f}% initial"
+                f"vs {initial_vol * 100:.1f}% initial",
             )
         else:
             # For constant vol models, display the constant volatility
-            st.metric(
-                "Volatility (ann.)",
-                f"{initial_vol * 100:.1f}%",
-                "constant"
-            )
+            st.metric("Volatility (ann.)", f"{initial_vol * 100:.1f}%", "constant")
 
 
 def _render_distribution_stats(result: SimulationResult):
@@ -160,9 +141,7 @@ def _render_distribution_stats(result: SimulationResult):
 
 
 def _render_volatility_info(
-    result: SimulationResult,
-    model_key: str,
-    params: dict[str, Any]
+    result: SimulationResult, model_key: str, params: dict[str, Any]
 ):
     """Render volatility-specific information."""
     characteristics = get_model_characteristics(model_key)
@@ -205,9 +184,7 @@ def _render_volatility_info(
 
 
 def render_simulation_info(
-    model_key: str,
-    params: dict[str, Any],
-    execution_time: float | None = None
+    model_key: str, params: dict[str, Any], execution_time: float | None = None
 ):
     """
     Render simulation configuration info.
@@ -234,7 +211,7 @@ def render_simulation_info(
     with col2:
         st.markdown(f"**Paths:** {int(params.get('n_paths', 10000)):,}")
         st.markdown(f"**Steps:** {int(params.get('n_steps', 252)):,}")
-        seed = params.get('seed', 42)
+        seed = params.get("seed", 42)
         st.markdown(f"**Seed:** {seed if seed else 'Random'}")
         if execution_time is not None:
             st.markdown(f"**Execution Time:** {execution_time:.2f}s")
@@ -251,11 +228,13 @@ def render_percentile_table(result: SimulationResult):
     values = np.percentile(terminal_prices, percentiles)
     returns = (values / initial_price - 1) * 100
 
-    df = pd.DataFrame({
-        "Percentile": [f"{p}%" for p in percentiles],
-        "Price": [f"${v:.2f}" for v in values],
-        "Return": [f"{r:+.1f}%" for r in returns],
-    })
+    df = pd.DataFrame(
+        {
+            "Percentile": [f"{p}%" for p in percentiles],
+            "Price": [f"${v:.2f}" for v in values],
+            "Return": [f"{r:+.1f}%" for r in returns],
+        }
+    )
 
     st.dataframe(df, width="stretch", hide_index=True)
 
@@ -279,18 +258,24 @@ def render_paths_summary(result: SimulationResult, n_display: int = 5):
     with col1:
         st.markdown("**Best Performing Paths**")
         best_data = {
-            "Path": [f"#{i+1}" for i in best_idx],
+            "Path": [f"#{i + 1}" for i in best_idx],
             "Terminal": [f"${terminal_prices[i]:.2f}" for i in best_idx],
-            "Return": [f"{(terminal_prices[i]/initial_price - 1)*100:+.1f}%" for i in best_idx],
+            "Return": [
+                f"{(terminal_prices[i] / initial_price - 1) * 100:+.1f}%"
+                for i in best_idx
+            ],
         }
         st.dataframe(pd.DataFrame(best_data), width="stretch", hide_index=True)
 
     with col2:
         st.markdown("**Worst Performing Paths**")
         worst_data = {
-            "Path": [f"#{i+1}" for i in worst_idx],
+            "Path": [f"#{i + 1}" for i in worst_idx],
             "Terminal": [f"${terminal_prices[i]:.2f}" for i in worst_idx],
-            "Return": [f"{(terminal_prices[i]/initial_price - 1)*100:+.1f}%" for i in worst_idx],
+            "Return": [
+                f"{(terminal_prices[i] / initial_price - 1) * 100:+.1f}%"
+                for i in worst_idx
+            ],
         }
         st.dataframe(pd.DataFrame(worst_data), width="stretch", hide_index=True)
 
@@ -324,7 +309,9 @@ def render_model_equations(model_key: str, params: dict[str, Any]):
             st.markdown(f"*Stationarity:* ${model.stationarity_condition}$")
 
         # Pricing method equations
-        has_pricing_eq = "analytical" in equations or "cf" in equations or "mc" in equations
+        has_pricing_eq = (
+            "analytical" in equations or "cf" in equations or "mc" in equations
+        )
         if has_pricing_eq:
             st.markdown("---")
             st.markdown("**Pricing Methods**")

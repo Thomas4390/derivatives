@@ -7,9 +7,11 @@ Factory functions for creating simulator instances.
 Provides a unified interface for creating any simulation model
 from configuration dictionaries or enum types.
 
-Author: Thomas
-Created: 2025
+Author: Thomas Vaudescal
+Created: 2026
 """
+
+from __future__ import annotations
 
 from typing import Any
 
@@ -62,10 +64,8 @@ _MODEL_NAME_MAP: dict[str, ModelType] = {
 # Factory Functions
 # =============================================================================
 
-def create_simulator(
-    model: str | ModelType,
-    **kwargs
-) -> BaseSimulator:
+
+def create_simulator(model: str | ModelType, **kwargs: Any) -> BaseSimulator:
     """
     Create a simulator instance from model type and parameters.
 
@@ -111,76 +111,75 @@ def create_heston(
     v0: float,
     kappa: float,
     theta: float,
-    xi: float,
+    alpha: float,
     rho: float,
-    scheme: DiscretizationScheme = DiscretizationScheme.FULL_TRUNCATION
+    scheme: DiscretizationScheme = DiscretizationScheme.FULL_TRUNCATION,
 ) -> HestonSimulator:
     """Create a Heston simulator."""
-    return HestonSimulator(v0=v0, kappa=kappa, theta=theta, xi=xi, rho=rho, scheme=scheme)
+    return HestonSimulator(
+        v0=v0, kappa=kappa, theta=theta, alpha=alpha, rho=rho, scheme=scheme
+    )
 
 
 def create_merton(
-    sigma: float,
-    lambda_j: float,
-    mu_j: float,
-    sigma_j: float
+    sigma: float, lam: float, alpha_j: float, sigma_j: float
 ) -> MertonSimulator:
     """Create a Merton jump diffusion simulator."""
-    return MertonSimulator(sigma=sigma, lambda_j=lambda_j, mu_j=mu_j, sigma_j=sigma_j)
+    return MertonSimulator(sigma=sigma, lam=lam, alpha_j=alpha_j, sigma_j=sigma_j)
 
 
 def create_bates(
     v0: float,
     kappa: float,
     theta: float,
-    xi: float,
+    alpha: float,
     rho: float,
-    lambda_j: float,
-    mu_j: float,
-    sigma_j: float
+    lam: float,
+    alpha_j: float,
+    sigma_j: float,
 ) -> BatesSimulator:
     """Create a Bates simulator."""
     return BatesSimulator(
-        v0=v0, kappa=kappa, theta=theta, xi=xi, rho=rho,
-        lambda_j=lambda_j, mu_j=mu_j, sigma_j=sigma_j
+        v0=v0,
+        kappa=kappa,
+        theta=theta,
+        alpha=alpha,
+        rho=rho,
+        lam=lam,
+        alpha_j=alpha_j,
+        sigma_j=sigma_j,
     )
 
 
 def create_garch(
-    sigma0: float,
-    omega: float,
-    alpha: float,
-    beta: float
+    sigma0: float, omega: float, alpha: float, beta: float
 ) -> GARCHSimulator:
     """Create a GARCH(1,1) simulator."""
     return GARCHSimulator(sigma0=sigma0, omega=omega, alpha=alpha, beta=beta)
 
 
 def create_ngarch(
-    sigma0: float,
-    omega: float,
-    alpha: float,
-    beta: float,
-    theta: float
+    sigma0: float, omega: float, alpha: float, beta: float, gamma: float
 ) -> NGARCHSimulator:
     """Create an NGARCH simulator."""
-    return NGARCHSimulator(sigma0=sigma0, omega=omega, alpha=alpha, beta=beta, theta=theta)
+    return NGARCHSimulator(
+        sigma0=sigma0, omega=omega, alpha=alpha, beta=beta, gamma=gamma
+    )
 
 
 def create_gjr_garch(
-    sigma0: float,
-    omega: float,
-    alpha: float,
-    beta: float,
-    gamma: float
+    sigma0: float, omega: float, alpha: float, beta: float, gamma: float
 ) -> GJRGARCHSimulator:
     """Create a GJR-GARCH simulator."""
-    return GJRGARCHSimulator(sigma0=sigma0, omega=omega, alpha=alpha, beta=beta, gamma=gamma)
+    return GJRGARCHSimulator(
+        sigma0=sigma0, omega=omega, alpha=alpha, beta=beta, gamma=gamma
+    )
 
 
 # =============================================================================
 # Model Information
 # =============================================================================
+
 
 def list_models() -> dict[str, str]:
     """
@@ -221,11 +220,16 @@ def get_model_info(model: str | ModelType) -> dict[str, Any]:
 
     # Get constructor parameters
     import inspect
+
     sig = inspect.signature(simulator_class.__init__)
     params = {
         name: {
-            "annotation": str(param.annotation) if param.annotation != inspect.Parameter.empty else "Any",
-            "default": param.default if param.default != inspect.Parameter.empty else "required"
+            "annotation": str(param.annotation)
+            if param.annotation != inspect.Parameter.empty
+            else "Any",
+            "default": param.default
+            if param.default != inspect.Parameter.empty
+            else "required",
         }
         for name, param in sig.parameters.items()
         if name != "self"
@@ -262,13 +266,33 @@ if __name__ == "__main__":
     string_names = ["gbm", "heston", "merton", "bates", "garch", "ngarch", "gjr_garch"]
     configs = {
         "gbm": {"sigma": 0.2},
-        "heston": {"v0": 0.04, "kappa": 2.0, "theta": 0.04, "xi": 0.3, "rho": -0.7},
-        "merton": {"sigma": 0.2, "lambda_j": 0.5, "mu_j": -0.1, "sigma_j": 0.2},
-        "bates": {"v0": 0.04, "kappa": 2.0, "theta": 0.04, "xi": 0.3, "rho": -0.7,
-                  "lambda_j": 0.5, "mu_j": -0.1, "sigma_j": 0.2},
+        "heston": {"v0": 0.04, "kappa": 2.0, "theta": 0.04, "alpha": 0.3, "rho": -0.7},
+        "merton": {"sigma": 0.2, "lam": 0.5, "alpha_j": -0.1, "sigma_j": 0.2},
+        "bates": {
+            "v0": 0.04,
+            "kappa": 2.0,
+            "theta": 0.04,
+            "alpha": 0.3,
+            "rho": -0.7,
+            "lam": 0.5,
+            "alpha_j": -0.1,
+            "sigma_j": 0.2,
+        },
         "garch": {"sigma0": 0.2, "omega": 1e-6, "alpha": 0.1, "beta": 0.85},
-        "ngarch": {"sigma0": 0.2, "omega": 1e-6, "alpha": 0.1, "beta": 0.85, "theta": 0.5},
-        "gjr_garch": {"sigma0": 0.2, "omega": 1e-6, "alpha": 0.05, "beta": 0.85, "gamma": 0.1},
+        "ngarch": {
+            "sigma0": 0.2,
+            "omega": 1e-6,
+            "alpha": 0.1,
+            "beta": 0.85,
+            "gamma": 0.5,
+        },
+        "gjr_garch": {
+            "sigma0": 0.2,
+            "omega": 1e-6,
+            "alpha": 0.05,
+            "beta": 0.85,
+            "gamma": 0.1,
+        },
     }
 
     for name in string_names:
@@ -279,7 +303,9 @@ if __name__ == "__main__":
     print("\n--- Create Simulator (ModelType Enum) ---")
     sim = create_simulator(ModelType.GBM, sigma=0.25)
     print(f"  ModelType.GBM -> {sim.model_name}")
-    sim = create_simulator(ModelType.HESTON, v0=0.04, kappa=2.0, theta=0.04, xi=0.3, rho=-0.7)
+    sim = create_simulator(
+        ModelType.HESTON, v0=0.04, kappa=2.0, theta=0.04, alpha=0.3, rho=-0.7
+    )
     print(f"  ModelType.HESTON -> {sim.model_name}")
 
     # Test convenience factory functions
@@ -287,20 +313,28 @@ if __name__ == "__main__":
     gbm = create_gbm(sigma=0.2)
     print(f"  create_gbm: {gbm.model_name}")
 
-    heston = create_heston(v0=0.04, kappa=2.0, theta=0.04, xi=0.3, rho=-0.7)
+    heston = create_heston(v0=0.04, kappa=2.0, theta=0.04, alpha=0.3, rho=-0.7)
     print(f"  create_heston: {heston.model_name}")
 
-    merton = create_merton(sigma=0.2, lambda_j=0.5, mu_j=-0.1, sigma_j=0.2)
+    merton = create_merton(sigma=0.2, lam=0.5, alpha_j=-0.1, sigma_j=0.2)
     print(f"  create_merton: {merton.model_name}")
 
-    bates = create_bates(v0=0.04, kappa=2.0, theta=0.04, xi=0.3, rho=-0.7,
-                         lambda_j=0.5, mu_j=-0.1, sigma_j=0.2)
+    bates = create_bates(
+        v0=0.04,
+        kappa=2.0,
+        theta=0.04,
+        alpha=0.3,
+        rho=-0.7,
+        lam=0.5,
+        alpha_j=-0.1,
+        sigma_j=0.2,
+    )
     print(f"  create_bates: {bates.model_name}")
 
     garch = create_garch(sigma0=0.2, omega=1e-6, alpha=0.1, beta=0.85)
     print(f"  create_garch: {garch.model_name}")
 
-    ngarch = create_ngarch(sigma0=0.2, omega=1e-6, alpha=0.1, beta=0.85, theta=0.5)
+    ngarch = create_ngarch(sigma0=0.2, omega=1e-6, alpha=0.1, beta=0.85, gamma=0.5)
     print(f"  create_ngarch: {ngarch.model_name}")
 
     gjr = create_gjr_garch(sigma0=0.2, omega=1e-6, alpha=0.05, beta=0.85, gamma=0.1)
@@ -316,11 +350,16 @@ if __name__ == "__main__":
         ("tgarch", "GJR-GARCH"),
     ]
     for alias, expected in aliases:
-        sim = create_simulator(alias, **configs[alias.replace("geometric_brownian_motion", "gbm")
-                                                 .replace("heston_jump", "bates")
-                                                 .replace("jump_diffusion", "merton")
-                                                 .replace("garch11", "garch")
-                                                 .replace("tgarch", "gjr_garch")])
+        sim = create_simulator(
+            alias,
+            **configs[
+                alias.replace("geometric_brownian_motion", "gbm")
+                .replace("heston_jump", "bates")
+                .replace("jump_diffusion", "merton")
+                .replace("garch11", "garch")
+                .replace("tgarch", "gjr_garch")
+            ],
+        )
         print(f"  '{alias}' -> {sim.model_name}")
 
     # Test get_model_info
@@ -351,7 +390,9 @@ if __name__ == "__main__":
     # Test simulation
     print("\n--- Simulation Test ---")
     sim = create_simulator("gbm", sigma=0.2)
-    result = sim.simulate_paths(s0=100.0, mu=0.05, t=1.0, n_paths=100, n_steps=252, seed=42)
+    result = sim.simulate_paths(
+        s0=100.0, mu=0.05, t=1.0, n_paths=100, n_steps=252, seed=42
+    )
     print(f"  GBM simulation: {result.n_paths} paths, {result.n_steps} steps")
     print(f"  Terminal mean: {result.terminal_mean:.2f}")
 

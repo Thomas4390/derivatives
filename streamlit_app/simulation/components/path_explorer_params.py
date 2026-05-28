@@ -35,6 +35,7 @@ def _label(html: str) -> None:
 
 # ── Main entry point ──────────────────────────────────────────────────────
 
+
 def render_explorer_params(model_key: str) -> dict[str, Any]:
     """
     Render compact inline parameter controls for the Path Explorer tab.
@@ -58,44 +59,64 @@ def render_explorer_params(model_key: str) -> dict[str, Any]:
     with c1:
         _label("S<sub>0</sub>")
         params["spot"] = st.number_input(
-            "S0", min_value=1.0, max_value=10000.0,
+            "S0",
+            min_value=1.0,
+            max_value=10000.0,
             value=st.session_state.get(f"{kp}spot", 100.0),
-            step=1.0, key=f"{kp}spot", label_visibility="collapsed",
+            step=1.0,
+            key=f"{kp}spot",
+            label_visibility="collapsed",
         )
 
     with c2:
         _label("&mu;")
         params["drift"] = st.number_input(
-            "drift", min_value=-0.20, max_value=0.50,
+            "drift",
+            min_value=-0.20,
+            max_value=0.50,
             value=st.session_state.get(f"{kp}drift", 0.08),
-            step=0.01, format="%.2f", key=f"{kp}drift",
+            step=0.01,
+            format="%.2f",
+            key=f"{kp}drift",
             label_visibility="collapsed",
         )
 
     with c3:
         _label("r")
         params["risk_free_rate"] = st.number_input(
-            "rate", min_value=0.0, max_value=0.20,
+            "rate",
+            min_value=0.0,
+            max_value=0.20,
             value=st.session_state.get(f"{kp}rate", 0.05),
-            step=0.005, format="%.3f", key=f"{kp}rate",
+            step=0.005,
+            format="%.3f",
+            key=f"{kp}rate",
             label_visibility="collapsed",
         )
 
     with c4:
         _label("T")
         params["time_horizon"] = st.number_input(
-            "T", min_value=0.1, max_value=10.0,
+            "T",
+            min_value=0.1,
+            max_value=10.0,
             value=st.session_state.get(f"{kp}T", 1.0),
-            step=0.1, format="%.1f", key=f"{kp}T",
+            step=0.1,
+            format="%.1f",
+            key=f"{kp}T",
             label_visibility="collapsed",
         )
 
     with c5:
         _label("Seed")
         params["seed"] = st.number_input(
-            "seed", min_value=1, max_value=99999,
+            "seed",
+            min_value=1,
+            max_value=99999,
             value=st.session_state.get(f"{kp}seed", 42),
-            step=1, key=f"{kp}seed", label_visibility="collapsed",
+            step=1,
+            key=f"{kp}seed",
+            label_visibility="collapsed",
             help="Fixed seed — same random draws across parameter changes",
         )
 
@@ -126,11 +147,15 @@ def render_explorer_params(model_key: str) -> dict[str, Any]:
         _render_garch(params, defaults, kp)
         c = st.columns(1)[0]
         with c:
-            _label("&theta;<sub>NG</sub>")
-            params["theta_ngarch"] = st.slider(
-                "theta_ng", min_value=0.0, max_value=2.0,
-                value=st.session_state.get(f"{kp}theta_ng", defaults.get("theta", 0.5)),
-                step=0.1, format="%.1f", key=f"{kp}theta_ng",
+            _label("&gamma;")
+            params["gamma_ngarch"] = st.slider(
+                "gamma_ng",
+                min_value=0.0,
+                max_value=2.0,
+                value=st.session_state.get(f"{kp}theta_ng", defaults.get("gamma", 0.5)),
+                step=0.1,
+                format="%.1f",
+                key=f"{kp}theta_ng",
                 label_visibility="collapsed",
             )
 
@@ -140,9 +165,13 @@ def render_explorer_params(model_key: str) -> dict[str, Any]:
         with c:
             _label("&gamma;")
             params["gamma"] = st.slider(
-                "gamma", min_value=0.0, max_value=0.5,
+                "gamma",
+                min_value=0.0,
+                max_value=0.5,
                 value=st.session_state.get(f"{kp}gamma", defaults.get("gamma", 0.03)),
-                step=0.01, format="%.3f", key=f"{kp}gamma",
+                step=0.01,
+                format="%.3f",
+                key=f"{kp}gamma",
                 label_visibility="collapsed",
             )
 
@@ -161,9 +190,13 @@ def _render_gbm(params: dict, defaults: dict, kp: str) -> None:
     with c:
         _label("&sigma;")
         params["sigma"] = st.slider(
-            "sigma", min_value=0.01, max_value=1.0,
+            "sigma",
+            min_value=0.01,
+            max_value=1.0,
             value=st.session_state.get(f"{kp}sigma", defaults.get("sigma", 0.20)),
-            step=0.01, format="%.2f", key=f"{kp}sigma",
+            step=0.01,
+            format="%.2f",
+            key=f"{kp}sigma",
             label_visibility="collapsed",
         )
 
@@ -174,41 +207,61 @@ def _render_heston(params: dict, defaults: dict, kp: str) -> None:
     with c1:
         _label("V<sub>0</sub>")
         params["v0"] = st.slider(
-            "v0", min_value=0.001, max_value=0.50,
+            "v0",
+            min_value=0.001,
+            max_value=0.50,
             value=st.session_state.get(f"{kp}v0", defaults.get("v0", 0.04)),
-            step=0.005, format="%.3f", key=f"{kp}v0",
+            step=0.005,
+            format="%.3f",
+            key=f"{kp}v0",
             label_visibility="collapsed",
         )
     with c2:
         _label("&kappa;")
         params["kappa"] = st.slider(
-            "kappa", min_value=0.1, max_value=10.0,
+            "kappa",
+            min_value=0.1,
+            max_value=10.0,
             value=st.session_state.get(f"{kp}kappa", defaults.get("kappa", 2.0)),
-            step=0.1, format="%.1f", key=f"{kp}kappa",
+            step=0.1,
+            format="%.1f",
+            key=f"{kp}kappa",
             label_visibility="collapsed",
         )
     with c3:
-        _label("&theta;")
+        _label("σ²")
         params["theta"] = st.slider(
-            "theta", min_value=0.001, max_value=0.50,
+            "theta",
+            min_value=0.001,
+            max_value=0.50,
             value=st.session_state.get(f"{kp}theta", defaults.get("theta", 0.04)),
-            step=0.005, format="%.3f", key=f"{kp}theta",
+            step=0.005,
+            format="%.3f",
+            key=f"{kp}theta",
             label_visibility="collapsed",
         )
     with c4:
-        _label("&xi;")
-        params["xi"] = st.slider(
-            "xi", min_value=0.01, max_value=1.0,
-            value=st.session_state.get(f"{kp}xi", defaults.get("xi", 0.3)),
-            step=0.01, format="%.2f", key=f"{kp}xi",
+        _label("&alpha;")
+        params["alpha"] = st.slider(
+            "alpha",
+            min_value=0.01,
+            max_value=1.0,
+            value=st.session_state.get(f"{kp}alpha", defaults.get("alpha", 0.3)),
+            step=0.01,
+            format="%.2f",
+            key=f"{kp}alpha",
             label_visibility="collapsed",
         )
     with c5:
         _label("&rho;")
         params["rho"] = st.slider(
-            "rho", min_value=-0.99, max_value=0.99,
+            "rho",
+            min_value=-0.99,
+            max_value=0.99,
             value=st.session_state.get(f"{kp}rho", defaults.get("rho", -0.7)),
-            step=0.01, format="%.2f", key=f"{kp}rho",
+            step=0.01,
+            format="%.2f",
+            key=f"{kp}rho",
             label_visibility="collapsed",
         )
 
@@ -217,7 +270,9 @@ def _render_heston(params: dict, defaults: dict, kp: str) -> None:
     if satisfied:
         st.caption(f"Feller OK: 2\u03ba\u03b8 = {lhs:.4f} > {rhs:.4f} = \u03be\u00b2")
     else:
-        st.caption(f"\u26a0\ufe0f Feller violated: 2\u03ba\u03b8 = {lhs:.4f} \u2264 {rhs:.4f} = \u03be\u00b2")
+        st.caption(
+            f"\u26a0\ufe0f Feller violated: 2\u03ba\u03b8 = {lhs:.4f} \u2264 {rhs:.4f} = \u03be\u00b2"
+        )
 
 
 def _render_merton(params: dict, defaults: dict, kp: str) -> None:
@@ -226,33 +281,49 @@ def _render_merton(params: dict, defaults: dict, kp: str) -> None:
     with c1:
         _label("&sigma;")
         params["sigma"] = st.slider(
-            "sigma", min_value=0.01, max_value=1.0,
+            "sigma",
+            min_value=0.01,
+            max_value=1.0,
             value=st.session_state.get(f"{kp}sigma", defaults.get("sigma", 0.20)),
-            step=0.01, format="%.2f", key=f"{kp}sigma",
+            step=0.01,
+            format="%.2f",
+            key=f"{kp}sigma",
             label_visibility="collapsed",
         )
     with c2:
         _label("&lambda;<sub>J</sub>")
-        params["lambda_j"] = st.slider(
-            "lambda_j", min_value=0.0, max_value=5.0,
-            value=st.session_state.get(f"{kp}lambda", defaults.get("lambda_j", 0.5)),
-            step=0.1, format="%.1f", key=f"{kp}lambda",
+        params["lam"] = st.slider(
+            "lam",
+            min_value=0.0,
+            max_value=5.0,
+            value=st.session_state.get(f"{kp}lambda", defaults.get("lam", 0.5)),
+            step=0.1,
+            format="%.1f",
+            key=f"{kp}lambda",
             label_visibility="collapsed",
         )
     with c3:
         _label("&mu;<sub>J</sub>")
-        params["mu_j"] = st.slider(
-            "mu_j", min_value=-0.5, max_value=0.5,
-            value=st.session_state.get(f"{kp}muj", defaults.get("mu_j", -0.1)),
-            step=0.01, format="%.2f", key=f"{kp}muj",
+        params["alpha_j"] = st.slider(
+            "alpha_j",
+            min_value=-0.5,
+            max_value=0.5,
+            value=st.session_state.get(f"{kp}muj", defaults.get("alpha_j", -0.1)),
+            step=0.01,
+            format="%.2f",
+            key=f"{kp}muj",
             label_visibility="collapsed",
         )
     with c4:
         _label("&sigma;<sub>J</sub>")
         params["sigma_j"] = st.slider(
-            "sigma_j", min_value=0.01, max_value=0.5,
+            "sigma_j",
+            min_value=0.01,
+            max_value=0.5,
             value=st.session_state.get(f"{kp}sigmaj", defaults.get("sigma_j", 0.2)),
-            step=0.01, format="%.2f", key=f"{kp}sigmaj",
+            step=0.01,
+            format="%.2f",
+            key=f"{kp}sigmaj",
             label_visibility="collapsed",
         )
 
@@ -263,26 +334,38 @@ def _render_jump(params: dict, defaults: dict, kp: str) -> None:
 
     with c1:
         _label("&lambda;<sub>J</sub>")
-        params["lambda_j"] = st.slider(
-            "lambda_j", min_value=0.0, max_value=5.0,
-            value=st.session_state.get(f"{kp}lambda", defaults.get("lambda_j", 0.5)),
-            step=0.1, format="%.1f", key=f"{kp}lambda",
+        params["lam"] = st.slider(
+            "lam",
+            min_value=0.0,
+            max_value=5.0,
+            value=st.session_state.get(f"{kp}lambda", defaults.get("lam", 0.5)),
+            step=0.1,
+            format="%.1f",
+            key=f"{kp}lambda",
             label_visibility="collapsed",
         )
     with c2:
         _label("&mu;<sub>J</sub>")
-        params["mu_j"] = st.slider(
-            "mu_j", min_value=-0.5, max_value=0.5,
-            value=st.session_state.get(f"{kp}muj", defaults.get("mu_j", -0.1)),
-            step=0.01, format="%.2f", key=f"{kp}muj",
+        params["alpha_j"] = st.slider(
+            "alpha_j",
+            min_value=-0.5,
+            max_value=0.5,
+            value=st.session_state.get(f"{kp}muj", defaults.get("alpha_j", -0.1)),
+            step=0.01,
+            format="%.2f",
+            key=f"{kp}muj",
             label_visibility="collapsed",
         )
     with c3:
         _label("&sigma;<sub>J</sub>")
         params["sigma_j"] = st.slider(
-            "sigma_j", min_value=0.01, max_value=0.5,
+            "sigma_j",
+            min_value=0.01,
+            max_value=0.5,
             value=st.session_state.get(f"{kp}sigmaj", defaults.get("sigma_j", 0.2)),
-            step=0.01, format="%.2f", key=f"{kp}sigmaj",
+            step=0.01,
+            format="%.2f",
+            key=f"{kp}sigmaj",
             label_visibility="collapsed",
         )
 
@@ -293,43 +376,63 @@ def _render_garch(params: dict, defaults: dict, kp: str) -> None:
     with c1:
         _label("&sigma;<sub>0</sub>")
         params["sigma0"] = st.slider(
-            "sigma0", min_value=0.01, max_value=2.0,
+            "sigma0",
+            min_value=0.01,
+            max_value=2.0,
             value=st.session_state.get(f"{kp}sigma0", defaults.get("sigma0", 0.20)),
-            step=0.01, format="%.2f", key=f"{kp}sigma0",
+            step=0.01,
+            format="%.2f",
+            key=f"{kp}sigma0",
             label_visibility="collapsed",
         )
     with c2:
         _label("&omega;")
         params["omega"] = st.number_input(
-            "omega", min_value=1e-7, max_value=0.1,
+            "omega",
+            min_value=1e-7,
+            max_value=0.1,
             value=st.session_state.get(f"{kp}omega", defaults.get("omega", 0.002)),
-            step=0.0001, format="%.4f", key=f"{kp}omega",
+            step=0.0001,
+            format="%.4f",
+            key=f"{kp}omega",
             label_visibility="collapsed",
         )
     with c3:
         _label("&alpha;")
         params["alpha"] = st.slider(
-            "alpha", min_value=0.0, max_value=0.50,
+            "alpha",
+            min_value=0.0,
+            max_value=0.50,
             value=st.session_state.get(f"{kp}alpha", defaults.get("alpha", 0.06)),
-            step=0.01, format="%.3f", key=f"{kp}alpha",
+            step=0.01,
+            format="%.3f",
+            key=f"{kp}alpha",
             label_visibility="collapsed",
         )
     with c4:
         _label("&beta;")
         params["beta"] = st.slider(
-            "beta", min_value=0.0, max_value=0.99,
+            "beta",
+            min_value=0.0,
+            max_value=0.99,
             value=st.session_state.get(f"{kp}beta", defaults.get("beta", 0.90)),
-            step=0.01, format="%.2f", key=f"{kp}beta",
+            step=0.01,
+            format="%.2f",
+            key=f"{kp}beta",
             label_visibility="collapsed",
         )
 
     # Persistence caption
     persistence = params["alpha"] + params["beta"]
     if persistence >= 1.0:
-        st.caption(f"\u26a0\ufe0f \u03b1+\u03b2 = {persistence:.3f} \u2265 1 \u2014 non-stationary")
+        st.caption(
+            f"\u26a0\ufe0f \u03b1+\u03b2 = {persistence:.3f} \u2265 1 \u2014 non-stationary"
+        )
     else:
         lr_vol = (params["omega"] / (1 - persistence)) ** 0.5 * 100
-        st.caption(f"Persistence \u03b1+\u03b2 = {persistence:.3f} \u00b7 Long-run vol \u2248 {lr_vol:.1f}%")
+        st.caption(
+            f"Persistence \u03b1+\u03b2 = {persistence:.3f} \u00b7 Long-run vol \u2248 {lr_vol:.1f}%"
+        )
 
 
 def _render_custom(params: dict, defaults: dict, kp: str, model_key: str) -> None:
@@ -348,8 +451,14 @@ def _render_custom(params: dict, defaults: dict, kp: str, model_key: str) -> Non
         with cols[i % len(cols)]:
             _label(p.display_name)
             params[p.name] = st.slider(
-                p.name, min_value=float(p.min_value), max_value=float(p.max_value),
-                value=st.session_state.get(f"{kp}{p.name}", float(defaults.get(p.name, p.default))),
-                step=float(p.step), format=p.format, key=f"{kp}{p.name}",
+                p.name,
+                min_value=float(p.min_value),
+                max_value=float(p.max_value),
+                value=st.session_state.get(
+                    f"{kp}{p.name}", float(defaults.get(p.name, p.default))
+                ),
+                step=float(p.step),
+                format=p.format,
+                key=f"{kp}{p.name}",
                 label_visibility="collapsed",
             )

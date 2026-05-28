@@ -12,9 +12,11 @@ This module provides:
 Note: ExerciseStyle enum is defined in backend.core.result_types
       ExerciseType is an alias for backward compatibility.
 
-Author: Thomas
-Created: 2025
+Author: Thomas Vaudescal
+Created: 2026
 """
+
+from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import NamedTuple
@@ -31,6 +33,7 @@ ExerciseType = ExerciseStyle
 # Exercise Schedules
 # =============================================================================
 
+
 @dataclass
 class EuropeanExercise:
     """
@@ -41,6 +44,7 @@ class EuropeanExercise:
     maturity : float
         Time to maturity in years
     """
+
     maturity: float
 
     @property
@@ -68,6 +72,7 @@ class AmericanExercise:
     start_time : float
         Earliest exercise time (default 0)
     """
+
     maturity: float
     start_time: float = 0.0
 
@@ -106,9 +111,10 @@ class BermudanExercise:
     exercise_dates : List[float]
         List of exercise times in years
     """
+
     exercise_dates: list[float]
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         """Sort exercise dates."""
         self.exercise_dates = sorted(self.exercise_dates)
 
@@ -134,10 +140,7 @@ class BermudanExercise:
 
     @classmethod
     def from_schedule(
-        cls,
-        start: float,
-        end: float,
-        frequency: str = "monthly"
+        cls, start: float, end: float, frequency: str = "monthly"
     ) -> "BermudanExercise":
         """
         Create Bermudan exercise from schedule.
@@ -162,7 +165,7 @@ class BermudanExercise:
             "monthly": 30,
             "quarterly": 91,
             "semiannual": 182,
-            "annual": 365
+            "annual": 365,
         }
 
         if frequency not in freq_days:
@@ -186,11 +189,12 @@ ExerciseSchedule = EuropeanExercise | AmericanExercise | BermudanExercise
 # Factory Function
 # =============================================================================
 
+
 def create_exercise(
     exercise_type: str | ExerciseStyle,
     maturity: float,
     exercise_dates: list[float] | None = None,
-    start_time: float = 0.0
+    start_time: float = 0.0,
 ) -> ExerciseSchedule:
     """
     Factory function to create exercise schedule.
@@ -240,8 +244,10 @@ def create_exercise(
 # Exercise Decision Helper
 # =============================================================================
 
+
 class ExerciseDecision(NamedTuple):
     """Result of exercise decision at a time step."""
+
     should_exercise: bool
     intrinsic_value: float
     continuation_value: float
@@ -254,7 +260,7 @@ def optimal_exercise_boundary(
     is_call: bool,
     spot_grid: np.ndarray,
     time_grid: np.ndarray,
-    option_values: np.ndarray
+    option_values: np.ndarray,
 ) -> np.ndarray:
     """
     Extract optimal exercise boundary from option value grid.
@@ -304,7 +310,9 @@ def optimal_exercise_boundary(
         if is_call:
             # For call, find lowest spot where exercise is optimal
             exercise_spots = spot_grid[exercise_optimal & (intrinsic > 0)]
-            boundary[t_idx] = exercise_spots.min() if len(exercise_spots) > 0 else np.inf
+            boundary[t_idx] = (
+                exercise_spots.min() if len(exercise_spots) > 0 else np.inf
+            )
         else:
             # For put, find highest spot where exercise is optimal
             exercise_spots = spot_grid[exercise_optimal & (intrinsic > 0)]
@@ -323,7 +331,7 @@ if __name__ == "__main__":
     print("=" * 50)
 
     # Test European
-    european = create_exercise('european', maturity=1.0)
+    european = create_exercise("european", maturity=1.0)
     print("\nEuropean Exercise:")
     print(f"  Maturity: {european.maturity}")
     print(f"  Can exercise at t=0.5: {european.can_exercise(0.5)}")
@@ -331,7 +339,7 @@ if __name__ == "__main__":
     print(f"  Exercise times: {european.get_exercise_times()}")
 
     # Test American
-    american = create_exercise('american', maturity=1.0)
+    american = create_exercise("american", maturity=1.0)
     print("\nAmerican Exercise:")
     print(f"  Maturity: {american.maturity}")
     print(f"  Can exercise at t=0.0: {american.can_exercise(0.0)}")
@@ -341,9 +349,7 @@ if __name__ == "__main__":
 
     # Test Bermudan
     bermudan = create_exercise(
-        'bermudan',
-        maturity=1.0,
-        exercise_dates=[0.25, 0.5, 0.75, 1.0]
+        "bermudan", maturity=1.0, exercise_dates=[0.25, 0.5, 0.75, 1.0]
     )
     print("\nBermudan Exercise:")
     print(f"  Maturity: {bermudan.maturity}")
@@ -353,7 +359,7 @@ if __name__ == "__main__":
 
     # Test Bermudan from schedule
     bermudan_monthly = BermudanExercise.from_schedule(
-        start=0.25, end=1.0, frequency='monthly'
+        start=0.25, end=1.0, frequency="monthly"
     )
     print("\nBermudan (monthly from t=0.25 to t=1.0):")
     print(f"  N dates: {len(bermudan_monthly.exercise_dates)}")

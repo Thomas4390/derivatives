@@ -24,8 +24,8 @@ Example
     bumped = market.bump_spot(5.0)  # spot = 105
     print(bumped.spot)  # 105.0
 
-Author: Thomas
-Created: 2025
+Author: Thomas Vaudescal
+Created: 2026
 """
 
 # Types and enums

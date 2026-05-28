@@ -13,8 +13,8 @@ Contains:
 Note: The high-level FFTEngine wrapper is in backend.engines.fft_engine
 and is exported from backend.engines directly.
 
-Author: Thomas
-Created: 2025
+Author: Thomas Vaudescal
+Created: 2026
 """
 
 # Import low-level engine and config from carr_madan

@@ -13,8 +13,8 @@ Models:
 - NGARCHSimulator: NGARCH
 - GJRGARCHSimulator: GJR-GARCH
 
-Author: Thomas
-Created: 2025
+Author: Thomas Vaudescal
+Created: 2026
 """
 
 
@@ -22,25 +22,36 @@ def __getattr__(name: str):
     """Lazy import to avoid conflicts when running modules directly."""
     if name == "GBMSimulator":
         from backend.simulation.models.gbm import GBMSimulator
+
         return GBMSimulator
     if name == "HestonSimulator":
         from backend.simulation.models.heston import HestonSimulator
+
         return HestonSimulator
     if name == "MertonSimulator":
         from backend.simulation.models.merton import MertonSimulator
+
         return MertonSimulator
     if name == "BatesSimulator":
         from backend.simulation.models.bates import BatesSimulator
+
         return BatesSimulator
     if name == "GARCHSimulator":
         from backend.simulation.models.garch import GARCHSimulator
+
         return GARCHSimulator
     if name == "NGARCHSimulator":
         from backend.simulation.models.ngarch import NGARCHSimulator
+
         return NGARCHSimulator
     if name == "GJRGARCHSimulator":
         from backend.simulation.models.gjr_garch import GJRGARCHSimulator
+
         return GJRGARCHSimulator
+    if name == "GARCHRiskNeutralSimulator":
+        from backend.simulation.models.garch_q import GARCHRiskNeutralSimulator
+
+        return GARCHRiskNeutralSimulator
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
@@ -52,4 +63,5 @@ __all__ = [
     "GARCHSimulator",
     "NGARCHSimulator",
     "GJRGARCHSimulator",
+    "GARCHRiskNeutralSimulator",
 ]

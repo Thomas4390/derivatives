@@ -11,9 +11,11 @@ This module provides:
 
 Uses Numba-optimized functions from pnl module for maximum performance.
 
-Author: Thomas
-Created: 2025
+Author: Thomas Vaudescal
+Created: 2026
 """
+
+from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -37,6 +39,7 @@ if TYPE_CHECKING:
 # BREAKEVEN RESULT CONTAINER
 # =============================================================================
 
+
 @dataclass
 class BreakevenResult:
     """
@@ -59,6 +62,7 @@ class BreakevenResult:
     loss_zones : List[Tuple[float, float]]
         Ranges where portfolio is at a loss
     """
+
     breakeven_points: list[float]
     max_profit: float
     max_profit_spot: float
@@ -77,7 +81,9 @@ class BreakevenResult:
         else:
             lines.append("No breakeven points (always profit or always loss)")
 
-        lines.append(f"Max Profit: ${self.max_profit:.2f} at ${self.max_profit_spot:.2f}")
+        lines.append(
+            f"Max Profit: ${self.max_profit:.2f} at ${self.max_profit_spot:.2f}"
+        )
         lines.append(f"Max Loss: ${self.max_loss:.2f} at ${self.max_loss_spot:.2f}")
 
         if self.profit_zones:
@@ -119,6 +125,7 @@ class BreakevenResult:
 # POSITION TO ARRAY CONVERSION (for Numba functions)
 # =============================================================================
 
+
 def _positions_to_arrays(
     positions: list[PortfolioPosition],
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
@@ -159,6 +166,7 @@ def _positions_to_arrays(
 # P&L CALCULATION (Numba-optimized)
 # =============================================================================
 
+
 def calculate_portfolio_pnl_at_expiry(
     spot: float,
     positions: list[PortfolioPosition],
@@ -187,7 +195,9 @@ def calculate_portfolio_pnl_at_expiry(
         return 0.0
 
     # Convert to arrays for Numba
-    strikes, option_types, position_types, quantities, premiums = _positions_to_arrays(positions)
+    strikes, option_types, position_types, quantities, premiums = _positions_to_arrays(
+        positions
+    )
 
     # Stock parameters
     stock_qty = float(stock.quantity) if stock else 0.0
@@ -197,10 +207,14 @@ def calculate_portfolio_pnl_at_expiry(
     spot_arr = np.array([spot], dtype=np.float64)
     pnl_arr = _compute_payoff_curve_numba(
         spot_arr,
-        strikes, option_types, position_types, quantities, premiums,
+        strikes,
+        option_types,
+        position_types,
+        quantities,
+        premiums,
         stock_quantity=stock_qty,
         stock_entry_price=stock_entry,
-        multiplier=1.0  # No multiplier at position level
+        multiplier=1.0,  # No multiplier at position level
     )
 
     return float(pnl_arr[0])
@@ -209,6 +223,7 @@ def calculate_portfolio_pnl_at_expiry(
 # =============================================================================
 # BREAKEVEN CALCULATOR
 # =============================================================================
+
 
 class BreakevenCalculator:
     """
@@ -231,7 +246,7 @@ class BreakevenCalculator:
         spot_min: float = 0.1,
         spot_max: float = 1000.0,
         precision: int = 10000,
-    ):
+    ) -> None:
         """Initialize breakeven calculator."""
         self._spot_min = spot_min
         self._spot_max = spot_max
@@ -301,7 +316,7 @@ class BreakevenCalculator:
 
     def calculate_from_portfolio(
         self,
-        portfolio: 'OptionsPortfolio',
+        portfolio: "OptionsPortfolio",
         spot_min: float | None = None,
         spot_max: float | None = None,
     ) -> BreakevenResult:
@@ -344,7 +359,9 @@ class BreakevenCalculator:
             return np.zeros_like(spot_range)
 
         # Convert positions to arrays for Numba
-        strikes, option_types, position_types, quantities, premiums = _positions_to_arrays(positions)
+        strikes, option_types, position_types, quantities, premiums = (
+            _positions_to_arrays(positions)
+        )
 
         # Stock parameters
         stock_qty = float(stock.quantity) if stock else 0.0
@@ -353,10 +370,14 @@ class BreakevenCalculator:
         # Use Numba-optimized payoff curve
         return _compute_payoff_curve_numba(
             spot_range.astype(np.float64),
-            strikes, option_types, position_types, quantities, premiums,
+            strikes,
+            option_types,
+            position_types,
+            quantities,
+            premiums,
             stock_quantity=stock_qty,
             stock_entry_price=stock_entry,
-            multiplier=1.0  # No multiplier at position level
+            multiplier=1.0,  # No multiplier at position level
         )
 
     def _find_sign_changes(
@@ -409,12 +430,18 @@ class BreakevenCalculator:
                 test_spot = max(spot_min, min(spot_max, test_spot))
 
                 # Calculate P&L at test point
-                test_pnl = calculate_portfolio_pnl_at_expiry(test_spot, positions, stock)
+                test_pnl = calculate_portfolio_pnl_at_expiry(
+                    test_spot, positions, stock
+                )
 
                 if test_pnl >= 0:
-                    profit_zones.append((breakeven_extended[i], breakeven_extended[i + 1]))
+                    profit_zones.append(
+                        (breakeven_extended[i], breakeven_extended[i + 1])
+                    )
                 else:
-                    loss_zones.append((breakeven_extended[i], breakeven_extended[i + 1]))
+                    loss_zones.append(
+                        (breakeven_extended[i], breakeven_extended[i + 1])
+                    )
 
         return profit_zones, loss_zones
 
@@ -422,6 +449,7 @@ class BreakevenCalculator:
 # =============================================================================
 # CONVENIENCE FUNCTION
 # =============================================================================
+
 
 def find_breakevens(
     positions: list[PortfolioPosition],
@@ -460,7 +488,7 @@ def find_breakevens(
 
 
 def find_breakevens_from_portfolio(
-    portfolio: 'OptionsPortfolio',
+    portfolio: "OptionsPortfolio",
     spot_min: float = 0.1,
     spot_max: float = 1000.0,
     precision: int = 10000,

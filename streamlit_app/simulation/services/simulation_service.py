@@ -18,6 +18,11 @@ from backend.simulation.base import SimulationResult
 from backend.simulation.factory import create_simulator
 
 
+def get_spot(sim_params: dict[str, Any]) -> float:
+    """Extract spot price from sim_params with standard fallback chain."""
+    return float(sim_params.get("spot_price", sim_params.get("spot", 100.0)))
+
+
 def _extract_model_params(model: str, params: dict[str, Any]) -> dict[str, Any]:
     """Extract model-specific parameters from unified params dict."""
     model_lower = model.lower()
@@ -33,15 +38,15 @@ def _extract_model_params(model: str, params: dict[str, Any]) -> dict[str, Any]:
             "v0": params.get("v0", 0.04),
             "kappa": params.get("kappa", 2.0),
             "theta": params.get("theta", 0.04),
-            "xi": params.get("xi", 0.3),
+            "alpha": params.get("alpha", 0.3),
             "rho": params.get("rho", -0.7),
         }
 
     if model_lower == "merton":
         return {
             "sigma": params.get("sigma", 0.20),
-            "lambda_j": params.get("lambda_j", 0.5),
-            "mu_j": params.get("mu_j", -0.1),
+            "lam": params.get("lam", 0.5),
+            "alpha_j": params.get("alpha_j", -0.1),
             "sigma_j": params.get("sigma_j", 0.2),
         }
 
@@ -50,10 +55,10 @@ def _extract_model_params(model: str, params: dict[str, Any]) -> dict[str, Any]:
             "v0": params.get("v0", 0.04),
             "kappa": params.get("kappa", 2.0),
             "theta": params.get("theta", 0.04),
-            "xi": params.get("xi", 0.3),
+            "alpha": params.get("alpha", 0.3),
             "rho": params.get("rho", -0.7),
-            "lambda_j": params.get("lambda_j", 0.5),
-            "mu_j": params.get("mu_j", -0.1),
+            "lam": params.get("lam", 0.5),
+            "alpha_j": params.get("alpha_j", -0.1),
             "sigma_j": params.get("sigma_j", 0.2),
         }
 
@@ -71,7 +76,7 @@ def _extract_model_params(model: str, params: dict[str, Any]) -> dict[str, Any]:
             "omega": params.get("omega", 0.002),
             "alpha": params.get("alpha", 0.06),
             "beta": params.get("beta", 0.90),
-            "theta": params.get("theta_ngarch", params.get("theta", 0.5)),
+            "gamma": params.get("gamma_ngarch", params.get("gamma", 0.5)),
         }
 
     if model_lower == "gjr_garch":
@@ -88,17 +93,19 @@ def _extract_model_params(model: str, params: dict[str, Any]) -> dict[str, Any]:
         get_custom_model_class,
         is_custom_model,
     )
+
     if is_custom_model(model):
         cls = get_custom_model_class()
         if cls is not None:
-            return {s["name"]: params.get(s["name"], s["default"]) for s in cls.PARAMETER_SPECS}
+            return {
+                s["name"]: params.get(s["name"], s["default"])
+                for s in cls.PARAMETER_SPECS
+            }
     raise ValueError(f"Unknown model: {model}")
 
 
 def run_simulation(
-    model: str,
-    params: dict[str, Any],
-    return_simulator: bool = False
+    model: str, params: dict[str, Any], return_simulator: bool = False
 ) -> SimulationResult | tuple:
     """
     Run unified simulation for any model.
@@ -129,22 +136,19 @@ def run_simulation(
 
     # Create simulator
     from services.custom_model_service import get_custom_model_class, is_custom_model
+
     if is_custom_model(model):
         cls = get_custom_model_class()
         instance = cls(**model_params)
         from backend.simulation.models.generic_euler import GenericEulerSimulator
+
         simulator = GenericEulerSimulator(instance)
     else:
         simulator = create_simulator(model, **model_params)
 
     # Run simulation
     result = simulator.simulate_paths(
-        s0=spot,
-        mu=drift,
-        t=time_horizon,
-        n_paths=n_paths,
-        n_steps=n_steps,
-        seed=seed
+        s0=spot, mu=drift, t=time_horizon, n_paths=n_paths, n_steps=n_steps, seed=seed
     )
 
     if return_simulator:
@@ -152,10 +156,7 @@ def run_simulation(
     return result
 
 
-def run_terminal_simulation(
-    model: str,
-    params: dict[str, Any]
-) -> np.ndarray:
+def run_terminal_simulation(model: str, params: dict[str, Any]) -> np.ndarray:
     """
     Run simulation and return only terminal prices (memory efficient).
 
@@ -180,21 +181,18 @@ def run_terminal_simulation(
     model_params = _extract_model_params(model, params)
 
     from services.custom_model_service import get_custom_model_class, is_custom_model
+
     if is_custom_model(model):
         cls = get_custom_model_class()
         instance = cls(**model_params)
         from backend.simulation.models.generic_euler import GenericEulerSimulator
+
         simulator = GenericEulerSimulator(instance)
     else:
         simulator = create_simulator(model, **model_params)
 
     return simulator.simulate_terminal(
-        s0=spot,
-        mu=drift,
-        t=time_horizon,
-        n_paths=n_paths,
-        n_steps=n_steps,
-        seed=seed
+        s0=spot, mu=drift, t=time_horizon, n_paths=n_paths, n_steps=n_steps, seed=seed
     )
 
 
@@ -254,12 +252,17 @@ def get_model_characteristics(model: str) -> dict[str, Any]:
             get_custom_model_class,
             is_custom_model,
         )
+
         if is_custom_model(model):
             cls = get_custom_model_class()
             if cls is not None:
                 instance = cls(**{s["name"]: s["default"] for s in cls.PARAMETER_SPECS})
-                has_sv = hasattr(instance, 'variance_drift') and callable(getattr(instance, 'variance_drift', None))
-                has_j = hasattr(instance, 'jump') and callable(getattr(instance, 'jump', None))
+                has_sv = hasattr(instance, "variance_drift") and callable(
+                    getattr(instance, "variance_drift", None)
+                )
+                has_j = hasattr(instance, "jump") and callable(
+                    getattr(instance, "jump", None)
+                )
                 return {
                     "has_stochastic_vol": has_sv,
                     "has_jumps": has_j,
@@ -287,22 +290,25 @@ def check_model_conditions(model: str, params: dict[str, Any]) -> dict[str, Any]
     conditions = []
 
     if model_lower in ["heston", "bates"]:
-        # Feller condition: 2*kappa*theta > xi^2
+        # Feller condition: 2*kappa*theta > alpha^2
         kappa = params.get("kappa", 2.0)
         theta = params.get("theta", 0.04)
-        xi = params.get("xi", 0.3)
+        alpha = params.get("alpha", 0.3)
         feller_lhs = 2 * kappa * theta
-        feller_rhs = xi ** 2
+        feller_rhs = alpha**2
         feller_satisfied = feller_lhs > feller_rhs
-        conditions.append({
-            "name": "Feller Condition",
-            "equation": "2κθ > ξ²",
-            "lhs": feller_lhs,
-            "rhs": feller_rhs,
-            "satisfied": feller_satisfied,
-            "description": "Ensures variance stays positive" if feller_satisfied
-                          else "Variance may become negative (use Full Truncation scheme)"
-        })
+        conditions.append(
+            {
+                "name": "Feller Condition",
+                "equation": "2κθ > ξ²",
+                "lhs": feller_lhs,
+                "rhs": feller_rhs,
+                "satisfied": feller_satisfied,
+                "description": "Ensures variance stays positive"
+                if feller_satisfied
+                else "Variance may become negative (use Full Truncation scheme)",
+            }
+        )
 
     elif model_lower == "garch":
         # Stationarity: alpha + beta < 1
@@ -310,32 +316,38 @@ def check_model_conditions(model: str, params: dict[str, Any]) -> dict[str, Any]
         beta = params.get("beta", 0.90)
         persistence = alpha + beta
         stationary = persistence < 1
-        conditions.append({
-            "name": "Stationarity",
-            "equation": "α + β < 1",
-            "value": persistence,
-            "threshold": 1.0,
-            "satisfied": stationary,
-            "description": "Volatility mean-reverts" if stationary
-                          else "Integrated GARCH - volatility doesn't mean-revert"
-        })
+        conditions.append(
+            {
+                "name": "Stationarity",
+                "equation": "α + β < 1",
+                "value": persistence,
+                "threshold": 1.0,
+                "satisfied": stationary,
+                "description": "Volatility mean-reverts"
+                if stationary
+                else "Integrated GARCH - volatility doesn't mean-revert",
+            }
+        )
 
     elif model_lower == "ngarch":
         # Stationarity: alpha*(1 + theta^2) + beta < 1
         alpha = params.get("alpha", 0.06)
         beta = params.get("beta", 0.90)
-        theta = params.get("theta_ngarch", params.get("theta", 0.5))
-        persistence = alpha * (1 + theta ** 2) + beta
+        gamma = params.get("gamma_ngarch", params.get("gamma", 0.5))
+        persistence = alpha * (1 + gamma**2) + beta
         stationary = persistence < 1
-        conditions.append({
-            "name": "Stationarity",
-            "equation": "α(1 + θ²) + β < 1",
-            "value": persistence,
-            "threshold": 1.0,
-            "satisfied": stationary,
-            "description": "Volatility mean-reverts" if stationary
-                          else "Non-stationary - volatility explodes"
-        })
+        conditions.append(
+            {
+                "name": "Stationarity",
+                "equation": "α(1 + θ²) + β < 1",
+                "value": persistence,
+                "threshold": 1.0,
+                "satisfied": stationary,
+                "description": "Volatility mean-reverts"
+                if stationary
+                else "Non-stationary - volatility explodes",
+            }
+        )
 
     elif model_lower == "gjr_garch":
         # Stationarity: alpha + beta + gamma/2 < 1
@@ -344,22 +356,22 @@ def check_model_conditions(model: str, params: dict[str, Any]) -> dict[str, Any]
         gamma = params.get("gamma", 0.03)
         persistence = alpha + beta + gamma / 2
         stationary = persistence < 1
-        conditions.append({
-            "name": "Stationarity",
-            "equation": "α + β + γ/2 < 1",
-            "value": persistence,
-            "threshold": 1.0,
-            "satisfied": stationary,
-            "description": "Volatility mean-reverts" if stationary
-                          else "Non-stationary - volatility explodes"
-        })
+        conditions.append(
+            {
+                "name": "Stationarity",
+                "equation": "α + β + γ/2 < 1",
+                "value": persistence,
+                "threshold": 1.0,
+                "satisfied": stationary,
+                "description": "Volatility mean-reverts"
+                if stationary
+                else "Non-stationary - volatility explodes",
+            }
+        )
 
     is_valid = all(c["satisfied"] for c in conditions) if conditions else True
 
-    return {
-        "is_valid": is_valid,
-        "conditions": conditions
-    }
+    return {"is_valid": is_valid, "conditions": conditions}
 
 
 def compute_long_run_volatility(model: str, params: dict[str, Any]) -> float | None:
@@ -391,8 +403,8 @@ def compute_long_run_volatility(model: str, params: dict[str, Any]) -> float | N
         omega = params.get("omega", 0.002)
         alpha = params.get("alpha", 0.06)
         beta = params.get("beta", 0.90)
-        theta = params.get("theta_ngarch", params.get("theta", 0.5))
-        persistence = alpha * (1 + theta ** 2) + beta
+        gamma = params.get("gamma_ngarch", params.get("gamma", 0.5))
+        persistence = alpha * (1 + gamma**2) + beta
         if persistence >= 1:
             return None
         return np.sqrt(omega / (1 - persistence))
@@ -429,6 +441,7 @@ def get_initial_volatility(model: str, params: dict[str, Any]) -> float:
 
     # Custom model: try to read first vol-like param
     from services.custom_model_service import get_custom_model_class, is_custom_model
+
     if is_custom_model(model):
         cls = get_custom_model_class()
         if cls is not None:
@@ -458,6 +471,7 @@ def get_model_display_name(key: str) -> str:
         return MODEL_NAMES[key]
     try:
         import streamlit as st
+
         custom = st.session_state.get("custom_model")
         if custom and "spec" in custom:
             return custom["spec"].name

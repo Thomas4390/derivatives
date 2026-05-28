@@ -11,9 +11,11 @@ Supports:
 
 No Numba — uses vectorized NumPy for flexibility with arbitrary Python callables.
 
-Author: Thomas
-Created: 2025
+Author: Thomas Vaudescal
+Created: 2026
 """
+
+from __future__ import annotations
 
 import time
 from typing import Any
@@ -41,14 +43,18 @@ class GenericEulerSimulator(BaseSimulator):
         Any model implementing drift(s, v, t, r, q) and diffusion(s, v, t).
     """
 
-    def __init__(self, model):
+    def __init__(self, model: Any) -> None:
         super().__init__()
-        self._model = model
-        self._model_name = model.name
-        self._has_jump = hasattr(model, 'jump') and callable(getattr(model, 'jump', None))
-        self._has_stoch_vol = (
-            hasattr(model, 'variance_drift') and callable(getattr(model, 'variance_drift', None))
-            and hasattr(model, 'variance_diffusion') and callable(getattr(model, 'variance_diffusion', None))
+        self._model: Any = model
+        self._model_name: str = model.name
+        self._has_jump: bool = hasattr(model, "jump") and callable(
+            getattr(model, "jump", None)
+        )
+        self._has_stoch_vol: bool = (
+            hasattr(model, "variance_drift")
+            and callable(getattr(model, "variance_drift", None))
+            and hasattr(model, "variance_diffusion")
+            and callable(getattr(model, "variance_diffusion", None))
         )
 
     def get_parameters(self) -> dict[str, Any]:
@@ -60,7 +66,9 @@ class GenericEulerSimulator(BaseSimulator):
 
     def _get_correlation(self) -> float:
         """Get price-variance correlation (0 if not specified)."""
-        if hasattr(self._model, 'get_correlation') and callable(getattr(self._model, 'get_correlation', None)):
+        if hasattr(self._model, "get_correlation") and callable(
+            getattr(self._model, "get_correlation", None)
+        ):
             return self._model.get_correlation()
         return 0.0
 
@@ -99,7 +107,7 @@ class GenericEulerSimulator(BaseSimulator):
         vol_paths = None
         if has_stoch_vol:
             rho = self._get_correlation()
-            sqrt_1mrho2 = np.sqrt(1.0 - rho ** 2)
+            sqrt_1mrho2 = np.sqrt(1.0 - rho**2)
             var_drift_fn = self._model.variance_drift
             var_diff_fn = self._model.variance_diffusion
             v = np.full(n_paths, v0, dtype=np.float64)
@@ -193,7 +201,7 @@ class GenericEulerSimulator(BaseSimulator):
 
         if has_stoch_vol:
             rho = self._get_correlation()
-            sqrt_1mrho2 = np.sqrt(1.0 - rho ** 2)
+            sqrt_1mrho2 = np.sqrt(1.0 - rho**2)
             var_drift_fn = self._model.variance_drift
             var_diff_fn = self._model.variance_diffusion
             v = np.full(n_paths, v0, dtype=np.float64)

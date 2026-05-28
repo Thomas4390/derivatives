@@ -19,8 +19,8 @@ Available Models:
 - NGARCHModel: Nonlinear Asymmetric GARCH
 - GJRGARCHModel: GJR-GARCH with leverage effect
 
-Author: Thomas
-Created: 2025
+Author: Thomas Vaudescal
+Created: 2026
 Version: 3.0.0
 """
 
@@ -61,8 +61,14 @@ from backend.models.garch import (
 )
 from backend.models.gbm import GBMModel
 from backend.models.heston import HestonModel
+from backend.models.heston_nandi import HestonNandiGARCHModel
 from backend.models.merton import MertonModel
-from backend.models.registry import ModelRegistry, registry
+from backend.models.ngarch_q import (
+    GARCHRiskNeutralModel,
+    GJRGARCHRiskNeutralModel,
+    NGARCHRiskNeutralModel,
+)
+from backend.models.registry import ModelFactory, ModelRegistry, registry
 
 # =============================================================================
 # EXPORTS
@@ -72,6 +78,10 @@ __all__ = [
     # New architecture models
     "GBMModel",
     "HestonModel",
+    "HestonNandiGARCHModel",
+    "GARCHRiskNeutralModel",
+    "GJRGARCHRiskNeutralModel",
+    "NGARCHRiskNeutralModel",
     "MertonModel",
     "BatesModel",
     # GARCH family
@@ -95,6 +105,7 @@ __all__ = [
     "PricingCapability",
     # Registry
     "registry",
+    "ModelFactory",
     "ModelRegistry",
 ]
 

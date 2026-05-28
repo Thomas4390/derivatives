@@ -17,14 +17,21 @@ Note: Portfolio-level Greeks surfaces and P&L calculations have been moved to:
 - backend/portfolio/greeks_surfaces.py - Greeks 3D surface calculations
 - backend/portfolio/breakeven.py - P&L at expiry calculations
 
-Author: Thomas
-Created: 2025
+Author: Thomas Vaudescal
+Created: 2026
 """
+
+from __future__ import annotations
 
 import numpy as np
 from numba import njit, prange
 
 # Import from single source of truth
+from backend.utils.constants.greeks import (
+    GREEK_DELTA,
+    GREEK_GAMMA,
+    GREEK_PRICE,
+)
 from backend.utils.math import (
     bs_greeks as _bs_greeks,
 )
@@ -33,51 +40,11 @@ from backend.utils.math import (
     bs_third_order_greeks,
 )
 
-# =============================================================================
-# GREEK INDEX MAPPING
-# =============================================================================
-# All functions return Greeks in this order (14 total):
-#
-# First-order Greeks (indices 0-5):
-#   0: price   - Option price
-#   1: delta   - ∂V/∂S (spot sensitivity)
-#   2: gamma   - ∂²V/∂S² (delta sensitivity to spot)
-#   3: vega    - ∂V/∂σ per 1% vol (volatility sensitivity)
-#   4: theta   - ∂V/∂t per day (time decay)
-#   5: rho     - ∂V/∂r per 1% rate (rate sensitivity)
-#
-# Second-order Greeks (indices 6-9):
-#   6: vanna   - ∂²V/∂S∂σ per 1% vol (delta-vol cross)
-#   7: volga   - ∂²V/∂σ² per 1%² vol (vega convexity)
-#   8: charm   - ∂²V/∂S∂t per day (delta decay)
-#   9: veta    - ∂²V/∂σ∂t per day per 1% vol (vega decay)
-#
-# Third-order Greeks (indices 10-13):
-#   10: speed  - ∂³V/∂S³ (gamma sensitivity to spot)
-#   11: zomma  - ∂³V/∂S²∂σ per 1% vol (gamma-vol cross)
-#   12: color  - ∂³V/∂S²∂t per day (gamma decay)
-#   13: ultima - ∂³V/∂σ³ per 1%³ vol (volga sensitivity to vol)
-
-# Greek indices for use with greek_index parameter
-GREEK_PRICE = 0
-GREEK_DELTA = 1
-GREEK_GAMMA = 2
-GREEK_VEGA = 3
-GREEK_THETA = 4
-GREEK_RHO = 5
-GREEK_VANNA = 6
-GREEK_VOLGA = 7
-GREEK_CHARM = 8
-GREEK_VETA = 9
-GREEK_SPEED = 10
-GREEK_ZOMMA = 11
-GREEK_COLOR = 12
-GREEK_ULTIMA = 13
-
 
 # =============================================================================
 # BLACK-SCHOLES FIRST-ORDER GREEKS (Wrapper with option_type interface)
 # =============================================================================
+
 
 @njit(fastmath=True, cache=True)
 def calculate_first_order_greeks(
@@ -86,8 +53,8 @@ def calculate_first_order_greeks(
     time_to_expiry: float,
     risk_free_rate: float,
     volatility: float,
-    option_type: int
-) -> tuple:
+    option_type: int,
+) -> tuple[float, float, float, float, float, float]:
     """
     Calculate first-order Black-Scholes Greeks.
 
@@ -123,14 +90,13 @@ def calculate_first_order_greeks(
     is_call = option_type == 1
 
     # Delegate to single source of truth
-    return _bs_greeks(
-        spot, strike, time_to_expiry, risk_free_rate, volatility, is_call
-    )
+    return _bs_greeks(spot, strike, time_to_expiry, risk_free_rate, volatility, is_call)
 
 
 # =============================================================================
 # COMBINED GREEKS CALCULATION
 # =============================================================================
+
 
 @njit(fastmath=True, cache=True)
 def calculate_all_greeks(
@@ -139,7 +105,7 @@ def calculate_all_greeks(
     time_to_expiry: float,
     risk_free_rate: float,
     volatility: float,
-    option_type: int
+    option_type: int,
 ) -> np.ndarray:
     """
     Calculate all 14 Greeks in a single pass.
@@ -208,6 +174,7 @@ def calculate_all_greeks(
 # SINGLE OPTION GREEKS (FOR INDIVIDUAL POSITION ANALYSIS)
 # =============================================================================
 
+
 @njit(fastmath=True, cache=True, parallel=True)
 def calculate_greeks_vectorized(
     spot_range: np.ndarray,
@@ -215,7 +182,7 @@ def calculate_greeks_vectorized(
     time_to_expiry: float,
     risk_free_rate: float,
     volatility: float,
-    option_type: int
+    option_type: int,
 ) -> np.ndarray:
     """
     Calculate all Greeks for a single option across spot range.
@@ -245,8 +212,12 @@ def calculate_greeks_vectorized(
 
     for i in prange(n_spots):
         result[i, :] = calculate_all_greeks(
-            spot_range[i], strike, time_to_expiry,
-            risk_free_rate, volatility, option_type
+            spot_range[i],
+            strike,
+            time_to_expiry,
+            risk_free_rate,
+            volatility,
+            option_type,
         )
 
     return result
@@ -267,7 +238,12 @@ if __name__ == "__main__":
     # Test first-order Greeks
     print("\n--- First-Order Greeks ---")
     price, delta, gamma, vega, theta, rho = calculate_first_order_greeks(
-        spot, strike, t, r, vol, option_type=1  # Call
+        spot,
+        strike,
+        t,
+        r,
+        vol,
+        option_type=1,  # Call
     )
     print("Call option (ATM):")
     print(f"  Price: ${price:.4f}")
@@ -279,7 +255,12 @@ if __name__ == "__main__":
 
     # Test put option
     price_put, delta_put, _, _, _, _ = calculate_first_order_greeks(
-        spot, strike, t, r, vol, option_type=0  # Put
+        spot,
+        strike,
+        t,
+        r,
+        vol,
+        option_type=0,  # Put
     )
     print("\nPut option (ATM):")
     print(f"  Price: ${price_put:.4f}")
@@ -292,9 +273,20 @@ if __name__ == "__main__":
     print("\n--- All 14 Greeks ---")
     all_greeks = calculate_all_greeks(spot, strike, t, r, vol, option_type=1)
     greek_names = [
-        "price", "delta", "gamma", "vega", "theta", "rho",
-        "vanna", "volga", "charm", "veta",
-        "speed", "zomma", "color", "ultima"
+        "price",
+        "delta",
+        "gamma",
+        "vega",
+        "theta",
+        "rho",
+        "vanna",
+        "volga",
+        "charm",
+        "veta",
+        "speed",
+        "zomma",
+        "color",
+        "ultima",
     ]
     for i, name in enumerate(greek_names):
         print(f"  {name:>8}: {all_greeks[i]:>12.6f}")
@@ -314,7 +306,9 @@ if __name__ == "__main__":
     print("\n--- Consistency Check ---")
     for i, s in enumerate(spot_range):
         scalar_greeks = calculate_all_greeks(s, strike, t, r, vol, option_type=1)
-        assert np.allclose(greeks_matrix[i, :], scalar_greeks, rtol=1e-10), f"Mismatch at spot={s}"
+        assert np.allclose(greeks_matrix[i, :], scalar_greeks, rtol=1e-10), (
+            f"Mismatch at spot={s}"
+        )
     print("Vectorized matches scalar: ✓")
 
     print("\n" + "=" * 50)

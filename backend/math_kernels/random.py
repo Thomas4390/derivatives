@@ -10,9 +10,11 @@ Includes:
 - Antithetic variate generation
 - Cholesky decomposition for correlation
 
-Author: Thomas
-Created: 2025
+Author: Thomas Vaudescal
+Created: 2026
 """
+
+from __future__ import annotations
 
 import math
 
@@ -22,6 +24,7 @@ from numba import njit, prange
 # =============================================================================
 # Basic Random Generation
 # =============================================================================
+
 
 @njit(fastmath=True, cache=True)
 def generate_normal(n: int) -> np.ndarray:
@@ -72,8 +75,9 @@ def generate_normal_2d(n_paths: int, n_steps: int) -> np.ndarray:
 # Correlated Brownian Motion
 # =============================================================================
 
+
 @njit(fastmath=True, cache=True)
-def generate_correlated_normals(rho: float) -> tuple:
+def generate_correlated_normals(rho: float) -> tuple[float, float]:
     """
     Generate two correlated standard normals with correlation rho.
 
@@ -101,11 +105,8 @@ def generate_correlated_normals(rho: float) -> tuple:
 
 @njit(parallel=True, fastmath=True, cache=True)
 def generate_correlated_brownian(
-    n_paths: int,
-    n_steps: int,
-    rho: float,
-    dt: float
-) -> tuple:
+    n_paths: int, n_steps: int, rho: float, dt: float
+) -> tuple[np.ndarray, np.ndarray]:
     """
     Generate correlated Brownian increments for Heston-type models.
 
@@ -143,10 +144,7 @@ def generate_correlated_brownian(
 
 
 @njit(fastmath=True, cache=True)
-def cholesky_transform(
-    z: np.ndarray,
-    chol: np.ndarray
-) -> np.ndarray:
+def cholesky_transform(z: np.ndarray, chol: np.ndarray) -> np.ndarray:
     """
     Transform independent normals to correlated via Cholesky.
 
@@ -212,8 +210,9 @@ def compute_cholesky(corr: np.ndarray) -> np.ndarray:
 # Antithetic Variates
 # =============================================================================
 
+
 @njit(fastmath=True, cache=True)
-def generate_antithetic_normals(n: int) -> tuple:
+def generate_antithetic_normals(n: int) -> tuple[np.ndarray, np.ndarray]:
     """
     Generate n normals with their antithetic pairs.
 
@@ -242,10 +241,8 @@ def generate_antithetic_normals(n: int) -> tuple:
 
 @njit(parallel=True, fastmath=True, cache=True)
 def generate_antithetic_brownian(
-    n_paths: int,
-    n_steps: int,
-    dt: float
-) -> tuple:
+    n_paths: int, n_steps: int, dt: float
+) -> tuple[np.ndarray, np.ndarray]:
     """
     Generate Brownian increments with antithetic variates.
 
@@ -281,8 +278,9 @@ def generate_antithetic_brownian(
 # Quasi-Random (Sobol) Support
 # =============================================================================
 
+
 @njit(fastmath=True, cache=True)
-def box_muller_transform(u1: float, u2: float) -> tuple:
+def box_muller_transform(u1: float, u2: float) -> tuple[float, float]:
     """
     Box-Muller transform: convert uniform to standard normal.
 

@@ -7,19 +7,26 @@ Enums and result dataclasses used throughout the pricing system.
 Note: This module is named 'result_types' to avoid conflict with the
 standard library 'types' module.
 
-Author: Thomas
-Created: 2025
+Author: Thomas Vaudescal
+Created: 2026
 """
+
+from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum, auto
+from typing import TypedDict
+
+import numpy as np
 
 # =============================================================================
 # Enums
 # =============================================================================
 
+
 class ExerciseStyle(Enum):
     """Option exercise style."""
+
     EUROPEAN = auto()
     AMERICAN = auto()
     BERMUDAN = auto()
@@ -27,6 +34,7 @@ class ExerciseStyle(Enum):
 
 class PricingCapability(Enum):
     """Type of pricing engine capability."""
+
     ANALYTICAL = auto()
     FFT = auto()
     MONTE_CARLO = auto()
@@ -36,29 +44,78 @@ class PricingCapability(Enum):
 # Result Dataclasses
 # =============================================================================
 
+
 @dataclass(frozen=True)
 class PricingResult:
     """
-    Result of option pricing.
+    Unified result of pricing any Priceable (vanilla or structured product).
 
     Attributes
     ----------
     price : float
-        Option price (premium)
+        Absolute price (premium for vanilla, notional-based for structured).
     engine : str
-        Name of the engine that produced the result
+        Name of the engine that produced the result.
     model : str
-        Name of the model used
-    error : Optional[float]
-        Estimation error (for MC methods)
+        Name of the model used.
+    error : float, optional
+        Estimation error (for MC methods).
+    metadata : dict, optional
+        Additional engine-specific metadata.
+
+    Structured Product Fields (None for vanilla)
+    ---------------------------------------------
+    fair_value_pct : float, optional
+        Present value as % of notional (e.g., 98.5 means 98.5%).
+    notional : float, optional
+        Product notional amount.
+    bond_floor_pct : float, optional
+        PV of the bond component (% of notional).
+    option_value_pct : float, optional
+        PV of the option component (% of notional).
+    expected_coupon_pct : float, optional
+        PV of expected coupons (% of notional).
+    autocall_probability : float, optional
+        Probability of early termination via autocall.
+    capital_loss_probability : float, optional
+        Probability of receiving less than notional at maturity.
+    expected_return : float, optional
+        Expected annualized return.
+    worst_case_return : float, optional
+        5th percentile return.
+    best_case_return : float, optional
+        95th percentile return.
     """
+
     price: float
     engine: str = ""
     model: str = ""
     error: float | None = None
+    metadata: dict[str, float] | None = None
+
+    # Structured product decomposition (None for vanilla instruments)
+    fair_value_pct: float | None = None
+    notional: float | None = None
+    bond_floor_pct: float | None = None
+    option_value_pct: float | None = None
+    expected_coupon_pct: float | None = None
+    autocall_probability: float | None = None
+    capital_loss_probability: float | None = None
+    expected_return: float | None = None
+    worst_case_return: float | None = None
+    best_case_return: float | None = None
+
+    @property
+    def is_structured(self) -> bool:
+        """True if this result contains structured product decomposition."""
+        return self.notional is not None
 
     def __repr__(self) -> str:
-        err_str = f", error={self.error:.6f}" if self.error else ""
+        err_str = f", error={self.error:.6f}" if self.error is not None else ""
+        if self.is_structured:
+            fv = self.fair_value_pct
+            fv_str = f"fair_value={fv:.2f}%" if fv is not None else "fair_value=N/A"
+            return f"PricingResult(price={self.price:.2f}, {fv_str}{err_str})"
         return f"PricingResult(price={self.price:.6f}{err_str})"
 
 
@@ -68,6 +125,11 @@ class GreeksResult:
     Portfolio or option Greeks.
 
     All Greeks are per-unit values (multiply by quantity for portfolio totals).
+
+    Price
+    -----
+    price : float
+        Option price (0.0 when not computed, e.g. for portfolio aggregation).
 
     First Order Greeks (∂V/∂x)
     --------------------------
@@ -107,6 +169,9 @@ class GreeksResult:
     ultima : float
         ∂³V/∂σ³ - third order sensitivity to volatility
     """
+
+    # Price
+    price: float = 0.0
     # First order
     delta: float = 0.0
     theta: float = 0.0
@@ -124,9 +189,26 @@ class GreeksResult:
     color: float = 0.0
     ultima: float = 0.0
 
-    def __add__(self, other: 'GreeksResult') -> 'GreeksResult':
+    @property
+    def has_higher_order(self) -> bool:
+        """True if any second/third-order Greek beyond gamma is populated."""
+        return any(
+            [
+                self.vanna != 0.0,
+                self.volga != 0.0,
+                self.charm != 0.0,
+                self.veta != 0.0,
+                self.speed != 0.0,
+                self.zomma != 0.0,
+                self.color != 0.0,
+                self.ultima != 0.0,
+            ]
+        )
+
+    def __add__(self, other: "GreeksResult") -> "GreeksResult":
         """Sum Greeks (for portfolio aggregation)."""
         return GreeksResult(
+            price=self.price + other.price,
             # First order
             delta=self.delta + other.delta,
             theta=self.theta + other.theta,
@@ -145,9 +227,10 @@ class GreeksResult:
             ultima=self.ultima + other.ultima,
         )
 
-    def __mul__(self, scalar: float) -> 'GreeksResult':
+    def __mul__(self, scalar: float) -> "GreeksResult":
         """Scale Greeks by a scalar."""
         return GreeksResult(
+            price=self.price * scalar,
             # First order
             delta=self.delta * scalar,
             theta=self.theta * scalar,
@@ -166,12 +249,13 @@ class GreeksResult:
             ultima=self.ultima * scalar,
         )
 
-    def __rmul__(self, scalar: float) -> 'GreeksResult':
+    def __rmul__(self, scalar: float) -> "GreeksResult":
         return self.__mul__(scalar)
 
-    def __sub__(self, other: 'GreeksResult') -> 'GreeksResult':
+    def __sub__(self, other: "GreeksResult") -> "GreeksResult":
         """Subtract Greeks (for hedging calculations)."""
         return GreeksResult(
+            price=self.price - other.price,
             # First order
             delta=self.delta - other.delta,
             theta=self.theta - other.theta,
@@ -190,11 +274,11 @@ class GreeksResult:
             ultima=self.ultima - other.ultima,
         )
 
-    def __truediv__(self, scalar: float) -> 'GreeksResult':
+    def __truediv__(self, scalar: float) -> "GreeksResult":
         """Divide Greeks by a scalar (for normalization)."""
         return self * (1.0 / scalar)
 
-    def __neg__(self) -> 'GreeksResult':
+    def __neg__(self) -> "GreeksResult":
         """Negate Greeks (for short positions)."""
         return self * (-1.0)
 
@@ -208,7 +292,7 @@ class GreeksResult:
         """Alias for charm (∂²V/∂S∂t)."""
         return self.charm
 
-    def first_order(self) -> dict:
+    def first_order(self) -> dict[str, float]:
         """Return only first-order Greeks."""
         return {
             "delta": self.delta,
@@ -217,7 +301,7 @@ class GreeksResult:
             "rho": self.rho,
         }
 
-    def second_order(self) -> dict:
+    def second_order(self) -> dict[str, float]:
         """Return only second-order Greeks."""
         return {
             "gamma": self.gamma,
@@ -227,7 +311,7 @@ class GreeksResult:
             "veta": self.veta,
         }
 
-    def third_order(self) -> dict:
+    def third_order(self) -> dict[str, float]:
         """Return only third-order Greeks."""
         return {
             "speed": self.speed,
@@ -236,7 +320,7 @@ class GreeksResult:
             "ultima": self.ultima,
         }
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, float]:
         """Convert all Greeks to dictionary."""
         return {
             # First order
@@ -258,41 +342,97 @@ class GreeksResult:
         }
 
 
-if __name__ == "__main__":
-    print("=" * 50)
-    print("Result Types Smoke Test")
-    print("=" * 50)
+@dataclass(frozen=True)
+class StructuredProductResult(PricingResult):
+    """
+    Backward-compatible wrapper for structured product results.
 
-    result = PricingResult(price=5.123, engine="BS", model="GBM")
-    print(f"\nPricing result: {result}")
+    New code should use :class:`PricingResult` directly with the structured
+    fields populated. This subclass adds legacy attribute aliases
+    (``fair_value``, ``bond_floor`` …) as read-only properties and a
+    :meth:`create` factory that maps the legacy constructor signature to the
+    new PricingResult fields.
 
-    greeks = GreeksResult(
-        # First order
-        delta=0.55, theta=-0.05, vega=0.20, rho=0.15,
-        # Second order
-        gamma=0.02, vanna=0.03, volga=0.01, charm=-0.001, veta=-0.02,
-        # Third order
-        speed=0.001, zomma=0.0005, color=-0.0001, ultima=0.0003,
-    )
-    print("\nGreeks (all orders):")
-    print(f"  1st order: {greeks.first_order()}")
-    print(f"  2nd order: {greeks.second_order()}")
-    print(f"  3rd order: {greeks.third_order()}")
+    The class itself is a normal frozen dataclass — ``__init__`` is the one
+    generated by ``@dataclass`` so the previous ``object.__setattr__``
+    boilerplate is gone.
+    """
 
-    # Test aliases
-    print("\nAliases:")
-    print(f"  volga == vomma: {greeks.volga == greeks.vomma}")
-    print(f"  charm == delta_decay: {greeks.charm == greeks.delta_decay}")
+    @classmethod
+    def create(
+        cls,
+        fair_value: float,
+        price: float,
+        notional: float,
+        engine: str = "",
+        model: str = "",
+        error: float | None = None,
+        bond_floor: float = 0.0,
+        option_value: float = 0.0,
+        expected_coupon: float = 0.0,
+        autocall_probability: float = 0.0,
+        capital_loss_probability: float = 0.0,
+        expected_return: float = 0.0,
+        worst_case_return: float = 0.0,
+        best_case_return: float = 0.0,
+    ) -> "StructuredProductResult":
+        """Build a :class:`StructuredProductResult` from the legacy keyword arguments.
 
-    # Test aggregation
-    greeks2 = GreeksResult(delta=0.30, gamma=0.01, theta=-0.03, vega=0.10, rho=0.10)
-    combined = greeks + greeks2
-    print(f"\nCombined delta: {combined.delta:.2f}")
+        The factory translates the legacy ``fair_value``/``bond_floor``/...
+        names into the canonical ``*_pct`` fields used by ``PricingResult``.
+        """
+        return cls(
+            price=price,
+            engine=engine,
+            model=model,
+            error=error,
+            metadata=None,
+            fair_value_pct=fair_value,
+            notional=notional,
+            bond_floor_pct=bond_floor,
+            option_value_pct=option_value,
+            expected_coupon_pct=expected_coupon,
+            autocall_probability=autocall_probability,
+            capital_loss_probability=capital_loss_probability,
+            expected_return=expected_return,
+            worst_case_return=worst_case_return,
+            best_case_return=best_case_return,
+        )
 
-    # Test scaling
-    scaled = greeks * 10
-    print(f"Scaled delta (x10): {scaled.delta:.2f}")
+    # Legacy attribute aliases (read-only properties)
+    @property
+    def fair_value(self) -> float:
+        """PV as % of notional (legacy alias for fair_value_pct)."""
+        return self.fair_value_pct  # type: ignore[return-value]
 
-    print("\n" + "=" * 50)
-    print("Result types smoke test passed")
-    print("=" * 50)
+    @property
+    def bond_floor(self) -> float:
+        """Bond floor % of notional (legacy alias for bond_floor_pct)."""
+        return self.bond_floor_pct or 0.0
+
+    @property
+    def option_value(self) -> float:
+        """Option value % of notional (legacy alias for option_value_pct)."""
+        return self.option_value_pct or 0.0
+
+    @property
+    def expected_coupon(self) -> float:
+        """Expected coupon % of notional (legacy alias for expected_coupon_pct)."""
+        return self.expected_coupon_pct or 0.0
+
+    def __repr__(self) -> str:
+        err_str = f", error={self.error:.6f}" if self.error is not None else ""
+        return (
+            f"StructuredProductResult(fair_value={self.fair_value:.2f}%, "
+            f"price={self.price:.2f}{err_str})"
+        )
+
+
+class StructuredProductPricingComponents(TypedDict):
+    """Type-safe return type for StructuredProduct.evaluate_paths()."""
+
+    pv: np.ndarray
+    bond_floor_pv: np.ndarray
+    option_pv: np.ndarray
+    coupon_pv: np.ndarray
+    autocall_probability: float

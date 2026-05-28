@@ -15,13 +15,52 @@ This module is the SINGLE SOURCE OF TRUTH for:
 - Implied volatility calculation
 - Discount factors and moneyness utilities
 
-Author: Thomas
-Created: 2025
+Author: Thomas Vaudescal
+Created: 2026
 """
 
-from backend.utils.math import (
-    # Constants
+# Core constants re-exported here for convenience.
+# For scaling factors (VEGA_SCALE, etc.), classification tuples (FIRST_ORDER_GREEKS, etc.),
+# and calibration bounds, import from backend.utils.constants directly.
+from backend.utils.constants import (
+    # Time
+    CALENDAR_DAYS_PER_YEAR,
     DAYS_PER_YEAR,
+    TRADING_DAYS_PER_YEAR,
+    # Numerical
+    DEFAULT_TOLERANCE,
+    GARCH_CALIBRATION_VARIANCE_FLOOR,
+    GARCH_VARIANCE_FLOOR,
+    LOG_2PI,
+    MIN_MATURITY,
+    SMOOTHING_EPS,
+    VAR_FLOOR,
+    # Greeks
+    GREEK_CHARM,
+    GREEK_COLOR,
+    GREEK_DELTA,
+    GREEK_GAMMA,
+    GREEK_PRICE,
+    GREEK_RHO,
+    GREEK_SPEED,
+    GREEK_THETA,
+    GREEK_ULTIMA,
+    GREEK_VANNA,
+    GREEK_VEGA,
+    GREEK_VETA,
+    GREEK_VOLGA,
+    GREEK_ZOMMA,
+    NUM_GREEKS,
+    VALID_GREEKS,
+    # Monte Carlo
+    DEFAULT_MC_PATHS,
+    DEFAULT_MC_STEPS_PER_YEAR,
+    DEFAULT_RATE_BUMP,
+    DEFAULT_SPOT_BUMP,
+    DEFAULT_TIME_BUMP_DAYS,
+    DEFAULT_VOL_BUMP,
+)
+from backend.utils.math import (
     SQRT_2,
     SQRT_2PI,
     # First-order Greeks
@@ -55,6 +94,10 @@ from backend.utils.math import (
     norm_pdf,
     norm_pdf_vec,
 )
+from backend.utils.logging import (
+    configure_root,
+    get_logger,
+)
 from backend.utils.validation import (
     ArbitrageViolationError,
     FellerConditionError,
@@ -62,6 +105,9 @@ from backend.utils.validation import (
     # Exceptions
     ValidationError,
     check_put_call_parity,
+    # Feller helpers
+    feller_ratio,
+    feller_satisfied,
     validate_correlation,
     validate_finite,
     # Model validation
@@ -81,8 +127,43 @@ from backend.utils.validation import (
 )
 
 __all__ = [
-    # Constants
+    # Time constants
+    "CALENDAR_DAYS_PER_YEAR",
     "DAYS_PER_YEAR",
+    "TRADING_DAYS_PER_YEAR",
+    # Numerical constants
+    "VAR_FLOOR",
+    "GARCH_VARIANCE_FLOOR",
+    "GARCH_CALIBRATION_VARIANCE_FLOOR",
+    "SMOOTHING_EPS",
+    "MIN_MATURITY",
+    "DEFAULT_TOLERANCE",
+    "LOG_2PI",
+    # Greek constants
+    "GREEK_PRICE",
+    "GREEK_DELTA",
+    "GREEK_GAMMA",
+    "GREEK_VEGA",
+    "GREEK_THETA",
+    "GREEK_RHO",
+    "GREEK_VANNA",
+    "GREEK_VOLGA",
+    "GREEK_CHARM",
+    "GREEK_VETA",
+    "GREEK_SPEED",
+    "GREEK_ZOMMA",
+    "GREEK_COLOR",
+    "GREEK_ULTIMA",
+    "NUM_GREEKS",
+    "VALID_GREEKS",
+    # Monte Carlo constants
+    "DEFAULT_MC_PATHS",
+    "DEFAULT_MC_STEPS_PER_YEAR",
+    "DEFAULT_SPOT_BUMP",
+    "DEFAULT_VOL_BUMP",
+    "DEFAULT_RATE_BUMP",
+    "DEFAULT_TIME_BUMP_DAYS",
+    # Math constants
     "SQRT_2PI",
     "SQRT_2",
     # Normal distribution
@@ -134,4 +215,10 @@ __all__ = [
     "validate_correlation",
     "validate_no_arbitrage",
     "check_put_call_parity",
+    # Feller helpers
+    "feller_ratio",
+    "feller_satisfied",
+    # Logging
+    "get_logger",
+    "configure_root",
 ]

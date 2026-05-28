@@ -14,7 +14,6 @@ Engines are the "How" - numerical methods that bridge:
 Available Engines
 -----------------
 - BSAnalyticEngine: Black-Scholes analytical pricing (GBM only)
-- ExoticAnalyticEngine: Closed-form exotic pricing (barrier, Asian geometric, digital, lookback) under GBM
 - FFTEngine: Carr-Madan FFT pricing (any model with characteristic function)
 - MonteCarloEngine: Monte Carlo simulation (any model with SDE)
 
@@ -36,7 +35,7 @@ Usage
 
     # FFT pricing (any model with characteristic function)
     fft_engine = FFTEngine()
-    heston = HestonModel(v0=0.04, kappa=2.0, theta=0.04, xi=0.3, rho=-0.7)
+    heston = HestonModel(v0=0.04, kappa=2.0, theta=0.04, alpha=0.3, rho=-0.7)
     result = fft_engine.price(option, heston, market)
 
     # Monte Carlo pricing (any model with SDE)
@@ -45,21 +44,20 @@ Usage
 
 Compatibility Matrix
 --------------------
-                        | Analytical | Exotic Analytical | FFT | Monte Carlo |
-    --------------------|------------|-------------------|-----|-------------|
-    GBMModel            |     ✓      |        ✓          |  ✓  |      ✓      |
-    HestonModel         |     ✗      |        ✗          |  ✓  |      ✓      |
-    BatesModel          |     ✗      |        ✗          |  ✓  |      ✓      |
-    MertonModel         |     ✗      |        ✗          |  ✓  |      ✓      |
+                        | Analytical | FFT | Monte Carlo |
+    --------------------|------------|-----|-------------|
+    GBMModel            |     ✓      |  ✓  |      ✓      |
+    HestonModel         |     ✗      |  ✓  |      ✓      |
+    BatesModel          |     ✗      |  ✓  |      ✓      |
+    MertonModel         |     ✗      |  ✓  |      ✓      |
 
-Author: Thomas
-Created: 2025
+Author: Thomas Vaudescal
+Created: 2026
 Version: 2.0.0
 """
 
 # Engine classes - import from renamed module files
 from backend.engines.analytic_engine import BSAnalyticEngine
-from backend.engines.exotic_engine import ExoticAnalyticEngine
 from backend.engines.fft_engine import FFTEngine
 
 # Configuration classes from underlying engines
@@ -67,13 +65,12 @@ from backend.engines.fourier.carr_madan import FFTConfig
 from backend.engines.mc_engine import MonteCarloEngine
 from backend.engines.monte_carlo.mc_base import MCConfig, MCResult
 
-# Vectorized Numba functions for high-performance array computations
-from backend.engines.vectorized_bs import (
+# Greek indices (centralized in backend.utils.constants.greeks)
+from backend.utils.constants.greeks import (
     GREEK_CHARM,
     GREEK_COLOR,
     GREEK_DELTA,
     GREEK_GAMMA,
-    # Greek indices
     GREEK_PRICE,
     GREEK_RHO,
     GREEK_SPEED,
@@ -84,6 +81,10 @@ from backend.engines.vectorized_bs import (
     GREEK_VETA,
     GREEK_VOLGA,
     GREEK_ZOMMA,
+)
+
+# Vectorized Numba functions for high-performance array computations
+from backend.engines.vectorized_bs import (
     calculate_all_greeks,
     calculate_first_order_greeks,
     calculate_greeks_vectorized,
@@ -96,7 +97,6 @@ from backend.engines.vectorized_bs import (
 __all__ = [
     # Analytic engines
     "BSAnalyticEngine",
-    "ExoticAnalyticEngine",
     # Fourier engines
     "FFTEngine",
     # Monte Carlo engines

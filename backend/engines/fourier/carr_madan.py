@@ -12,15 +12,23 @@ References:
     Carr, P. and Madan, D.B. (1999). "Option valuation using the fast Fourier
     transform." Journal of Computational Finance, 2(4), 61-73.
 
-Author: Thomas
-Created: 2025
+Author: Thomas Vaudescal
+Created: 2026
 """
+
+from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
 
 import numpy as np
 from numba import njit
+
+from backend.utils.constants import (
+    FFT_DEFAULT_ALPHA,
+    FFT_DEFAULT_ETA,
+    FFT_DEFAULT_N,
+)
 
 
 @dataclass(frozen=True)
@@ -41,11 +49,12 @@ class FFTConfig:
         Integration step size (default 0.25). Controls the grid spacing.
         Smaller values give finer grids but may cause numerical issues.
     """
-    alpha: float = 1.5
-    n_fft: int = 4096
-    eta: float = 0.25
 
-    def __post_init__(self):
+    alpha: float = FFT_DEFAULT_ALPHA
+    n_fft: int = FFT_DEFAULT_N
+    eta: float = FFT_DEFAULT_ETA
+
+    def __post_init__(self) -> None:
         if self.alpha <= 0:
             raise ValueError(f"Alpha must be positive, got {self.alpha}")
         if self.n_fft <= 0 or (self.n_fft & (self.n_fft - 1)) != 0:
@@ -100,13 +109,17 @@ class CarrMadanFFTEngine:
     prices = engine.price_strikes(my_cf, s0=100, strikes=np.array([90,100,110]), t=0.25, r=0.05)
     """
 
-    def __init__(self, config: FFTConfig = None):
-        self._config = config or FFTConfig()
+    def __init__(self, config: FFTConfig | None = None) -> None:
+        self._config: FFTConfig = config or FFTConfig()
 
         # Pre-compute fixed arrays for efficiency
-        self._v_grid = np.arange(self._config.n_fft) * self._config.eta
-        self._simpson = _simpson_weights(self._config.n_fft, self._config.eta)
-        self._lambda_spacing = 2 * np.pi / (self._config.n_fft * self._config.eta)
+        self._v_grid: np.ndarray = np.arange(self._config.n_fft) * self._config.eta
+        self._simpson: np.ndarray = _simpson_weights(
+            self._config.n_fft, self._config.eta
+        )
+        self._lambda_spacing: float = (
+            2 * np.pi / (self._config.n_fft * self._config.eta)
+        )
 
     @property
     def config(self) -> FFTConfig:
@@ -114,11 +127,7 @@ class CarrMadanFFTEngine:
         return self._config
 
     def _compute_integrand(
-        self,
-        characteristic_fn: CharacteristicFunction,
-        s0: float,
-        t: float,
-        r: float
+        self, characteristic_fn: CharacteristicFunction, s0: float, t: float, r: float
     ) -> np.ndarray:
         """
         Compute the Carr-Madan integrand.
@@ -152,11 +161,7 @@ class CarrMadanFFTEngine:
         cf_values = characteristic_fn(u)
 
         # Carr-Madan denominator
-        denominator = (
-            alpha ** 2 + alpha
-            - v ** 2
-            + 1j * (2 * alpha + 1) * v
-        )
+        denominator = alpha**2 + alpha - v**2 + 1j * (2 * alpha + 1) * v
 
         # Integrand
         integrand = np.exp(-r * t) * cf_values / denominator
@@ -164,9 +169,7 @@ class CarrMadanFFTEngine:
         return integrand
 
     def _fft_transform(
-        self,
-        integrand: np.ndarray,
-        log_s0: float
+        self, integrand: np.ndarray, log_s0: float
     ) -> tuple[np.ndarray, np.ndarray]:
         """
         Apply FFT and return damped call prices and log-strike grid.
@@ -199,7 +202,7 @@ class CarrMadanFFTEngine:
         damped_prices: np.ndarray,
         log_strikes_grid: np.ndarray,
         log_k: float,
-        log_s0: float
+        log_s0: float,
     ) -> float:
         """Interpolate to get price at specific log-strike."""
         # Find index in grid
@@ -222,7 +225,7 @@ class CarrMadanFFTEngine:
         k: float,
         t: float,
         r: float,
-        q: float = 0.0
+        q: float = 0.0,
     ) -> float:
         """
         Price a single European call option.
@@ -266,7 +269,7 @@ class CarrMadanFFTEngine:
         k: float,
         t: float,
         r: float,
-        q: float = 0.0
+        q: float = 0.0,
     ) -> float:
         """
         Price a single European put option using put-call parity.
@@ -304,7 +307,7 @@ class CarrMadanFFTEngine:
         t: float,
         r: float,
         is_call: bool = True,
-        q: float = 0.0
+        q: float = 0.0,
     ) -> np.ndarray:
         """
         Price multiple strikes efficiently with a single FFT.
@@ -352,7 +355,9 @@ class CarrMadanFFTEngine:
                 prices[i] = call_price
             else:
                 # Put-call parity: P = C - S*e^(-qT) + K*e^(-rT)
-                prices[i] = max(call_price - s0 * np.exp(-q * t) + k * np.exp(-r * t), 0.0)
+                prices[i] = max(
+                    call_price - s0 * np.exp(-q * t) + k * np.exp(-r * t), 0.0
+                )
 
         return prices
 
@@ -364,7 +369,7 @@ class CarrMadanFFTEngine:
         maturities: np.ndarray,
         r: float,
         is_call: bool = True,
-        q: float = 0.0
+        q: float = 0.0,
     ) -> np.ndarray:
         """
         Price options across a strike-maturity surface.
@@ -410,6 +415,7 @@ class CarrMadanFFTEngine:
 # Convenience function for quick pricing
 # =============================================================================
 
+
 def fft_price(
     characteristic_fn: CharacteristicFunction,
     s0: float,
@@ -418,8 +424,8 @@ def fft_price(
     r: float,
     is_call: bool = True,
     q: float = 0.0,
-    alpha: float = 1.5,
-    n_fft: int = 4096
+    alpha: float = FFT_DEFAULT_ALPHA,
+    n_fft: int = FFT_DEFAULT_N,
 ) -> float:
     """
     Quick FFT pricing with default configuration.
@@ -471,11 +477,11 @@ if __name__ == "__main__":
 
     # Test parameters
     s0, k, t, r = 100.0, 100.0, 0.5, 0.05
-    v0, kappa, theta, xi, rho = 0.04, 2.0, 0.04, 0.3, -0.7
+    v0, kappa, theta, alpha, rho = 0.04, 2.0, 0.04, 0.3, -0.7
 
     # Create characteristic function for Heston model
     def heston_cf(u: np.ndarray) -> np.ndarray:
-        return heston_cf_vectorized(u, s0, v0, t, r, kappa, theta, xi, rho)
+        return heston_cf_vectorized(u, s0, v0, t, r, kappa, theta, alpha, rho)
 
     # Test FFT config
     print("\n--- FFT Configuration ---")

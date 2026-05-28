@@ -17,14 +17,16 @@ Usage:
     # List available models
     print(registry.list_models())
 
-Author: Thomas
-Created: 2025
+Author: Thomas Vaudescal
+Created: 2026
 """
-
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Any
+
+logger = logging.getLogger(__name__)
 
 from backend.core.interfaces import Model as BaseModel
 from backend.core.result_types import PricingCapability
@@ -33,7 +35,7 @@ if TYPE_CHECKING:
     from backend.simulation.base import BaseSimulator
 
 
-class ModelRegistry:
+class ModelFactory:
     """
     Central registry for all financial models.
 
@@ -47,9 +49,9 @@ class ModelRegistry:
         - Model discovery via list_models()
     """
 
-    _instance: "ModelRegistry" | None = None
+    _instance: "ModelFactory" | None = None
 
-    def __new__(cls):
+    def __new__(cls) -> ModelFactory:
         """Singleton pattern."""
         if cls._instance is None:
             cls._instance = super().__new__(cls)
@@ -58,10 +60,7 @@ class ModelRegistry:
         return cls._instance
 
     def register(
-        self,
-        key: str,
-        model_class: type[BaseModel],
-        aliases: list[str] | None = None
+        self, key: str, model_class: type[BaseModel], aliases: list[str] | None = None
     ) -> None:
         """
         Register a model class.
@@ -169,10 +168,7 @@ class ModelRegistry:
         return model.create_simulator(**simulator_opts)
 
     def create_pricer(
-        self,
-        key: str,
-        method: PricingCapability | None = None,
-        **params
+        self, key: str, method: PricingCapability | None = None, **params
     ) -> Any:
         """
         Create pricer directly from model key and params.
@@ -222,7 +218,8 @@ class ModelRegistry:
             # This is a bit hacky but works for now
             try:
                 result[key] = model_class.__name__
-            except Exception:
+            except AttributeError:
+                logger.warning("Model class at key '%s' has no __name__", key)
                 result[key] = key
         return result
 
@@ -244,7 +241,10 @@ class ModelRegistry:
 
 
 # Global singleton instance
-registry = ModelRegistry()
+registry = ModelFactory()
+
+# Backward-compat alias
+ModelRegistry = ModelFactory
 
 
 # =============================================================================

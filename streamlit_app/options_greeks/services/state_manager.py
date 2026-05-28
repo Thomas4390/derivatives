@@ -24,17 +24,23 @@ Position dict formats:
         }
 """
 
-
 import streamlit as st
 
 
 def init_session_state() -> None:
     """Initialize all session state variables with defaults."""
-    if 'positions' not in st.session_state:
+    if "positions" not in st.session_state:
         st.session_state.positions = []
 
-    if 'stock_position' not in st.session_state:
+    if "stock_position" not in st.session_state:
         st.session_state.stock_position = None
+
+    if "sp_mode" not in st.session_state:
+        st.session_state.sp_mode = False
+
+    for key in ("sp_config", "sp_result", "sp_greeks", "sp_product_type"):
+        if key not in st.session_state:
+            st.session_state[key] = None
 
 
 def get_positions() -> list[dict]:
@@ -44,7 +50,7 @@ def get_positions() -> list[dict]:
     Returns:
         List of option position dicts
     """
-    return st.session_state.get('positions', [])
+    return st.session_state.get("positions", [])
 
 
 def get_stock_position() -> dict | None:
@@ -54,7 +60,7 @@ def get_stock_position() -> dict | None:
     Returns:
         Stock position dict or None
     """
-    return st.session_state.get('stock_position', None)
+    return st.session_state.get("stock_position", None)
 
 
 def add_position(position: dict) -> None:
@@ -69,7 +75,7 @@ def add_position(position: dict) -> None:
             - quantity: int
             - premium_paid: float
     """
-    if 'positions' not in st.session_state:
+    if "positions" not in st.session_state:
         st.session_state.positions = []
     st.session_state.positions.append(position)
 
@@ -123,7 +129,9 @@ def has_positions() -> bool:
     Returns:
         True if there are any positions
     """
-    return bool(st.session_state.positions) or st.session_state.stock_position is not None
+    return (
+        bool(st.session_state.positions) or st.session_state.stock_position is not None
+    )
 
 
 def get_position_count() -> tuple[int, bool]:
@@ -133,12 +141,14 @@ def get_position_count() -> tuple[int, bool]:
     Returns:
         Tuple of (option_count, has_stock)
     """
-    option_count = len(st.session_state.get('positions', []))
-    has_stock = st.session_state.get('stock_position') is not None
+    option_count = len(st.session_state.get("positions", []))
+    has_stock = st.session_state.get("stock_position") is not None
     return option_count, has_stock
 
 
-def set_positions_from_strategy(positions: list[dict], stock_position: dict | None) -> None:
+def set_positions_from_strategy(
+    positions: list[dict], stock_position: dict | None
+) -> None:
     """
     Set positions from a predefined strategy.
 
@@ -154,6 +164,7 @@ def set_positions_from_strategy(positions: list[dict], stock_position: dict | No
 # Position Factory Functions
 # =============================================================================
 
+
 def create_option_position(
     option_type: str,
     position_type: str,
@@ -162,12 +173,16 @@ def create_option_position(
     premium_paid: float,
     dte_days: int | None = None,
     volatility: float | None = None,
-    instrument_class: str = 'vanilla',
+    instrument_class: str = "vanilla",
     barrier: float | None = None,
     is_up: bool | None = None,
     is_knock_in: bool | None = None,
     rebate: float = 0.0,
     payout: float = 1.0,
+    extra1: float = 0.0,
+    choice_time_pct: float = 0.5,
+    power_n: float = 2.0,
+    gap_trigger: float | None = None,
 ) -> dict:
     """
     Create an option position dict.
@@ -181,46 +196,57 @@ def create_option_position(
         dte_days: Days to expiration (optional)
         volatility: Implied volatility (optional)
         instrument_class: 'vanilla', 'barrier', 'asian', 'digital',
-                          'lookback_fixed', or 'lookback_floating'
+                          'lookback_floating', 'lookback_fixed',
+                          'chooser', 'asset_or_nothing', 'power', 'gap'
         barrier: Barrier level (for barrier options)
         is_up: True for up-barrier, False for down-barrier
         is_knock_in: True for knock-in, False for knock-out
         rebate: Rebate amount (for barrier options)
         payout: Fixed payout (for digital options)
+        extra1: Type-specific param (t_c for chooser, n for power, K2 for gap)
+        choice_time_pct: Choice time as fraction of maturity (chooser)
+        power_n: Power exponent (power options)
+        gap_trigger: Trigger strike K2 (gap options)
 
     Returns:
         Option position dict
     """
     position = {
-        'option_type': option_type,
-        'position_type': position_type,
-        'strike': strike,
-        'quantity': quantity,
-        'premium_paid': premium_paid
+        "option_type": option_type,
+        "position_type": position_type,
+        "strike": strike,
+        "quantity": quantity,
+        "premium_paid": premium_paid,
     }
     if dte_days is not None:
-        position['dte_days'] = dte_days
+        position["dte_days"] = dte_days
     if volatility is not None:
-        position['volatility'] = volatility
-    if instrument_class != 'vanilla':
-        position['instrument_class'] = instrument_class
+        position["volatility"] = volatility
+    if instrument_class != "vanilla":
+        position["instrument_class"] = instrument_class
         if barrier is not None:
-            position['barrier'] = barrier
+            position["barrier"] = barrier
         if is_up is not None:
-            position['is_up'] = is_up
+            position["is_up"] = is_up
         if is_knock_in is not None:
-            position['is_knock_in'] = is_knock_in
+            position["is_knock_in"] = is_knock_in
         if rebate != 0.0:
-            position['rebate'] = rebate
+            position["rebate"] = rebate
         if payout != 1.0:
-            position['payout'] = payout
+            position["payout"] = payout
+        if extra1 != 0.0:
+            position["extra1"] = extra1
+        if instrument_class == "chooser":
+            position["choice_time_pct"] = choice_time_pct
+        if instrument_class == "power":
+            position["power_n"] = power_n
+        if instrument_class == "gap" and gap_trigger is not None:
+            position["gap_trigger"] = gap_trigger
     return position
 
 
 def create_stock_position(
-    position_type: str,
-    quantity: int,
-    entry_price: float
+    position_type: str, quantity: int, entry_price: float
 ) -> dict:
     """
     Create a stock position dict.
@@ -234,7 +260,7 @@ def create_stock_position(
         Stock position dict
     """
     return {
-        'position_type': position_type,
-        'quantity': quantity,
-        'entry_price': entry_price
+        "position_type": position_type,
+        "quantity": quantity,
+        "entry_price": entry_price,
     }

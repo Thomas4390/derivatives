@@ -30,6 +30,7 @@ from backend.simulation.base import SimulationResult
 @dataclass
 class PricingComparison:
     """Results from pricing comparison."""
+
     # Monte Carlo
     mc_price: float
     mc_std_error: float
@@ -66,22 +67,22 @@ class PricingComparison:
 
 
 def _create_vanilla_option(
-    strike: float,
-    time_to_maturity: float,
-    is_call: bool = True
+    strike: float, time_to_maturity: float, is_call: bool = True
 ) -> VanillaOption:
     """Create a vanilla option instrument."""
     return VanillaOption(
         strike=strike,
         maturity=time_to_maturity,
         is_call=is_call,
-        exercise=ExerciseStyle.EUROPEAN
+        exercise=ExerciseStyle.EUROPEAN,
     )
 
 
-def _create_market(spot: float, rate: float) -> MarketEnvironment:
+def _create_market(
+    spot: float, rate: float, dividend_yield: float = 0.0
+) -> MarketEnvironment:
     """Create market environment."""
-    return MarketEnvironment(spot=spot, rate=rate)
+    return MarketEnvironment(spot=spot, rate=rate, dividend_yield=dividend_yield)
 
 
 def _create_model(model_key: str, params: dict[str, Any]):
@@ -96,16 +97,16 @@ def _create_model(model_key: str, params: dict[str, Any]):
             v0=params.get("v0", 0.04),
             kappa=params.get("kappa", 2.0),
             theta=params.get("theta", 0.04),
-            xi=params.get("xi", 0.3),
-            rho=params.get("rho", -0.7)
+            alpha=params.get("alpha", 0.3),
+            rho=params.get("rho", -0.7),
         )
 
     if model_lower == "merton":
         return MertonModel(
             sigma=params.get("sigma", 0.20),
-            lambda_j=params.get("lambda_j", 0.5),
-            mu_j=params.get("mu_j", -0.1),
-            sigma_j=params.get("sigma_j", 0.2)
+            lam=params.get("lam", 0.5),
+            alpha_j=params.get("alpha_j", -0.1),
+            sigma_j=params.get("sigma_j", 0.2),
         )
 
     if model_lower == "bates":
@@ -113,11 +114,11 @@ def _create_model(model_key: str, params: dict[str, Any]):
             v0=params.get("v0", 0.04),
             kappa=params.get("kappa", 2.0),
             theta=params.get("theta", 0.04),
-            xi=params.get("xi", 0.3),
+            alpha=params.get("alpha", 0.3),
             rho=params.get("rho", -0.7),
-            lambda_j=params.get("lambda_j", 0.5),
-            mu_j=params.get("mu_j", -0.1),
-            sigma_j=params.get("sigma_j", 0.2)
+            lam=params.get("lam", 0.5),
+            alpha_j=params.get("alpha_j", -0.1),
+            sigma_j=params.get("sigma_j", 0.2),
         )
 
     # Try custom model
@@ -125,10 +126,12 @@ def _create_model(model_key: str, params: dict[str, Any]):
         get_custom_model_class,
         is_custom_model,
     )
+
     if is_custom_model(model_key):
         cls = get_custom_model_class()
         if cls is not None:
             from services.simulation_service import _extract_model_params
+
             model_params = _extract_model_params(model_key, params)
             return cls(**model_params)
     return None
@@ -140,7 +143,7 @@ def price_from_terminals(
     time_to_maturity: float,
     risk_free_rate: float,
     is_call: bool = True,
-    confidence_level: float = 0.95
+    confidence_level: float = 0.95,
 ) -> dict[str, float]:
     """
     Price option from terminal prices using Monte Carlo.
@@ -174,6 +177,7 @@ def price_from_terminals(
 
     # Confidence interval
     from scipy import stats
+
     z = stats.norm.ppf((1 + confidence_level) / 2)
     ci_lower = price - z * std_error
     ci_upper = price + z * std_error
@@ -182,7 +186,7 @@ def price_from_terminals(
         "price": price,
         "std_error": std_error,
         "confidence_interval": (ci_lower, ci_upper),
-        "n_paths": n_paths
+        "n_paths": n_paths,
     }
 
 
@@ -193,7 +197,7 @@ def price_with_analytical(
     time_to_maturity: float,
     spot: float,
     risk_free_rate: float,
-    is_call: bool = True
+    is_call: bool = True,
 ) -> dict[str, float] | None:
     """
     Price option using analytical formula (Black-Scholes).
@@ -241,7 +245,7 @@ def price_with_fft(
     time_to_maturity: float,
     spot: float,
     risk_free_rate: float,
-    is_call: bool = True
+    is_call: bool = True,
 ) -> float | None:
     """
     Price option using FFT (Carr-Madan).
@@ -257,6 +261,7 @@ def price_with_fft(
 
         # Check if model supports FFT
         from backend.core.result_types import PricingCapability
+
         if PricingCapability.FFT not in model.supported_engines:
             return None
 
@@ -273,6 +278,7 @@ def price_with_fft(
 
     except Exception as e:
         import logging
+
         logging.warning(f"FFT pricing failed for model={model_key}: {e}", exc_info=True)
         return None
 
@@ -285,7 +291,7 @@ def compare_pricing(
     time_to_maturity: float,
     spot: float,
     risk_free_rate: float,
-    is_call: bool = True
+    is_call: bool = True,
 ) -> PricingComparison:
     """
     Compare pricing across all available methods for a model.
@@ -311,7 +317,7 @@ def compare_pricing(
         strike=strike,
         time_to_maturity=time_to_maturity,
         risk_free_rate=risk_free_rate,
-        is_call=is_call
+        is_call=is_call,
     )
 
     comparison = PricingComparison(
@@ -319,7 +325,7 @@ def compare_pricing(
         mc_std_error=mc_result["std_error"],
         mc_confidence_interval=mc_result["confidence_interval"],
         mc_n_paths=mc_result["n_paths"],
-        model=model_key
+        model=model_key,
     )
 
     # Analytical pricing (GBM only)
@@ -330,7 +336,7 @@ def compare_pricing(
         time_to_maturity=time_to_maturity,
         spot=spot,
         risk_free_rate=risk_free_rate,
-        is_call=is_call
+        is_call=is_call,
     )
 
     if analytical_result is not None:
@@ -340,7 +346,9 @@ def compare_pricing(
         comparison.analytical_gamma = analytical_result.get("gamma")
         comparison.analytical_vega = analytical_result.get("vega")
         comparison.analytical_theta = analytical_result.get("theta")
-        comparison.mc_vs_analytical_error = comparison.mc_price - comparison.analytical_price
+        comparison.mc_vs_analytical_error = (
+            comparison.mc_price - comparison.analytical_price
+        )
 
     # FFT pricing
     fft_price = price_with_fft(
@@ -350,7 +358,7 @@ def compare_pricing(
         time_to_maturity=time_to_maturity,
         spot=spot,
         risk_free_rate=risk_free_rate,
-        is_call=is_call
+        is_call=is_call,
     )
 
     if fft_price is not None:
@@ -371,7 +379,7 @@ def price_multiple_strikes(
     time_to_maturity: float,
     spot: float,
     risk_free_rate: float,
-    is_call: bool = True
+    is_call: bool = True,
 ) -> dict[str, np.ndarray]:
     """
     Price options at multiple strikes.
@@ -396,7 +404,7 @@ def price_multiple_strikes(
             strike=strike,
             time_to_maturity=time_to_maturity,
             risk_free_rate=risk_free_rate,
-            is_call=is_call
+            is_call=is_call,
         )
         mc_prices[i] = mc_result["price"]
         mc_errors[i] = mc_result["std_error"]
@@ -418,7 +426,7 @@ def price_multiple_strikes(
                 time_to_maturity=time_to_maturity,
                 spot=spot,
                 risk_free_rate=risk_free_rate,
-                is_call=is_call
+                is_call=is_call,
             )
             if ana_result:
                 analytical_prices[i] = ana_result["price"]
@@ -435,7 +443,11 @@ def price_multiple_strikes(
                 fft_prices = engine.price_strikes(option, model, market, strikes)
                 result["fft_prices"] = fft_prices
         except Exception:
-            pass
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "FFT multi-strike pricing failed for model=%s", model_key, exc_info=True
+            )
 
     return result
 
@@ -457,6 +469,7 @@ def get_available_pricing_methods(model_key: str) -> list[str]:
     )
 
     from backend.core.result_types import PricingCapability
+
     if is_custom_model(model_key):
         cls = get_custom_model_class()
         if cls is not None:
@@ -467,5 +480,3 @@ def get_available_pricing_methods(model_key: str) -> list[str]:
             methods.append("monte_carlo")
             return methods
     return ["monte_carlo"]
-
-

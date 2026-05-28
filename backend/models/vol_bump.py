@@ -10,10 +10,11 @@ Provides a unified interface for bumping volatility across all model types:
 - Heston/Bates: bump in vol space then convert to variance → v0_new = (sqrt(v0) + h)^2
 - GARCH family: bump sigma0 (initial volatility)
 
-Author: Thomas
-Created: 2025
+Author: Thomas Vaudescal
+Created: 2026
 """
 
+from __future__ import annotations
 
 import numpy as np
 
@@ -49,48 +50,48 @@ def create_vol_bumped_model(model: Model, vol_bump: float) -> Model | None:
     params = model.get_parameters()
 
     if isinstance(model, GBMModel):
-        new_sigma = max(params['sigma'] + vol_bump, 1e-8)
+        new_sigma = max(params["sigma"] + vol_bump, 1e-8)
         return GBMModel(sigma=new_sigma)
 
     if isinstance(model, MertonModel):
-        new_sigma = max(params['sigma'] + vol_bump, 1e-8)
+        new_sigma = max(params["sigma"] + vol_bump, 1e-8)
         return MertonModel(
             sigma=new_sigma,
-            lambda_j=params['lambda_j'],
-            mu_j=params['mu_j'],
-            sigma_j=params['sigma_j']
+            lam=params["lam"],
+            alpha_j=params["alpha_j"],
+            sigma_j=params["sigma_j"],
         )
 
     if isinstance(model, BatesModel):
         # Bump in vol space: new_vol = sqrt(v0) + h, then v0_new = new_vol^2
-        new_vol = max(np.sqrt(params['v0']) + vol_bump, 0.0)
-        new_v0 = max(new_vol ** 2, 1e-8)
+        new_vol = max(np.sqrt(params["v0"]) + vol_bump, 0.0)
+        new_v0 = max(new_vol**2, 1e-8)
         return BatesModel(
             v0=new_v0,
-            kappa=params['kappa'],
-            theta=params['theta'],
-            xi=params['xi'],
-            rho=params['rho'],
-            lambda_j=params['lambda_j'],
-            mu_j=params['mu_j'],
-            sigma_j=params['sigma_j']
+            kappa=params["kappa"],
+            theta=params["theta"],
+            alpha=params["alpha"],
+            rho=params["rho"],
+            lam=params["lam"],
+            alpha_j=params["alpha_j"],
+            sigma_j=params["sigma_j"],
         )
 
     if isinstance(model, HestonModel):
-        new_vol = max(np.sqrt(params['v0']) + vol_bump, 0.0)
-        new_v0 = max(new_vol ** 2, 1e-8)
+        new_vol = max(np.sqrt(params["v0"]) + vol_bump, 0.0)
+        new_v0 = max(new_vol**2, 1e-8)
         return HestonModel(
             v0=new_v0,
-            kappa=params['kappa'],
-            theta=params['theta'],
-            xi=params['xi'],
-            rho=params['rho']
+            kappa=params["kappa"],
+            theta=params["theta"],
+            alpha=params["alpha"],
+            rho=params["rho"],
         )
 
     if isinstance(model, (GARCHModel, NGARCHModel, GJRGARCHModel)):
-        new_sigma0 = max(params['sigma0'] + vol_bump, 1e-8)
+        new_sigma0 = max(params["sigma0"] + vol_bump, 1e-8)
         p = dict(params)
-        p['sigma0'] = new_sigma0
+        p["sigma0"] = new_sigma0
         return type(model)(**p)
 
     return None

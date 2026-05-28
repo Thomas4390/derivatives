@@ -5,9 +5,11 @@ Regression Kernels for American Option Pricing
 Numba-optimized kernels for Longstaff-Schwartz regression
 and continuation value estimation.
 
-Author: Thomas
-Created: 2025
+Author: Thomas Vaudescal
+Created: 2026
 """
+
+from __future__ import annotations
 
 import numpy as np
 from numba import njit, prange
@@ -15,6 +17,7 @@ from numba import njit, prange
 # =============================================================================
 # Basis Functions
 # =============================================================================
+
 
 @njit(fastmath=True, cache=True)
 def laguerre_basis(x: float, order: int) -> np.ndarray:
@@ -49,7 +52,9 @@ def laguerre_basis(x: float, order: int) -> np.ndarray:
 
     # Recurrence for higher orders: L_n = ((2n-1-x)*L_{n-1} - (n-1)*L_{n-2}) / n
     for n in range(3, order + 1):
-        result[n] = ((2.0 * n - 1.0 - x) * result[n-1] - (n - 1.0) * result[n-2]) / n
+        result[n] = (
+            (2.0 * n - 1.0 - x) * result[n - 1] - (n - 1.0) * result[n - 2]
+        ) / n
 
     return result
 
@@ -108,7 +113,7 @@ def chebyshev_basis(x: float, order: int) -> np.ndarray:
         result[1] = x
 
     for n in range(2, order + 1):
-        result[n] = 2.0 * x * result[n-1] - result[n-2]
+        result[n] = 2.0 * x * result[n - 1] - result[n - 2]
 
     return result
 
@@ -117,11 +122,9 @@ def chebyshev_basis(x: float, order: int) -> np.ndarray:
 # Vectorized Basis Construction
 # =============================================================================
 
+
 @njit(parallel=True, fastmath=True, cache=True)
-def build_laguerre_design_matrix(
-    spots: np.ndarray,
-    order: int
-) -> np.ndarray:
+def build_laguerre_design_matrix(spots: np.ndarray, order: int) -> np.ndarray:
     """
     Build design matrix with Laguerre basis for all spots.
 
@@ -149,10 +152,7 @@ def build_laguerre_design_matrix(
 
 
 @njit(parallel=True, fastmath=True, cache=True)
-def build_polynomial_design_matrix(
-    spots: np.ndarray,
-    order: int
-) -> np.ndarray:
+def build_polynomial_design_matrix(spots: np.ndarray, order: int) -> np.ndarray:
     """
     Build design matrix with polynomial basis for all spots.
 
@@ -182,6 +182,7 @@ def build_polynomial_design_matrix(
 # =============================================================================
 # Regression Solvers
 # =============================================================================
+
 
 @njit(fastmath=True, cache=True)
 def lstsq_regression(X: np.ndarray, y: np.ndarray) -> np.ndarray:
@@ -242,13 +243,14 @@ def predict(X: np.ndarray, beta: np.ndarray) -> np.ndarray:
 # Continuation Value Estimation (Longstaff-Schwartz Core)
 # =============================================================================
 
+
 @njit(fastmath=True, cache=True)
 def continuation_value(
     spots: np.ndarray,
     discounted_payoffs: np.ndarray,
     itm_mask: np.ndarray,
     order: int = 2,
-    use_laguerre: bool = True
+    use_laguerre: bool = True,
 ) -> np.ndarray:
     """
     Estimate continuation value via regression on in-the-money paths.
@@ -324,9 +326,7 @@ def continuation_value(
 
 @njit(fastmath=True, cache=True)
 def american_put_exercise_decision(
-    spots: np.ndarray,
-    strike: float,
-    continuation_values: np.ndarray
+    spots: np.ndarray, strike: float, continuation_values: np.ndarray
 ) -> np.ndarray:
     """
     Determine optimal exercise for American put.

@@ -26,6 +26,7 @@ from streamlit_app.simulation.config.model_registry import (
 # CATEGORIZATION HELPERS
 # ============================================================================
 
+
 def get_model_category(model_key: str) -> str:
     """Get human-readable category for a model."""
     model = get_model(model_key)
@@ -114,6 +115,7 @@ def group_models_by_category() -> dict[str, list[str]]:
 # PARAMETER HELPERS
 # ============================================================================
 
+
 def get_model_parameters(model_key: str) -> list[ParameterSpec]:
     """Get parameter specifications for a model."""
     model = get_model(model_key)
@@ -160,6 +162,7 @@ def format_parameter_value(param_spec: ParameterSpec, value: float) -> str:
 # EQUATION HELPERS
 # ============================================================================
 
+
 def get_model_equations(model_key: str) -> dict[str, str]:
     """Get LaTeX equations for a model."""
     model = get_model(model_key)
@@ -182,10 +185,7 @@ def get_model_equations(model_key: str) -> dict[str, str]:
     return equations
 
 
-def get_equation_with_values(
-    model_key: str,
-    params: dict[str, Any]
-) -> str:
+def get_equation_with_values(model_key: str, params: dict[str, Any]) -> str:
     """
     Get equation with parameter values substituted.
 
@@ -200,10 +200,10 @@ def get_equation_with_values(
     if model_lower == "heston":
         kappa = params.get("kappa", 2.0)
         theta = params.get("theta", 0.04)
-        xi = params.get("xi", 0.3)
+        alpha = params.get("alpha", 0.3)
         rho = params.get("rho", -0.7)
         return (
-            rf"dV = {kappa:.1f}({theta:.3f} - V) \, dt + {xi:.2f} \sqrt{{V}} \, dW_V"
+            rf"dV = {kappa:.1f}({theta:.3f} - V) \, dt + {alpha:.2f} \sqrt{{V}} \, dW_V"
             rf"\quad (\rho = {rho:.2f})"
         )
 
@@ -221,6 +221,7 @@ def get_equation_with_values(
 # CONDITION HELPERS
 # ============================================================================
 
+
 def check_feller_condition(params: dict[str, Any]) -> tuple[bool, float, float]:
     """
     Check Feller condition for Heston/Bates.
@@ -230,17 +231,16 @@ def check_feller_condition(params: dict[str, Any]) -> tuple[bool, float, float]:
     """
     kappa = params.get("kappa", 2.0)
     theta = params.get("theta", 0.04)
-    xi = params.get("xi", 0.3)
+    alpha = params.get("alpha", 0.3)
 
     lhs = 2 * kappa * theta
-    rhs = xi ** 2
+    rhs = alpha**2
 
     return (lhs > rhs, lhs, rhs)
 
 
 def check_garch_stationarity(
-    model_key: str,
-    params: dict[str, Any]
+    model_key: str, params: dict[str, Any]
 ) -> tuple[bool, float]:
     """
     Check stationarity condition for GARCH models.
@@ -256,8 +256,8 @@ def check_garch_stationarity(
     if model_lower == "garch":
         persistence = alpha + beta
     elif model_lower == "ngarch":
-        theta = params.get("theta_ngarch", params.get("theta", 0.5))
-        persistence = alpha * (1 + theta ** 2) + beta
+        gamma = params.get("gamma_ngarch", params.get("gamma", 0.5))
+        persistence = alpha * (1 + gamma**2) + beta
     elif model_lower == "gjr_garch":
         gamma = params.get("gamma", 0.03)
         persistence = alpha + beta + gamma / 2
@@ -267,7 +267,9 @@ def check_garch_stationarity(
     return (persistence < 1, persistence)
 
 
-def get_condition_display(model_key: str, params: dict[str, Any]) -> dict[str, Any] | None:
+def get_condition_display(
+    model_key: str, params: dict[str, Any]
+) -> dict[str, Any] | None:
     """
     Get condition check display info.
 
@@ -283,8 +285,9 @@ def get_condition_display(model_key: str, params: dict[str, Any]) -> dict[str, A
             "equation": model.feller_condition,
             "satisfied": satisfied,
             "message": f"2κθ = {lhs:.4f} {'>' if satisfied else '≤'} {rhs:.4f} = ξ²",
-            "help": "Ensures variance stays positive" if satisfied
-                   else "Variance may become negative. Consider using Full Truncation scheme.",
+            "help": "Ensures variance stays positive"
+            if satisfied
+            else "Variance may become negative. Consider using Full Truncation scheme.",
         }
 
     if model.stationarity_condition:
@@ -294,8 +297,9 @@ def get_condition_display(model_key: str, params: dict[str, Any]) -> dict[str, A
             "equation": model.stationarity_condition,
             "satisfied": satisfied,
             "message": f"Persistence = {persistence:.4f} {'<' if satisfied else '≥'} 1",
-            "help": "Volatility mean-reverts to long-run level" if satisfied
-                   else "Non-stationary: volatility may explode over time",
+            "help": "Volatility mean-reverts to long-run level"
+            if satisfied
+            else "Non-stationary: volatility may explode over time",
         }
 
     return None
@@ -304,6 +308,7 @@ def get_condition_display(model_key: str, params: dict[str, Any]) -> dict[str, A
 # ============================================================================
 # DISPLAY HELPERS
 # ============================================================================
+
 
 def get_model_icon(model_key: str) -> str:
     """Get emoji icon for model."""
@@ -335,6 +340,7 @@ def get_short_description(model_key: str) -> str:
     # Fallback for custom model
     try:
         import streamlit as st
+
         custom = st.session_state.get("custom_model")
         if custom and "spec" in custom:
             return custom["spec"].description
@@ -357,9 +363,9 @@ def format_price_display(price: float) -> str:
 # STATISTICS HELPERS
 # ============================================================================
 
+
 def compute_summary_statistics(
-    terminal_prices: np.ndarray,
-    initial_price: float
+    terminal_prices: np.ndarray, initial_price: float
 ) -> dict[str, float]:
     """Compute summary statistics for terminal distribution."""
     returns = np.log(terminal_prices / initial_price)
@@ -392,4 +398,4 @@ def compute_kurtosis(x: np.ndarray) -> float:
     mean = np.mean(x)
     std = np.std(x, ddof=1)
     m4 = np.mean((x - mean) ** 4)
-    return (m4 / (std ** 4)) - 3
+    return (m4 / (std**4)) - 3

@@ -17,11 +17,13 @@ Designed to work with the backend architecture:
 - Consistent with find_breakevens_from_portfolio pattern
 - Numba JIT compilation for performance-critical paths
 
-Author: Thomas
-Created: 2025
+Author: Thomas Vaudescal
+Created: 2026
 """
 
-from typing import TYPE_CHECKING, NamedTuple
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 import numpy as np
 from numba import njit
@@ -35,8 +37,10 @@ from backend.portfolio.positions import PortfolioPosition, StockPosition
 # RESULT TYPES
 # =============================================================================
 
+
 class RiskProfile(NamedTuple):
     """Risk profile for a portfolio."""
+
     has_unlimited_profit: bool
     has_unlimited_loss: bool
     max_profit: float | None
@@ -49,13 +53,14 @@ class RiskProfile(NamedTuple):
 # NUMBA-OPTIMIZED CORE FUNCTIONS
 # =============================================================================
 
+
 @njit(cache=True)
 def _check_unlimited_risk_numba(
     option_types: np.ndarray,
     position_types: np.ndarray,
     quantities: np.ndarray,
     has_stock: bool,
-    stock_is_long: bool
+    stock_is_long: bool,
 ) -> tuple[bool, bool]:
     """
     Numba-optimized unlimited risk detection.
@@ -102,9 +107,7 @@ def _check_unlimited_risk_numba(
 
 @njit(cache=True)
 def _determine_max_profit_numba(
-    unlimited_profit: bool,
-    max_profit_from_breakeven: float,
-    expiry_pnl: np.ndarray
+    unlimited_profit: bool, max_profit_from_breakeven: float, expiry_pnl: np.ndarray
 ) -> float:
     """Numba-optimized max profit determination."""
     if not unlimited_profit:
@@ -121,9 +124,7 @@ def _determine_max_profit_numba(
 
 @njit(cache=True)
 def _determine_max_loss_numba(
-    unlimited_loss: bool,
-    max_loss_from_breakeven: float,
-    expiry_pnl: np.ndarray
+    unlimited_loss: bool, max_loss_from_breakeven: float, expiry_pnl: np.ndarray
 ) -> float:
     """Numba-optimized max loss determination."""
     if not unlimited_loss:
@@ -142,12 +143,13 @@ def _determine_max_loss_numba(
 # ARRAY-BASED API (for direct Numba usage)
 # =============================================================================
 
+
 def check_unlimited_risk_arrays(
     option_types: np.ndarray,
     position_types: np.ndarray,
     quantities: np.ndarray,
     has_stock: bool = False,
-    stock_is_long: bool = True
+    stock_is_long: bool = True,
 ) -> tuple[bool, bool]:
     """
     Check unlimited risk using array inputs (Numba-optimized).
@@ -173,8 +175,9 @@ def check_unlimited_risk_arrays(
 # HIGH-LEVEL API (works with position classes)
 # =============================================================================
 
+
 def _positions_to_arrays(
-    positions: list[PortfolioPosition]
+    positions: list[PortfolioPosition],
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Convert position objects to numpy arrays for Numba functions.
@@ -196,8 +199,7 @@ def _positions_to_arrays(
 
 
 def check_unlimited_risk(
-    positions: list[PortfolioPosition],
-    stock: StockPosition | None = None
+    positions: list[PortfolioPosition], stock: StockPosition | None = None
 ) -> tuple[bool, bool]:
     """
     Check if portfolio has unlimited profit or loss potential.
@@ -225,7 +227,9 @@ def check_unlimited_risk(
     )
 
 
-def check_unlimited_risk_from_portfolio(portfolio: 'OptionsPortfolio') -> tuple[bool, bool]:
+def check_unlimited_risk_from_portfolio(
+    portfolio: "OptionsPortfolio",
+) -> tuple[bool, bool]:
     """
     Check if portfolio has unlimited profit or loss potential.
 
@@ -244,11 +248,12 @@ def check_unlimited_risk_from_portfolio(portfolio: 'OptionsPortfolio') -> tuple[
 # FULL RISK ANALYSIS
 # =============================================================================
 
+
 def analyze_portfolio_risk(
     positions: list[PortfolioPosition],
     stock: StockPosition | None,
-    breakeven_result,  # BreakevenResult or None
-    expiry_pnl: np.ndarray
+    breakeven_result: Any,
+    expiry_pnl: np.ndarray,
 ) -> RiskProfile:
     """
     Perform complete risk analysis on a portfolio.
@@ -273,7 +278,7 @@ def analyze_portfolio_risk(
             max_profit=None,
             max_loss=None,
             max_profit_spot=None,
-            max_loss_spot=None
+            max_loss_spot=None,
         )
 
     # Use Numba functions for max profit/loss determination
@@ -290,14 +295,12 @@ def analyze_portfolio_risk(
         max_profit=float(max_profit),
         max_loss=float(max_loss),
         max_profit_spot=breakeven_result.max_profit_spot,
-        max_loss_spot=breakeven_result.max_loss_spot
+        max_loss_spot=breakeven_result.max_loss_spot,
     )
 
 
 def analyze_portfolio_risk_from_portfolio(
-    portfolio: 'OptionsPortfolio',
-    breakeven_result,
-    expiry_pnl: np.ndarray
+    portfolio: "OptionsPortfolio", breakeven_result: Any, expiry_pnl: np.ndarray
 ) -> RiskProfile:
     """
     Perform complete risk analysis on an OptionsPortfolio.
@@ -321,7 +324,8 @@ def analyze_portfolio_risk_from_portfolio(
 # HUMAN-READABLE SUMMARY
 # =============================================================================
 
-def get_risk_summary(risk_profile: RiskProfile) -> dict:
+
+def get_risk_summary(risk_profile: RiskProfile) -> dict[str, Any]:
     """
     Get a human-readable risk summary.
 
@@ -332,26 +336,26 @@ def get_risk_summary(risk_profile: RiskProfile) -> dict:
         Dictionary with risk summary information
     """
     summary = {
-        'risk_level': 'Unknown',
-        'profit_potential': 'Unknown',
-        'loss_potential': 'Unknown',
-        'warnings': []
+        "risk_level": "Unknown",
+        "profit_potential": "Unknown",
+        "loss_potential": "Unknown",
+        "warnings": [],
     }
 
     # Profit potential
     if risk_profile.has_unlimited_profit:
-        summary['profit_potential'] = 'Unlimited'
+        summary["profit_potential"] = "Unlimited"
     elif risk_profile.max_profit is not None:
-        summary['profit_potential'] = f'${risk_profile.max_profit:.2f}'
+        summary["profit_potential"] = f"${risk_profile.max_profit:.2f}"
 
     # Loss potential
     if risk_profile.has_unlimited_loss:
-        summary['loss_potential'] = 'Unlimited'
-        summary['warnings'].append('Position has unlimited loss potential')
-        summary['risk_level'] = 'High'
+        summary["loss_potential"] = "Unlimited"
+        summary["warnings"].append("Position has unlimited loss potential")
+        summary["risk_level"] = "High"
     elif risk_profile.max_loss is not None:
-        summary['loss_potential'] = f'${abs(risk_profile.max_loss):.2f}'
-        summary['risk_level'] = 'Defined'
+        summary["loss_potential"] = f"${abs(risk_profile.max_loss):.2f}"
+        summary["risk_level"] = "Defined"
 
     return summary
 
@@ -414,7 +418,7 @@ if __name__ == "__main__":
     print("\n--- Test 5: Bull Call Spread ---")
     positions_spread = [
         long_call(strike=100, maturity=0.5),
-        short_call(strike=110, maturity=0.5)
+        short_call(strike=110, maturity=0.5),
     ]
     up, ul = check_unlimited_risk(positions_spread)
     assert up is False, f"Expected False, got {up}"
@@ -428,7 +432,7 @@ if __name__ == "__main__":
         long_put(strike=90, maturity=0.5),
         short_put(strike=95, maturity=0.5),
         short_call(strike=105, maturity=0.5),
-        long_call(strike=110, maturity=0.5)
+        long_call(strike=110, maturity=0.5),
     ]
     up, ul = check_unlimited_risk(positions_condor)
     assert up is False, f"Expected False, got {up}"
@@ -440,7 +444,7 @@ if __name__ == "__main__":
     print("\n--- Test 7: Long Straddle ---")
     positions_straddle = [
         long_call(strike=100, maturity=0.5),
-        long_put(strike=100, maturity=0.5)
+        long_put(strike=100, maturity=0.5),
     ]
     up, ul = check_unlimited_risk(positions_straddle)
     assert up is True, f"Expected True, got {up}"
@@ -452,7 +456,7 @@ if __name__ == "__main__":
     print("\n--- Test 8: Short Strangle ---")
     positions_strangle = [
         short_call(strike=110, maturity=0.5),
-        short_put(strike=90, maturity=0.5)
+        short_put(strike=90, maturity=0.5),
     ]
     up, ul = check_unlimited_risk(positions_strangle)
     assert up is False, f"Expected False, got {up}"

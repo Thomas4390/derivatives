@@ -10,9 +10,11 @@ Includes:
 - GBM exact solution
 - Heston variance process schemes (Euler, Truncation, Reflection, QE)
 
-Author: Thomas
-Created: 2025
+Author: Thomas Vaudescal
+Created: 2026
 """
+
+from __future__ import annotations
 
 import math
 
@@ -23,14 +25,9 @@ from numba import njit
 # Generic SDE Schemes
 # =============================================================================
 
+
 @njit(fastmath=True, cache=True)
-def euler_step(
-    x: float,
-    drift: float,
-    diffusion: float,
-    dt: float,
-    dw: float
-) -> float:
+def euler_step(x: float, drift: float, diffusion: float, dt: float, dw: float) -> float:
     """
     Euler-Maruyama scheme for SDE: dX = μdt + σdW.
 
@@ -62,7 +59,7 @@ def milstein_step(
     diffusion: float,
     diffusion_prime: float,
     dt: float,
-    dw: float
+    dw: float,
 ) -> float:
     """
     Milstein scheme for SDE: dX = μdt + σdW.
@@ -90,22 +87,16 @@ def milstein_step(
         Updated value
     """
     dw_sq = dw * dw - dt  # ∫dW² - dt for Ito correction
-    return (x + drift * dt + diffusion * dw +
-            0.5 * diffusion * diffusion_prime * dw_sq)
+    return x + drift * dt + diffusion * dw + 0.5 * diffusion * diffusion_prime * dw_sq
 
 
 # =============================================================================
 # GBM Kernels
 # =============================================================================
 
+
 @njit(fastmath=True, cache=True)
-def gbm_exact_step(
-    s: float,
-    mu: float,
-    sigma: float,
-    dt: float,
-    z: float
-) -> float:
+def gbm_exact_step(s: float, mu: float, sigma: float, dt: float, z: float) -> float:
     """
     Exact GBM solution step.
 
@@ -135,13 +126,7 @@ def gbm_exact_step(
 
 
 @njit(fastmath=True, cache=True)
-def gbm_euler_step(
-    s: float,
-    mu: float,
-    sigma: float,
-    dt: float,
-    dw: float
-) -> float:
+def gbm_euler_step(s: float, mu: float, sigma: float, dt: float, dw: float) -> float:
     """
     Euler scheme for GBM: dS = μSdt + σSdW.
 
@@ -170,14 +155,10 @@ def gbm_euler_step(
 # Heston Variance Process Kernels
 # =============================================================================
 
+
 @njit(fastmath=True, cache=True)
 def heston_euler_step(
-    v: float,
-    kappa: float,
-    theta: float,
-    xi: float,
-    dt: float,
-    dw_v: float
+    v: float, kappa: float, theta: float, alpha: float, dt: float, dw_v: float
 ) -> float:
     """
     Simple Euler scheme for Heston variance: dV = κ(θ-V)dt + ξ√VdW.
@@ -192,7 +173,7 @@ def heston_euler_step(
         Mean reversion speed
     theta : float
         Long-run variance
-    xi : float
+    alpha : float
         Volatility of volatility
     dt : float
         Time step
@@ -205,17 +186,12 @@ def heston_euler_step(
         Updated variance (may be negative!)
     """
     sqrt_v = math.sqrt(max(v, 0.0))
-    return v + kappa * (theta - v) * dt + xi * sqrt_v * dw_v
+    return v + kappa * (theta - v) * dt + alpha * sqrt_v * dw_v
 
 
 @njit(fastmath=True, cache=True)
 def heston_truncation_step(
-    v: float,
-    kappa: float,
-    theta: float,
-    xi: float,
-    dt: float,
-    dw_v: float
+    v: float, kappa: float, theta: float, alpha: float, dt: float, dw_v: float
 ) -> float:
     """
     Full truncation scheme for Heston variance.
@@ -230,7 +206,7 @@ def heston_truncation_step(
         Mean reversion speed
     theta : float
         Long-run variance
-    xi : float
+    alpha : float
         Volatility of volatility
     dt : float
         Time step
@@ -244,18 +220,13 @@ def heston_truncation_step(
     """
     v_plus = max(v, 0.0)
     sqrt_v = math.sqrt(v_plus)
-    v_next = v + kappa * (theta - v_plus) * dt + xi * sqrt_v * dw_v
+    v_next = v + kappa * (theta - v_plus) * dt + alpha * sqrt_v * dw_v
     return max(v_next, 0.0)
 
 
 @njit(fastmath=True, cache=True)
 def heston_reflection_step(
-    v: float,
-    kappa: float,
-    theta: float,
-    xi: float,
-    dt: float,
-    dw_v: float
+    v: float, kappa: float, theta: float, alpha: float, dt: float, dw_v: float
 ) -> float:
     """
     Reflection scheme for Heston variance.
@@ -270,7 +241,7 @@ def heston_reflection_step(
         Mean reversion speed
     theta : float
         Long-run variance
-    xi : float
+    alpha : float
         Volatility of volatility
     dt : float
         Time step
@@ -284,19 +255,13 @@ def heston_reflection_step(
     """
     v_abs = abs(v)
     sqrt_v = math.sqrt(v_abs)
-    v_next = v + kappa * (theta - v_abs) * dt + xi * sqrt_v * dw_v
+    v_next = v + kappa * (theta - v_abs) * dt + alpha * sqrt_v * dw_v
     return abs(v_next)
 
 
 @njit(fastmath=True, cache=True)
 def heston_qe_step(
-    v: float,
-    kappa: float,
-    theta: float,
-    xi: float,
-    dt: float,
-    u1: float,
-    u2: float
+    v: float, kappa: float, theta: float, alpha: float, dt: float, u1: float, u2: float
 ) -> float:
     """
     Quadratic Exponential (QE) scheme for Heston variance.
@@ -312,7 +277,7 @@ def heston_qe_step(
         Mean reversion speed
     theta : float
         Long-run variance
-    xi : float
+    alpha : float
         Volatility of volatility
     dt : float
         Time step
@@ -332,11 +297,14 @@ def heston_qe_step(
     exp_kappa_dt = math.exp(-kappa * dt)
     m = theta + (v_plus - theta) * exp_kappa_dt
 
-    s2 = (v_plus * xi * xi * exp_kappa_dt / kappa * (1.0 - exp_kappa_dt) +
-          theta * xi * xi / (2.0 * kappa) * (1.0 - exp_kappa_dt) ** 2)
+    s2 = (
+        v_plus * alpha * alpha * exp_kappa_dt / kappa * (1.0 - exp_kappa_dt)
+        + theta * alpha * alpha / (2.0 * kappa) * (1.0 - exp_kappa_dt) ** 2
+    )
 
     psi = s2 / (m * m) if m > 1e-10 else 1000.0
 
+    v_next: float
     if psi <= 1.5:
         # Moment-matched quadratic approximation
         b2 = 2.0 / psi - 1.0 + math.sqrt(2.0 / psi * (2.0 / psi - 1.0))
@@ -356,13 +324,7 @@ def heston_qe_step(
 
 
 @njit(fastmath=True, cache=True)
-def heston_spot_step(
-    s: float,
-    v: float,
-    mu: float,
-    dt: float,
-    dw_s: float
-) -> float:
+def heston_spot_step(s: float, v: float, mu: float, dt: float, dw_s: float) -> float:
     """
     Spot price step in Heston model: dS = μSdt + √VSdW.
 
@@ -394,18 +356,19 @@ def heston_spot_step(
 # Jump Process Kernels
 # =============================================================================
 
+
 @njit(fastmath=True, cache=True)
 def merton_jump_step(
     s: float,
     mu: float,
     sigma: float,
-    lambda_j: float,
-    mu_j: float,
+    lam: float,
+    alpha_j: float,
     sigma_j: float,
     dt: float,
     z_diff: float,
     n_jumps: int,
-    z_jumps: np.ndarray
+    z_jumps: np.ndarray,
 ) -> float:
     """
     Merton jump-diffusion step.
@@ -420,9 +383,9 @@ def merton_jump_step(
         Drift rate
     sigma : float
         Diffusion volatility
-    lambda_j : float
+    lam : float
         Jump intensity (jumps per year)
-    mu_j : float
+    alpha_j : float
         Mean jump size (log scale)
     sigma_j : float
         Jump size volatility
@@ -441,16 +404,16 @@ def merton_jump_step(
         Updated spot price
     """
     # Compensator
-    kappa = math.exp(mu_j + 0.5 * sigma_j * sigma_j) - 1.0
+    kappa = math.exp(alpha_j + 0.5 * sigma_j * sigma_j) - 1.0
 
     # Diffusion component
-    drift = (mu - lambda_j * kappa - 0.5 * sigma * sigma) * dt
+    drift = (mu - lam * kappa - 0.5 * sigma * sigma) * dt
     diffusion = sigma * math.sqrt(dt) * z_diff
 
     # Jump component
     jump_sum = 0.0
     for i in range(n_jumps):
-        jump_sum += mu_j + sigma_j * z_jumps[i]
+        jump_sum += alpha_j + sigma_j * z_jumps[i]
 
     log_return = drift + diffusion + jump_sum
     return s * math.exp(log_return)
@@ -468,20 +431,20 @@ if __name__ == "__main__":
     np.random.seed(42)
 
     # Test GBM exact
-    s0, mu, sigma, dt = 100.0, 0.05, 0.20, 1/252
+    s0, mu, sigma, dt = 100.0, 0.05, 0.20, 1 / 252
     z = np.random.standard_normal()
     s1 = gbm_exact_step(s0, mu, sigma, dt, z)
     print(f"\nGBM Exact: S0={s0:.2f} -> S1={s1:.4f}")
 
     # Test Heston truncation
-    v0, kappa, theta, xi = 0.04, 2.0, 0.04, 0.3
+    v0, kappa, theta, alpha = 0.04, 2.0, 0.04, 0.3
     dw_v = np.sqrt(dt) * np.random.standard_normal()
-    v1 = heston_truncation_step(v0, kappa, theta, xi, dt, dw_v)
+    v1 = heston_truncation_step(v0, kappa, theta, alpha, dt, dw_v)
     print(f"Heston Truncation: V0={v0:.4f} -> V1={v1:.6f}")
 
     # Test Heston QE
     u1, u2 = np.random.random(), np.random.standard_normal()
-    v1_qe = heston_qe_step(v0, kappa, theta, xi, dt, u1, u2)
+    v1_qe = heston_qe_step(v0, kappa, theta, alpha, dt, u1, u2)
     print(f"Heston QE: V0={v0:.4f} -> V1={v1_qe:.6f}")
 
     print("\n" + "=" * 50)

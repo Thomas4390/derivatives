@@ -36,17 +36,30 @@ Greeks are scaled to provide intuitive, market-standard values:
 
 To obtain raw (unscaled) values, use the `unscale_greeks()` function.
 
-Author: Thomas
-Created: 2025
+Author: Thomas Vaudescal
+Created: 2026
 """
+
+from __future__ import annotations
 
 from typing import NamedTuple
 
 import numpy as np
 
 # Import from single source of truth
+from backend.utils.constants.greeks import (
+    CHARM_SCALE,
+    COLOR_SCALE,
+    RHO_SCALE,
+    THETA_SCALE,
+    ULTIMA_SCALE,
+    VANNA_SCALE,
+    VEGA_SCALE,
+    VETA_SCALE,
+    VOLGA_SCALE,
+    ZOMMA_SCALE,
+)
 from backend.utils.math import (
-    DAYS_PER_YEAR,
     bs_delta as _bs_delta,
     bs_gamma as _bs_gamma,
     bs_greeks as _bs_greeks,
@@ -54,36 +67,15 @@ from backend.utils.math import (
     bs_third_order_greeks as _bs_third_order_greeks,
 )
 
-# =============================================================================
-# Constants
-# =============================================================================
-
-# -----------------------------------------------------------------------------
-# Scaling Factors
-# -----------------------------------------------------------------------------
-# These factors convert raw mathematical Greeks to market-standard values.
-# Raw value = scaled value * SCALE_FACTOR (or / UNSCALE_FACTOR)
-
-VEGA_SCALE = 100.0       # Vega is per 1% vol (0.01 in decimal)
-RHO_SCALE = 100.0        # Rho is per 1% rate (0.01 in decimal)
-THETA_SCALE = DAYS_PER_YEAR  # Theta is per calendar day
-
-VANNA_SCALE = 100.0      # Per 1% vol
-VOLGA_SCALE = 10000.0    # Per 1%² vol (100 * 100)
-CHARM_SCALE = DAYS_PER_YEAR  # Per calendar day
-VETA_SCALE = DAYS_PER_YEAR * 100.0  # Per day per 1% vol
-
-ZOMMA_SCALE = 100.0      # Per 1% vol
-COLOR_SCALE = DAYS_PER_YEAR  # Per calendar day
-ULTIMA_SCALE = 1000000.0  # Per 1%³ vol (100 * 100 * 100)
-
 
 # =============================================================================
 # Result Types
 # =============================================================================
 
+
 class FirstOrderGreeks(NamedTuple):
     """First-order Greeks."""
+
     delta: float
     gamma: float
     vega: float
@@ -93,6 +85,7 @@ class FirstOrderGreeks(NamedTuple):
 
 class SecondOrderGreeks(NamedTuple):
     """Second-order Greeks."""
+
     vanna: float
     volga: float  # Also known as vomma
     charm: float
@@ -101,6 +94,7 @@ class SecondOrderGreeks(NamedTuple):
 
 class ThirdOrderGreeks(NamedTuple):
     """Third-order Greeks."""
+
     speed: float
     zomma: float
     color: float
@@ -109,6 +103,7 @@ class ThirdOrderGreeks(NamedTuple):
 
 class AllGreeks(NamedTuple):
     """All 14 Greeks."""
+
     # Price
     price: float
     # First order
@@ -133,15 +128,10 @@ class AllGreeks(NamedTuple):
 # First-Order Greeks
 # =============================================================================
 
+
 def bs_greeks_first_order(
-    s: float,
-    k: float,
-    t: float,
-    r: float,
-    q: float,
-    sigma: float,
-    is_call: bool
-) -> tuple:
+    s: float, k: float, t: float, r: float, q: float, sigma: float, is_call: bool
+) -> tuple[float, float, float, float, float]:
     """
     Calculate first-order Black-Scholes Greeks.
 
@@ -168,13 +158,13 @@ def bs_greeks_first_order(
         (delta, gamma, vega, theta, rho)
     """
     # Use single source of truth from utils/math
-    price, delta, gamma, vega, theta, rho = _bs_greeks(
-        s, k, t, r, sigma, is_call, q
-    )
+    price, delta, gamma, vega, theta, rho = _bs_greeks(s, k, t, r, sigma, is_call, q)
     return delta, gamma, vega, theta, rho
 
 
-def bs_delta(s: float, k: float, t: float, r: float, q: float, sigma: float, is_call: bool) -> float:
+def bs_delta(
+    s: float, k: float, t: float, r: float, q: float, sigma: float, is_call: bool
+) -> float:
     """Calculate Black-Scholes delta."""
     return _bs_delta(s, k, t, r, sigma, is_call, q)
 
@@ -188,14 +178,10 @@ def bs_gamma(s: float, k: float, t: float, r: float, q: float, sigma: float) -> 
 # Second-Order Greeks
 # =============================================================================
 
+
 def bs_greeks_second_order(
-    s: float,
-    k: float,
-    t: float,
-    r: float,
-    q: float,
-    sigma: float
-) -> tuple:
+    s: float, k: float, t: float, r: float, q: float, sigma: float
+) -> tuple[float, float, float, float]:
     """
     Calculate second-order Black-Scholes Greeks.
 
@@ -226,14 +212,10 @@ def bs_greeks_second_order(
 # Third-Order Greeks
 # =============================================================================
 
+
 def bs_greeks_third_order(
-    s: float,
-    k: float,
-    t: float,
-    r: float,
-    q: float,
-    sigma: float
-) -> tuple:
+    s: float, k: float, t: float, r: float, q: float, sigma: float
+) -> tuple[float, float, float, float]:
     """
     Calculate third-order Black-Scholes Greeks.
 
@@ -264,15 +246,25 @@ def bs_greeks_third_order(
 # All Greeks Combined
 # =============================================================================
 
+
 def bs_all_greeks(
-    s: float,
-    k: float,
-    t: float,
-    r: float,
-    q: float,
-    sigma: float,
-    is_call: bool
-) -> tuple:
+    s: float, k: float, t: float, r: float, q: float, sigma: float, is_call: bool
+) -> tuple[
+    float,
+    float,
+    float,
+    float,
+    float,
+    float,
+    float,
+    float,
+    float,
+    float,
+    float,
+    float,
+    float,
+    float,
+]:
     """
     Calculate all 14 Black-Scholes Greeks plus price.
 
@@ -308,13 +300,28 @@ def bs_all_greeks(
     # Third order
     speed, zomma, color, ultima = _bs_third_order_greeks(s, k, t, r, sigma, q)
 
-    return (price, delta, gamma, vega, theta, rho, vanna, volga, charm, veta,
-            speed, zomma, color, ultima)
+    return (
+        price,
+        delta,
+        gamma,
+        vega,
+        theta,
+        rho,
+        vanna,
+        volga,
+        charm,
+        veta,
+        speed,
+        zomma,
+        color,
+        ultima,
+    )
 
 
 # =============================================================================
 # Vectorized Versions
 # =============================================================================
+
 
 def bs_greeks_surface(
     spots: np.ndarray,
@@ -323,8 +330,8 @@ def bs_greeks_surface(
     r: float,
     q: float,
     sigma: float,
-    is_call: bool
-) -> dict:
+    is_call: bool,
+) -> dict[str, np.ndarray]:
     """
     Calculate Greeks across a range of spot prices.
 
@@ -350,40 +357,40 @@ def bs_greeks_surface(
     dict
         Dictionary with arrays for each Greek
     """
-    n = len(spots)
-    result = {
-        'price': np.empty(n),
-        'delta': np.empty(n),
-        'gamma': np.empty(n),
-        'vega': np.empty(n),
-        'theta': np.empty(n),
-        'rho': np.empty(n),
-        'vanna': np.empty(n),
-        'volga': np.empty(n),
-        'charm': np.empty(n),
-        'veta': np.empty(n),
-        'speed': np.empty(n),
-        'zomma': np.empty(n),
-        'color': np.empty(n),
-        'ultima': np.empty(n),
+    n: int = len(spots)
+    result: dict[str, np.ndarray] = {
+        "price": np.empty(n),
+        "delta": np.empty(n),
+        "gamma": np.empty(n),
+        "vega": np.empty(n),
+        "theta": np.empty(n),
+        "rho": np.empty(n),
+        "vanna": np.empty(n),
+        "volga": np.empty(n),
+        "charm": np.empty(n),
+        "veta": np.empty(n),
+        "speed": np.empty(n),
+        "zomma": np.empty(n),
+        "color": np.empty(n),
+        "ultima": np.empty(n),
     }
 
     for i in range(n):
         greeks = bs_all_greeks(spots[i], k, t, r, q, sigma, is_call)
-        result['price'][i] = greeks[0]
-        result['delta'][i] = greeks[1]
-        result['gamma'][i] = greeks[2]
-        result['vega'][i] = greeks[3]
-        result['theta'][i] = greeks[4]
-        result['rho'][i] = greeks[5]
-        result['vanna'][i] = greeks[6]
-        result['volga'][i] = greeks[7]
-        result['charm'][i] = greeks[8]
-        result['veta'][i] = greeks[9]
-        result['speed'][i] = greeks[10]
-        result['zomma'][i] = greeks[11]
-        result['color'][i] = greeks[12]
-        result['ultima'][i] = greeks[13]
+        result["price"][i] = greeks[0]
+        result["delta"][i] = greeks[1]
+        result["gamma"][i] = greeks[2]
+        result["vega"][i] = greeks[3]
+        result["theta"][i] = greeks[4]
+        result["rho"][i] = greeks[5]
+        result["vanna"][i] = greeks[6]
+        result["volga"][i] = greeks[7]
+        result["charm"][i] = greeks[8]
+        result["veta"][i] = greeks[9]
+        result["speed"][i] = greeks[10]
+        result["zomma"][i] = greeks[11]
+        result["color"][i] = greeks[12]
+        result["ultima"][i] = greeks[13]
 
     return result
 
@@ -391,6 +398,7 @@ def bs_greeks_surface(
 # =============================================================================
 # Utility Functions
 # =============================================================================
+
 
 def unscale_greeks(greeks: AllGreeks) -> AllGreeks:
     """

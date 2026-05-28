@@ -40,7 +40,7 @@ def render_market_parameters(key_prefix: str = "market") -> dict[str, float]:
         value=st.session_state.get(f"{key_prefix}_spot", 100.0),
         step=1.0,
         key=f"{key_prefix}_spot_input",
-        help="Current asset price"
+        help="Current asset price",
     )
     st.session_state[f"{key_prefix}_spot"] = params["spot"]
 
@@ -56,7 +56,7 @@ def render_market_parameters(key_prefix: str = "market") -> dict[str, float]:
             step=0.005,
             format="%.3f",
             key=f"{key_prefix}_rate_input",
-            help="Annualized risk-free rate"
+            help="Annualized risk-free rate",
         )
         st.session_state[f"{key_prefix}_rate"] = params["risk_free_rate"]
 
@@ -69,7 +69,7 @@ def render_market_parameters(key_prefix: str = "market") -> dict[str, float]:
             step=0.01,
             format="%.2f",
             key=f"{key_prefix}_drift_input",
-            help="Annualized expected return"
+            help="Annualized expected return",
         )
         st.session_state[f"{key_prefix}_drift"] = params["drift"]
 
@@ -82,7 +82,7 @@ def render_market_parameters(key_prefix: str = "market") -> dict[str, float]:
         step=0.1,
         format="%.1f",
         key=f"{key_prefix}_time_input",
-        help="Simulation horizon in years"
+        help="Simulation horizon in years",
     )
     st.session_state[f"{key_prefix}_time"] = params["time_horizon"]
 
@@ -90,8 +90,7 @@ def render_market_parameters(key_prefix: str = "market") -> dict[str, float]:
 
 
 def render_model_parameters(
-    model_key: str,
-    key_prefix: str = "model"
+    model_key: str, key_prefix: str = "model"
 ) -> dict[str, float]:
     """
     Render model-specific parameters.
@@ -159,12 +158,12 @@ def _render_gbm_params(defaults: dict, key_prefix: str) -> dict[str, float]:
         step=0.01,
         format="%.2f",
         key=f"{key_prefix}_sigma_input",
-        help="Annualized volatility (0.20 = 20%)"
+        help="Annualized volatility (0.20 = 20%)",
     )
     st.session_state[f"{key_prefix}_sigma"] = params["sigma"]
 
     # Display as percentage
-    st.caption(f"σ = {params['sigma']*100:.1f}%")
+    st.caption(f"σ = {params['sigma'] * 100:.1f}%")
 
     return params
 
@@ -182,10 +181,10 @@ def _render_heston_params(defaults: dict, key_prefix: str) -> dict[str, float]:
         step=0.005,
         format="%.3f",
         key=f"{key_prefix}_v0_input",
-        help="Initial variance level"
+        help="Initial variance level",
     )
     st.session_state[f"{key_prefix}_v0"] = params["v0"]
-    st.caption(f"Initial vol = {params['v0']**0.5*100:.1f}%")
+    st.caption(f"Initial vol = {params['v0'] ** 0.5 * 100:.1f}%")
 
     col1, col2 = st.columns(2)
 
@@ -195,44 +194,48 @@ def _render_heston_params(defaults: dict, key_prefix: str) -> dict[str, float]:
             "Mean Reversion (κ)",
             min_value=0.1,
             max_value=10.0,
-            value=st.session_state.get(f"{key_prefix}_kappa", defaults.get("kappa", 2.0)),
+            value=st.session_state.get(
+                f"{key_prefix}_kappa", defaults.get("kappa", 2.0)
+            ),
             step=0.1,
             format="%.1f",
             key=f"{key_prefix}_kappa_input",
-            help="Speed of variance mean reversion"
+            help="Speed of variance mean reversion",
         )
         st.session_state[f"{key_prefix}_kappa"] = params["kappa"]
 
     with col2:
         # Long-run variance
         params["theta"] = st.slider(
-            "Long-Run Var (θ)",
+            "Long-Run Var (σ²)",
             min_value=0.001,
             max_value=0.50,
-            value=st.session_state.get(f"{key_prefix}_theta", defaults.get("theta", 0.04)),
+            value=st.session_state.get(
+                f"{key_prefix}_theta", defaults.get("theta", 0.04)
+            ),
             step=0.005,
             format="%.3f",
             key=f"{key_prefix}_theta_input",
-            help="Long-run variance level"
+            help="Long-run variance level",
         )
         st.session_state[f"{key_prefix}_theta"] = params["theta"]
-        st.caption(f"Long-run vol = {params['theta']**0.5*100:.1f}%")
+        st.caption(f"Long-run vol = {params['theta'] ** 0.5 * 100:.1f}%")
 
     col3, col4 = st.columns(2)
 
     with col3:
         # Vol of vol
-        params["xi"] = st.slider(
-            "Vol of Vol (ξ)",
+        params["alpha"] = st.slider(
+            "Vol of Vol (α)",
             min_value=0.01,
             max_value=1.0,
-            value=st.session_state.get(f"{key_prefix}_xi", defaults.get("xi", 0.3)),
+            value=st.session_state.get(f"{key_prefix}_xi", defaults.get("alpha", 0.3)),
             step=0.01,
             format="%.2f",
             key=f"{key_prefix}_xi_input",
-            help="Volatility of variance"
+            help="Volatility of variance",
         )
-        st.session_state[f"{key_prefix}_xi"] = params["xi"]
+        st.session_state[f"{key_prefix}_xi"] = params["alpha"]
 
     with col4:
         # Correlation
@@ -244,7 +247,7 @@ def _render_heston_params(defaults: dict, key_prefix: str) -> dict[str, float]:
             step=0.01,
             format="%.2f",
             key=f"{key_prefix}_rho_input",
-            help="Price-variance correlation"
+            help="Price-variance correlation",
         )
         st.session_state[f"{key_prefix}_rho"] = params["rho"]
 
@@ -264,7 +267,7 @@ def _render_merton_params(defaults: dict, key_prefix: str) -> dict[str, float]:
         step=0.01,
         format="%.2f",
         key=f"{key_prefix}_sigma_input",
-        help="Diffusion volatility"
+        help="Diffusion volatility",
     )
     st.session_state[f"{key_prefix}_sigma"] = params["sigma"]
 
@@ -273,40 +276,44 @@ def _render_merton_params(defaults: dict, key_prefix: str) -> dict[str, float]:
     col1, col2 = st.columns(2)
 
     with col1:
-        params["lambda_j"] = st.slider(
+        params["lam"] = st.slider(
             "Jump Intensity (λ)",
             min_value=0.0,
             max_value=5.0,
-            value=st.session_state.get(f"{key_prefix}_lambda", defaults.get("lambda_j", 0.5)),
+            value=st.session_state.get(
+                f"{key_prefix}_lambda", defaults.get("lam", 0.5)
+            ),
             step=0.1,
             format="%.1f",
             key=f"{key_prefix}_lambda_input",
-            help="Expected jumps per year"
+            help="Expected jumps per year",
         )
-        st.session_state[f"{key_prefix}_lambda"] = params["lambda_j"]
+        st.session_state[f"{key_prefix}_lambda"] = params["lam"]
 
     with col2:
-        params["mu_j"] = st.slider(
-            "Mean Jump (μⱼ)",
+        params["alpha_j"] = st.slider(
+            "Mean Jump (α_J)",
             min_value=-0.5,
             max_value=0.5,
-            value=st.session_state.get(f"{key_prefix}_muj", defaults.get("mu_j", -0.1)),
+            value=st.session_state.get(f"{key_prefix}_muj", defaults.get("alpha_j", -0.1)),
             step=0.01,
             format="%.2f",
             key=f"{key_prefix}_muj_input",
-            help="Mean of log-jump size"
+            help="Mean of log-jump size",
         )
-        st.session_state[f"{key_prefix}_muj"] = params["mu_j"]
+        st.session_state[f"{key_prefix}_muj"] = params["alpha_j"]
 
     params["sigma_j"] = st.slider(
-        "Jump Vol (σⱼ)",
+        "Jump Vol (σ_J)",
         min_value=0.01,
         max_value=0.5,
-        value=st.session_state.get(f"{key_prefix}_sigmaj", defaults.get("sigma_j", 0.2)),
+        value=st.session_state.get(
+            f"{key_prefix}_sigmaj", defaults.get("sigma_j", 0.2)
+        ),
         step=0.01,
         format="%.2f",
         key=f"{key_prefix}_sigmaj_input",
-        help="Volatility of log-jump size"
+        help="Volatility of log-jump size",
     )
     st.session_state[f"{key_prefix}_sigmaj"] = params["sigma_j"]
 
@@ -327,40 +334,44 @@ def _render_bates_params(defaults: dict, key_prefix: str) -> dict[str, float]:
     col1, col2 = st.columns(2)
 
     with col1:
-        params["lambda_j"] = st.slider(
+        params["lam"] = st.slider(
             "Jump Intensity (λ)",
             min_value=0.0,
             max_value=5.0,
-            value=st.session_state.get(f"{key_prefix}_lambda", defaults.get("lambda_j", 0.5)),
+            value=st.session_state.get(
+                f"{key_prefix}_lambda", defaults.get("lam", 0.5)
+            ),
             step=0.1,
             format="%.1f",
             key=f"{key_prefix}_lambda_input",
-            help="Expected jumps per year"
+            help="Expected jumps per year",
         )
-        st.session_state[f"{key_prefix}_lambda"] = params["lambda_j"]
+        st.session_state[f"{key_prefix}_lambda"] = params["lam"]
 
     with col2:
-        params["mu_j"] = st.slider(
-            "Mean Jump (μⱼ)",
+        params["alpha_j"] = st.slider(
+            "Mean Jump (α_J)",
             min_value=-0.5,
             max_value=0.5,
-            value=st.session_state.get(f"{key_prefix}_muj", defaults.get("mu_j", -0.1)),
+            value=st.session_state.get(f"{key_prefix}_muj", defaults.get("alpha_j", -0.1)),
             step=0.01,
             format="%.2f",
             key=f"{key_prefix}_muj_input",
-            help="Mean of log-jump size"
+            help="Mean of log-jump size",
         )
-        st.session_state[f"{key_prefix}_muj"] = params["mu_j"]
+        st.session_state[f"{key_prefix}_muj"] = params["alpha_j"]
 
     params["sigma_j"] = st.slider(
-        "Jump Vol (σⱼ)",
+        "Jump Vol (σ_J)",
         min_value=0.01,
         max_value=0.5,
-        value=st.session_state.get(f"{key_prefix}_sigmaj", defaults.get("sigma_j", 0.2)),
+        value=st.session_state.get(
+            f"{key_prefix}_sigmaj", defaults.get("sigma_j", 0.2)
+        ),
         step=0.01,
         format="%.2f",
         key=f"{key_prefix}_sigmaj_input",
-        help="Volatility of log-jump size"
+        help="Volatility of log-jump size",
     )
     st.session_state[f"{key_prefix}_sigmaj"] = params["sigma_j"]
 
@@ -382,14 +393,16 @@ def _render_garch_params(defaults: dict, key_prefix: str) -> dict[str, float]:
         "Initial Vol (σ₀)",
         min_value=0.01,
         max_value=2.0,
-        value=st.session_state.get(f"{key_prefix}_sigma0", defaults.get("sigma0", 0.20)),
+        value=st.session_state.get(
+            f"{key_prefix}_sigma0", defaults.get("sigma0", 0.20)
+        ),
         step=0.01,
         format="%.2f",
         key=f"{key_prefix}_sigma0_input",
-        help="Initial volatility level"
+        help="Initial volatility level",
     )
     st.session_state[f"{key_prefix}_sigma0"] = params["sigma0"]
-    st.caption(f"σ₀ = {params['sigma0']*100:.1f}%")
+    st.caption(f"σ₀ = {params['sigma0'] * 100:.1f}%")
 
     params["omega"] = st.number_input(
         "Constant (ω)",
@@ -399,7 +412,7 @@ def _render_garch_params(defaults: dict, key_prefix: str) -> dict[str, float]:
         step=0.0001,
         format="%.4f",
         key=f"{key_prefix}_omega_input",
-        help="Variance intercept — long-run vol ≈ √(ω / (1 − α − β))"
+        help="Variance intercept — long-run vol ≈ √(ω / (1 − α − β))",
     )
     st.session_state[f"{key_prefix}_omega"] = params["omega"]
 
@@ -410,11 +423,13 @@ def _render_garch_params(defaults: dict, key_prefix: str) -> dict[str, float]:
             "ARCH Coef (α)",
             min_value=0.0,
             max_value=0.50,
-            value=st.session_state.get(f"{key_prefix}_alpha", defaults.get("alpha", 0.06)),
+            value=st.session_state.get(
+                f"{key_prefix}_alpha", defaults.get("alpha", 0.06)
+            ),
             step=0.01,
             format="%.3f",
             key=f"{key_prefix}_alpha_input",
-            help="Reaction to past shocks — must satisfy α + β < 1"
+            help="Reaction to past shocks — must satisfy α + β < 1",
         )
         st.session_state[f"{key_prefix}_alpha"] = params["alpha"]
 
@@ -423,11 +438,13 @@ def _render_garch_params(defaults: dict, key_prefix: str) -> dict[str, float]:
             "GARCH Coef (β)",
             min_value=0.0,
             max_value=0.99,
-            value=st.session_state.get(f"{key_prefix}_beta", defaults.get("beta", 0.90)),
+            value=st.session_state.get(
+                f"{key_prefix}_beta", defaults.get("beta", 0.90)
+            ),
             step=0.01,
             format="%.2f",
             key=f"{key_prefix}_beta_input",
-            help="Volatility persistence — must satisfy α + β < 1"
+            help="Volatility persistence — must satisfy α + β < 1",
         )
         st.session_state[f"{key_prefix}_beta"] = params["beta"]
 
@@ -439,17 +456,19 @@ def _render_ngarch_params(defaults: dict, key_prefix: str) -> dict[str, float]:
     params = _render_garch_params(defaults, key_prefix)
 
     # Leverage parameter
-    params["theta_ngarch"] = st.slider(
-        "Leverage (θ)",
+    params["gamma_ngarch"] = st.slider(
+        "Leverage (γ)",
         min_value=0.0,
         max_value=2.0,
-        value=st.session_state.get(f"{key_prefix}_theta_ng", defaults.get("theta", 0.5)),
+        value=st.session_state.get(
+            f"{key_prefix}_theta_ng", defaults.get("theta", 0.5)
+        ),
         step=0.1,
         format="%.1f",
         key=f"{key_prefix}_theta_ng_input",
-        help="Leverage effect parameter"
+        help="Leverage effect parameter",
     )
-    st.session_state[f"{key_prefix}_theta_ng"] = params["theta_ngarch"]
+    st.session_state[f"{key_prefix}_theta_ng"] = params["gamma_ngarch"]
 
     return params
 
@@ -467,14 +486,16 @@ def _render_gjr_garch_params(defaults: dict, key_prefix: str) -> dict[str, float
         step=0.01,
         format="%.3f",
         key=f"{key_prefix}_gamma_input",
-        help="Extra vol reaction to negative shocks — persistence = α + γ/2 + β"
+        help="Extra vol reaction to negative shocks — persistence = α + γ/2 + β",
     )
     st.session_state[f"{key_prefix}_gamma"] = params["gamma"]
 
     return params
 
 
-def _render_dynamic_params(model_key: str, defaults: dict, key_prefix: str) -> dict[str, float]:
+def _render_dynamic_params(
+    model_key: str, defaults: dict, key_prefix: str
+) -> dict[str, float]:
     """Render parameters dynamically from ModelSpec (used for custom models)."""
     params = {}
     model = get_model(model_key)
@@ -484,7 +505,9 @@ def _render_dynamic_params(model_key: str, defaults: dict, key_prefix: str) -> d
             p.display_name,
             min_value=float(p.min_value),
             max_value=float(p.max_value),
-            value=st.session_state.get(f"{key_prefix}_{p.name}", float(defaults.get(p.name, p.default))),
+            value=st.session_state.get(
+                f"{key_prefix}_{p.name}", float(defaults.get(p.name, p.default))
+            ),
             step=float(p.step),
             format=p.format,
             key=f"{key_prefix}_{p.name}_input",
@@ -500,10 +523,10 @@ def _render_feller_warning(params: dict[str, float]):
     satisfied, lhs, rhs = check_feller_condition(params)
 
     if satisfied:
-        st.success(f"✓ Feller: 2κθ = {lhs:.4f} > {rhs:.4f} = ξ²")
+        st.success(f"✓ Feller: 2κσ² = {lhs:.4f} > {rhs:.4f} = α²")
     else:
         st.warning(
-            f"⚠️ Feller violated: 2κθ = {lhs:.4f} ≤ {rhs:.4f} = ξ²\n\n"
+            f"⚠️ Feller violated: 2κσ² = {lhs:.4f} ≤ {rhs:.4f} = α²\n\n"
             "Variance may become negative. Full Truncation scheme will be used."
         )
 
@@ -522,7 +545,7 @@ def _render_stationarity_warning(model_key: str, params: dict[str, float]):
     # Build persistence formula label
     model_lower = model_key.lower()
     if model_lower == "ngarch":
-        formula = "α(1+θ²)+β"
+        formula = "α(1+γ²)+β"
     elif model_lower == "gjr_garch":
         formula = "α+β+γ/2"
     else:
@@ -558,7 +581,7 @@ def render_simulation_settings(key_prefix: str = "sim") -> dict[str, Any]:
             value=st.session_state.get(f"{key_prefix}_paths", 10000),
             step=100,
             key=f"{key_prefix}_paths_input",
-            help="Number of Monte Carlo paths"
+            help="Number of Monte Carlo paths",
         )
         st.session_state[f"{key_prefix}_paths"] = settings["n_paths"]
 
@@ -570,7 +593,7 @@ def render_simulation_settings(key_prefix: str = "sim") -> dict[str, Any]:
             value=st.session_state.get(f"{key_prefix}_steps", 252),
             step=1,
             key=f"{key_prefix}_steps_input",
-            help="Steps per path (252 = daily)"
+            help="Steps per path (252 = daily)",
         )
         st.session_state[f"{key_prefix}_steps"] = settings["n_steps"]
 
@@ -581,7 +604,7 @@ def render_simulation_settings(key_prefix: str = "sim") -> dict[str, Any]:
         value=st.session_state.get(f"{key_prefix}_seed", 42),
         step=1,
         key=f"{key_prefix}_seed_input",
-        help="0 = random seed"
+        help="0 = random seed",
     )
     st.session_state[f"{key_prefix}_seed"] = settings["seed"]
 
@@ -601,13 +624,18 @@ def render_option_parameters(key_prefix: str = "option") -> dict[str, Any]:
 
     # Dynamic styling based on option type
     border_color = "#10b981" if is_call_display else "#ef4444"
-    bg_gradient = "linear-gradient(135deg, #f0fdf4 0%, #ecfdf5 100%)" if is_call_display else "linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%)"
+    bg_gradient = (
+        "linear-gradient(135deg, #f0fdf4 0%, #ecfdf5 100%)"
+        if is_call_display
+        else "linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%)"
+    )
     type_badge_bg = "#d1fae5" if is_call_display else "#fee2e2"
     type_badge_color = "#047857" if is_call_display else "#b91c1c"
     type_label = "CALL" if is_call_display else "PUT"
 
     # Styled header like options_greeks
-    st.markdown(f"""
+    st.markdown(
+        f"""
     <div style="background: {bg_gradient}; border: 1px solid {border_color}40; border-left: 4px solid {border_color}; border-radius: 8px; padding: 0.75rem; margin-bottom: 0.625rem;">
         <div style="display: flex; justify-content: space-between; align-items: center;">
             <div style="display: flex; align-items: center; gap: 0.5rem;">
@@ -617,7 +645,9 @@ def render_option_parameters(key_prefix: str = "option") -> dict[str, Any]:
             <span style="background: {type_badge_bg}; color: {type_badge_color}; font-size: 0.65rem; font-weight: 700; padding: 0.2rem 0.5rem; border-radius: 4px; text-transform: uppercase;">{type_label}</span>
         </div>
     </div>
-    """, unsafe_allow_html=True)
+    """,
+        unsafe_allow_html=True,
+    )
 
     params = {}
 
@@ -640,17 +670,14 @@ def render_option_parameters(key_prefix: str = "option") -> dict[str, Any]:
         step=1.0,
         format="%.2f",
         key=f"{key_prefix}_strike_input",
-        help="Option strike price"
+        help="Option strike price",
     )
     st.session_state[f"{key_prefix}_strike"] = params["strike"]
 
     return params
 
 
-def render_parameter_panel(
-    model_key: str,
-    key_prefix: str = "param"
-) -> dict[str, Any]:
+def render_parameter_panel(model_key: str, key_prefix: str = "param") -> dict[str, Any]:
     """
     Render complete parameter panel for a model.
 

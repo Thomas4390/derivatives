@@ -7,7 +7,6 @@ Provides:
 - Convergence visualization
 """
 
-
 import numpy as np
 import streamlit as st
 from services.pricing_service import (
@@ -16,10 +15,7 @@ from services.pricing_service import (
 )
 
 
-def render_pricing_comparison(
-    comparison: PricingComparison,
-    show_greeks: bool = True
-):
+def render_pricing_comparison(comparison: PricingComparison, show_greeks: bool = True):
     """
     Render pricing comparison results.
 
@@ -37,7 +33,10 @@ def render_pricing_comparison(
     _render_price_table(comparison)
 
     # Error analysis
-    if comparison.mc_vs_analytical_error is not None or comparison.mc_vs_fft_error is not None:
+    if (
+        comparison.mc_vs_analytical_error is not None
+        or comparison.mc_vs_fft_error is not None
+    ):
         _render_error_analysis(comparison)
 
     # Greeks (if available)
@@ -54,7 +53,7 @@ def _render_price_table(comparison: PricingComparison):
         st.metric(
             label="Monte Carlo",
             value=f"${comparison.mc_price:.2f}",
-            help=f"N = {comparison.mc_n_paths:,} paths"
+            help=f"N = {comparison.mc_n_paths:,} paths",
         )
         ci_low, ci_high = comparison.mc_confidence_interval
         st.caption(f"95% CI: [{ci_low:.2f}, {ci_high:.2f}]")
@@ -68,15 +67,17 @@ def _render_price_table(comparison: PricingComparison):
                 label="Black-Scholes",
                 value=f"${comparison.analytical_price:.2f}",
                 delta=f"{error:+.2f} (MC - BS)" if error else None,
-                delta_color="off"
+                delta_color="off",
             )
-            pct_error = abs(error / comparison.analytical_price) * 100 if comparison.analytical_price > 0 else 0
+            pct_error = (
+                abs(error / comparison.analytical_price) * 100
+                if comparison.analytical_price > 0
+                else 0
+            )
             st.caption(f"Error: {pct_error:.2f}%")
         else:
             st.metric(
-                label="Black-Scholes",
-                value="N/A",
-                help="Only available for GBM model"
+                label="Black-Scholes", value="N/A", help="Only available for GBM model"
             )
             st.caption("Not available for this model")
 
@@ -88,15 +89,19 @@ def _render_price_table(comparison: PricingComparison):
                 label="FFT (Carr-Madan)",
                 value=f"${comparison.fft_price:.2f}",
                 delta=f"{error:+.2f} (MC - FFT)" if error else None,
-                delta_color="off"
+                delta_color="off",
             )
-            pct_error = abs(error / comparison.fft_price) * 100 if comparison.fft_price > 0 else 0
+            pct_error = (
+                abs(error / comparison.fft_price) * 100
+                if comparison.fft_price > 0
+                else 0
+            )
             st.caption(f"Error: {pct_error:.2f}%")
         else:
             st.metric(
                 label="FFT",
                 value="N/A",
-                help="Only for models with characteristic function"
+                help="Only for models with characteristic function",
             )
             st.caption("Not available for GARCH models")
 
@@ -131,8 +136,8 @@ def _render_error_analysis(comparison: PricingComparison):
             | Band | Range |
             |------|-------|
             | 1σ | [{comparison.mc_price - se:.2f}, {comparison.mc_price + se:.2f}] |
-            | 2σ | [{comparison.mc_price - 2*se:.2f}, {comparison.mc_price + 2*se:.2f}] |
-            | 3σ | [{comparison.mc_price - 3*se:.2f}, {comparison.mc_price + 3*se:.2f}] |
+            | 2σ | [{comparison.mc_price - 2 * se:.2f}, {comparison.mc_price + 2 * se:.2f}] |
+            | 3σ | [{comparison.mc_price - 3 * se:.2f}, {comparison.mc_price + 3 * se:.2f}] |
             """)
 
             # Interpretation
@@ -179,25 +184,25 @@ def render_pricing_methods_info(model_key: str):
         "analytical": {
             "name": "Black-Scholes (Analytical)",
             "description": "Closed-form solution. Exact and fast.",
-            "icon": "🎯"
+            "icon": "🎯",
         },
         "fft": {
             "name": "FFT (Carr-Madan)",
             "description": "Uses characteristic function. Very accurate.",
-            "icon": "📊"
+            "icon": "📊",
         },
         "monte_carlo": {
             "name": "Monte Carlo",
             "description": "Simulation-based. Works for all models.",
-            "icon": "🎲"
-        }
+            "icon": "🎲",
+        },
     }
 
     for method in methods:
         info = method_info.get(method, {})
         if info:
             st.markdown(f"**{info['icon']} {info['name']}**")
-            st.caption(info['description'])
+            st.caption(info["description"])
 
 
 def render_convergence_guide():
@@ -232,7 +237,7 @@ def render_strike_comparison(
     mc_errors: np.ndarray,
     analytical_prices: np.ndarray | None = None,
     fft_prices: np.ndarray | None = None,
-    spot: float = 100.0
+    spot: float = 100.0,
 ):
     """
     Render comparison across multiple strikes.
@@ -269,16 +274,18 @@ def render_strike_comparison(
 
     # Format columns
     st.dataframe(
-        df.style.format({
-            "Strike": "${:.2f}",
-            "Moneyness": "{:.2f}",
-            "MC Price": "${:.2f}",
-            "MC Std Err": "{:.2f}",
-            "BS Price": "${:.2f}" if analytical_prices is not None else None,
-            "MC - BS": "{:+.2f}" if analytical_prices is not None else None,
-            "FFT Price": "${:.2f}" if fft_prices is not None else None,
-            "MC - FFT": "{:+.2f}" if fft_prices is not None else None,
-        }),
+        df.style.format(
+            {
+                "Strike": "${:.2f}",
+                "Moneyness": "{:.2f}",
+                "MC Price": "${:.2f}",
+                "MC Std Err": "{:.2f}",
+                "BS Price": "${:.2f}" if analytical_prices is not None else None,
+                "MC - BS": "{:+.2f}" if analytical_prices is not None else None,
+                "FFT Price": "${:.2f}" if fft_prices is not None else None,
+                "MC - FFT": "{:+.2f}" if fft_prices is not None else None,
+            }
+        ),
         width="stretch",
-        hide_index=True
+        hide_index=True,
     )

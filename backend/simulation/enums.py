@@ -5,9 +5,11 @@ Enumerations for Simulation Models
 This module defines enumerations for model types used throughout
 the simulation framework.
 
-Author: Thomas
-Created: 2025
+Author: Thomas Vaudescal
+Created: 2026
 """
+
+from __future__ import annotations
 
 from enum import Enum, auto
 
@@ -39,22 +41,22 @@ class ModelType(Enum):
     GJR_GARCH = "GJR-GARCH"
 
     @classmethod
-    def continuous_time_models(cls) -> list:
+    def continuous_time_models(cls) -> list[ModelType]:
         """Returns list of continuous-time models."""
         return [cls.GBM, cls.HESTON, cls.BATES, cls.MERTON]
 
     @classmethod
-    def discrete_time_models(cls) -> list:
+    def discrete_time_models(cls) -> list[ModelType]:
         """Returns list of discrete-time (GARCH) models."""
         return [cls.GARCH, cls.NGARCH, cls.GJR_GARCH]
 
     @classmethod
-    def stochastic_vol_models(cls) -> list:
+    def stochastic_vol_models(cls) -> list[ModelType]:
         """Returns list of models with stochastic volatility output."""
         return [cls.HESTON, cls.BATES, cls.GARCH, cls.NGARCH, cls.GJR_GARCH]
 
     @classmethod
-    def jump_models(cls) -> list:
+    def jump_models(cls) -> list[ModelType]:
         """Returns list of models with jump components."""
         return [cls.MERTON, cls.BATES]
 
@@ -67,10 +69,10 @@ class DiscretizationScheme(Enum):
     can become negative under naive Euler discretization.
     """
 
-    EULER = auto()           # Simple Euler (can have negative variance)
+    EULER = auto()  # Simple Euler (can have negative variance)
     FULL_TRUNCATION = auto()  # Variance floored at 0
-    REFLECTION = auto()       # Negative variance reflected
-    QE = auto()              # Quadratic Exponential (most accurate)
+    REFLECTION = auto()  # Negative variance reflected
+    QE = auto()  # Quadratic Exponential (most accurate)
 
     @classmethod
     def default(cls) -> "DiscretizationScheme":
@@ -78,16 +80,8 @@ class DiscretizationScheme(Enum):
         return cls.FULL_TRUNCATION
 
 
-class Measure(Enum):
-    """
-    Probability measure for simulation.
-
-    P-measure (physical/real-world) uses expected return mu as drift.
-    Q-measure (risk-neutral) uses risk-free rate r as drift.
-    """
-
-    P_MEASURE = "Physical (Real-World)"
-    Q_MEASURE = "Risk-Neutral"
+# Canonical Measure — re-exported from core for backward compatibility
+from backend.core.interfaces import Measure  # noqa: F401
 
 
 # =============================================================================

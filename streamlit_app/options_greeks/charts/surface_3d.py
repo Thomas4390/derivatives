@@ -19,8 +19,8 @@ def create_3d_surface_figure(
     Z: np.ndarray,
     greek_name: str,
     y_label: str,
-    colorscale: str = 'Viridis',
-    surface_type: str = 'DTE'
+    colorscale: str = "Viridis",
+    surface_type: str = "DTE",
 ) -> go.Figure:
     """
     Create a 3D surface figure for a Greek.
@@ -39,62 +39,61 @@ def create_3d_surface_figure(
     """
     greek_title = GREEK_TITLES.get(greek_name, greek_name.capitalize())
 
-    fig = go.Figure(data=[go.Surface(
-        x=X,
-        y=Y,
-        z=Z,
-        colorscale=colorscale,
-        showscale=True,
-        colorbar=dict(
-            title=dict(
-                text=greek_title,
-                font=dict(
-                    family='Inter, -apple-system, BlinkMacSystemFont, sans-serif',
-                    size=12,
-                    color='#475569'
-                )
-            ),
-            thickness=18,
-            len=0.7,
-            x=1.02,
-            tickfont=dict(
-                family='JetBrains Mono, monospace',
-                size=10,
-                color='#64748b'
-            ),
-            bgcolor='rgba(255,255,255,0.9)',
-            bordercolor='#e2e8f0',
-            borderwidth=1
-        ),
-        contours={
-            "z": {
-                "show": True,
-                "usecolormap": True,
-                "project": {"z": False}
-            }
-        },
-        hovertemplate=(
-            '<b>Underlying:</b> $%{x:,.2f}<br>' +
-            f'<b>{y_label}:</b> %{{y:.1f}}<br>' +
-            f'<b>{greek_title}:</b> %{{z:.4f}}<br>' +
-            '<extra></extra>'
-        )
-    )])
+    fig = go.Figure(
+        data=[
+            go.Surface(
+                x=X,
+                y=Y,
+                z=Z,
+                colorscale=colorscale,
+                showscale=True,
+                colorbar=dict(
+                    title=dict(
+                        text=greek_title,
+                        font=dict(
+                            family="Inter, -apple-system, BlinkMacSystemFont, sans-serif",
+                            size=12,
+                            color="#475569",
+                        ),
+                    ),
+                    thickness=18,
+                    len=0.7,
+                    x=1.02,
+                    tickfont=dict(
+                        family="JetBrains Mono, monospace", size=10, color="#64748b"
+                    ),
+                    bgcolor="rgba(255,255,255,0.9)",
+                    bordercolor="#e2e8f0",
+                    borderwidth=1,
+                ),
+                contours={
+                    "z": {"show": True, "usecolormap": True, "project": {"z": False}}
+                },
+                hovertemplate=(
+                    "<b>Underlying:</b> $%{x:,.2f}<br>"
+                    + f"<b>{y_label}:</b> %{{y:.1f}}<br>"
+                    + f"<b>{greek_title}:</b> %{{z:.4f}}<br>"
+                    + "<extra></extra>"
+                ),
+            )
+        ]
+    )
 
     # Custom scene based on theme - need deep copy to avoid modifying defaults
     import copy
+
     scene = copy.deepcopy(SCENE_DEFAULTS)
-    scene['xaxis']['title']['text'] = 'Underlying Price ($)'
-    scene['yaxis']['title']['text'] = y_label
-    scene['zaxis']['title']['text'] = greek_title
+    scene["xaxis"]["title"]["text"] = "Underlying Price ($)"
+    scene["yaxis"]["title"]["text"] = y_label
+    scene["zaxis"]["title"]["text"] = greek_title
 
     fig.update_layout(
-        font=LAYOUT_DEFAULTS['font'],
-        paper_bgcolor=LAYOUT_DEFAULTS['paper_bgcolor'],
+        font=LAYOUT_DEFAULTS["font"],
+        paper_bgcolor=LAYOUT_DEFAULTS["paper_bgcolor"],
         scene=scene,
         height=700,
         margin=dict(l=0, r=30, t=30, b=0),
-        hoverlabel=LAYOUT_DEFAULTS['hoverlabel']
+        hoverlabel=LAYOUT_DEFAULTS["hoverlabel"],
     )
 
     return fig
@@ -107,7 +106,7 @@ def calculate_3d_surface(
     surface_type: str,
     risk_free_rate: float,
     _calculate_greeks_3d_dte_func,
-    _calculate_greeks_3d_iv_func
+    _calculate_greeks_3d_iv_func,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, str]:
     """
     Calculate 3D surface data for a Greek (DTE or IV mode).
@@ -124,12 +123,21 @@ def calculate_3d_surface(
         Tuple of (X, Y, Z, y_label)
     """
     portfolio_data = json.loads(portfolio_json)
-    spot_base = portfolio_data.get('spot_price', 100.0)
+    spot_base = portfolio_data.get("spot_price", portfolio_data.get("spot", 100.0))
     spot_range = np.linspace(spot_base * 0.7, spot_base * 1.3, 100)
     greek_idx = GREEK_NAMES.index(greek_name)
 
     if surface_type == "DTE":
-        dte_range = np.linspace(1, 90, 100)
+        max_dte_days = 90
+        product_params_json = portfolio_data.get("product_params_json")
+        if product_params_json:
+            pp = (
+                json.loads(product_params_json)
+                if isinstance(product_params_json, str)
+                else product_params_json
+            )
+            max_dte_days = min(int(pp.get("maturity", 0.25) * 365), 90)
+        dte_range = np.linspace(1, max_dte_days, 100)
         # New signature: (portfolio_json, spot_range, dte_range, risk_free_rate, base_iv, greek_index)
         matrix_2d = _calculate_greeks_3d_dte_func(
             portfolio_json,
@@ -137,7 +145,7 @@ def calculate_3d_surface(
             dte_range,
             risk_free_rate,
             0.25,  # base_iv
-            greek_idx
+            greek_idx,
         )
         return spot_range, dte_range, matrix_2d.T, "DTE (days)"
     iv_range = np.linspace(0.05, 0.50, 100)
@@ -148,7 +156,7 @@ def calculate_3d_surface(
         iv_range,
         risk_free_rate,
         30.0,  # base_dte
-        greek_idx
+        greek_idx,
     )
     return spot_range, iv_range * 100, matrix_2d.T, "IV (%)"
 
@@ -163,7 +171,7 @@ def calculate_3d_surface_strike(
     dte: float,
     risk_free_rate: float,
     volatility: float,
-    _calculate_greeks_3d_strike_func
+    _calculate_greeks_3d_strike_func,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, str]:
     """
     Calculate 3D surface data for a Greek varying by Strike (single-leg only).
@@ -189,14 +197,16 @@ def calculate_3d_surface_strike(
 
     # Build a portfolio JSON with the single position for the new function signature
     portfolio_data = {
-        'spot_price': spot_price,
-        'options': [{
-            'option_type': option_type,
-            'position_type': position_type,
-            'strike': spot_price,  # Will be varied
-            'quantity': quantity
-        }],
-        'stock': None
+        "spot_price": spot_price,
+        "options": [
+            {
+                "option_type": option_type,
+                "position_type": position_type,
+                "strike": spot_price,  # Will be varied
+                "quantity": quantity,
+            }
+        ],
+        "stock": None,
     }
     portfolio_json = json.dumps(portfolio_data)
 
@@ -208,7 +218,7 @@ def calculate_3d_surface_strike(
         risk_free_rate,
         volatility,
         dte,
-        greek_idx
+        greek_idx,
     )
 
     # Convert strike range to percentage of spot for better visualization
@@ -227,7 +237,7 @@ def render_3d_tab(
     stock_position,
     _calculate_greeks_3d_dte_func,
     _calculate_greeks_3d_iv_func,
-    _calculate_greeks_3d_strike_func=None
+    _calculate_greeks_3d_strike_func=None,
 ) -> None:
     """
     Render the complete 3D surface tab.
@@ -246,22 +256,20 @@ def render_3d_tab(
     """
     # Detect single-leg vanilla position (Strike variation only for vanilla)
     is_single_vanilla_leg = (
-        len(positions) == 1 and
-        stock_position is None and
-        positions[0].get('instrument_class', 'vanilla') == 'vanilla'
-    ) or (
-        len(positions) == 0 and
-        stock_position is None
-    )
+        len(positions) == 1
+        and stock_position is None
+        and positions[0].get("instrument_class", "vanilla") == "vanilla"
+    ) or (len(positions) == 0 and stock_position is None)
     is_single_exotic_leg = (
-        len(positions) == 1 and
-        stock_position is None and
-        positions[0].get('instrument_class', 'vanilla') != 'vanilla'
+        len(positions) == 1
+        and stock_position is None
+        and positions[0].get("instrument_class", "vanilla") != "vanilla"
     )
     is_single_leg = is_single_vanilla_leg
 
     if not positions and not stock_position:
-        st.markdown("""
+        st.markdown(
+            """
         <div style="
             background: linear-gradient(135deg, #e0f2fe 0%, #f0f9ff 100%);
             border: 1px solid #7dd3fc;
@@ -278,22 +286,25 @@ def render_3d_tab(
                 <div style="color: #0369a1; font-size: 0.8rem;">Add positions using the sidebar to begin analysis</div>
             </div>
         </div>
-        """, unsafe_allow_html=True)
+        """,
+            unsafe_allow_html=True,
+        )
 
     # Get position details for strike variation
     if positions:
         pos = positions[0]
-        option_type = pos['option_type']
-        position_type = pos['position_type']
-        quantity = pos['quantity']
+        option_type = pos["option_type"]
+        position_type = pos["position_type"]
+        quantity = pos["quantity"]
     else:
         # Default position
-        option_type = 'call'
-        position_type = 'long'
+        option_type = "call"
+        position_type = "long"
         quantity = 1
 
     # Surface type toggle buttons (like P&L Profile)
-    st.markdown("""
+    st.markdown(
+        """
     <div style="
         display: flex;
         align-items: center;
@@ -302,30 +313,32 @@ def render_3d_tab(
     ">
         <span style="font-size: 0.8rem; color: #64748b; font-weight: 500;">Vary by:</span>
     </div>
-    """, unsafe_allow_html=True)
+    """,
+        unsafe_allow_html=True,
+    )
 
     # Initialize session state for 3D surface type
-    if '3d_surface_type' not in st.session_state:
-        st.session_state['3d_surface_type'] = 'DTE'
+    if "3d_surface_type" not in st.session_state:
+        st.session_state["3d_surface_type"] = "DTE"
 
     # Create toggle buttons
     if is_single_leg:
         btn_cols = st.columns([1, 1, 1, 3])
-        options = ['DTE', 'IV', 'Strike']
+        options = ["DTE", "IV", "Strike"]
     else:
         btn_cols = st.columns([1, 1, 4])
-        options = ['DTE', 'IV']
+        options = ["DTE", "IV"]
 
     for i, opt in enumerate(options):
         with btn_cols[i]:
-            is_selected = st.session_state['3d_surface_type'] == opt
+            is_selected = st.session_state["3d_surface_type"] == opt
             if st.button(
                 opt,
                 key=f"3d_surface_btn_{opt}",
                 type="primary" if is_selected else "secondary",
-                width="stretch"
+                width="stretch",
             ):
-                st.session_state['3d_surface_type'] = opt
+                st.session_state["3d_surface_type"] = opt
                 st.rerun()
 
     # Inform user when Strike variation is unavailable for exotic legs
@@ -335,10 +348,11 @@ def render_3d_tab(
             "(DTE and IV variation still work)."
         )
 
-    surface_type = st.session_state['3d_surface_type']
+    surface_type = st.session_state["3d_surface_type"]
 
     # Controls in a clean card
-    st.markdown("""
+    st.markdown(
+        """
     <div style="
         background: #f8fafc;
         border: 1px solid #e2e8f0;
@@ -351,32 +365,40 @@ def render_3d_tab(
             Surface Configuration
         </div>
     </div>
-    """, unsafe_allow_html=True)
+    """,
+        unsafe_allow_html=True,
+    )
 
     col1, col2 = st.columns([3, 3])
 
     with col1:
-        selected_greek = st.selectbox(
+        selected_greek = st.selectbox(  # pyright: ignore[reportCallIssue]
             "Greek",
             options=GREEK_NAMES,
             format_func=lambda x: GREEK_TITLES.get(x, x.capitalize()),
             index=1,  # Default to delta
-            help="Select which Greek to visualize"
+            help="Select which Greek to visualize",
         )
 
     with col2:
         colorscale = st.selectbox(
             "Color Scheme",
-            SURFACE_COLORSCALES['alternatives'] + [SURFACE_COLORSCALES['default']],
-            index=len(SURFACE_COLORSCALES['alternatives']),  # Default to Viridis
-            help="Choose the color palette for the surface"
+            SURFACE_COLORSCALES["alternatives"] + [SURFACE_COLORSCALES["default"]],
+            index=len(SURFACE_COLORSCALES["alternatives"]),  # Default to Viridis
+            help="Choose the color palette for the surface",
         )
 
     st.markdown("<div style='height: 0.5rem'></div>", unsafe_allow_html=True)
 
     # Calculate surface based on type
-    with st.spinner(f'Calculating 3D surface for {GREEK_TITLES.get(selected_greek, selected_greek)}...'):
-        if surface_type == "Strike" and is_single_leg and _calculate_greeks_3d_strike_func:
+    with st.spinner(
+        f"Calculating 3D surface for {GREEK_TITLES.get(selected_greek, selected_greek)}..."
+    ):
+        if (
+            surface_type == "Strike"
+            and is_single_leg
+            and _calculate_greeks_3d_strike_func
+        ):
             X, Y, Z, y_label = calculate_3d_surface_strike(
                 spot_price,
                 selected_greek,
@@ -386,7 +408,7 @@ def render_3d_tab(
                 dte,
                 risk_free_rate,
                 volatility,
-                _calculate_greeks_3d_strike_func
+                _calculate_greeks_3d_strike_func,
             )
         else:
             X, Y, Z, y_label = calculate_3d_surface(
@@ -395,22 +417,20 @@ def render_3d_tab(
                 surface_type if surface_type != "Strike" else "DTE",
                 risk_free_rate,
                 _calculate_greeks_3d_dte_func,
-                _calculate_greeks_3d_iv_func
+                _calculate_greeks_3d_iv_func,
             )
 
     # Create and display figure
     fig = create_3d_surface_figure(
-        X, Y, Z,
-        selected_greek,
-        y_label,
-        colorscale,
-        surface_type
+        X, Y, Z, selected_greek, y_label, colorscale, surface_type
     )
 
-    st.plotly_chart(fig, width="stretch", config={'displayModeBar': True})
+    st.plotly_chart(fig, width="stretch", config={"displayModeBar": True})
 
     # Info boxes
-    _render_3d_info_boxes(selected_greek, y_label, positions, stock_position, surface_type)
+    _render_3d_info_boxes(
+        selected_greek, y_label, positions, stock_position, surface_type
+    )
 
 
 def _render_3d_info_boxes(
@@ -418,7 +438,7 @@ def _render_3d_info_boxes(
     y_label: str,
     positions: list,
     stock_position,
-    surface_type: str = "DTE"
+    surface_type: str = "DTE",
 ) -> None:
     """Render information boxes below the 3D chart."""
     col1, col2 = st.columns(2)
@@ -431,11 +451,12 @@ def _render_3d_info_boxes(
     variation_desc = {
         "DTE": "Days to Expiration",
         "IV": "Implied Volatility",
-        "Strike": "Strike Price"
+        "Strike": "Strike Price",
     }.get(surface_type, surface_type)
 
     with col1:
-        st.markdown(f"""
+        st.markdown(
+            f"""
         <div style="
             background: #f8fafc;
             border: 1px solid #e2e8f0;
@@ -449,13 +470,16 @@ def _render_3d_info_boxes(
                 <div><span style="color: #64748b;">Greek:</span> <strong>{greek_title}</strong></div>
                 <div><span style="color: #64748b;">Varying:</span> <strong>{variation_desc}</strong></div>
                 <div><span style="color: #64748b;">Options:</span> <strong>{option_count}</strong></div>
-                <div><span style="color: #64748b;">Stock:</span> <strong>{'Yes' if stock_count else 'No'}</strong></div>
+                <div><span style="color: #64748b;">Stock:</span> <strong>{"Yes" if stock_count else "No"}</strong></div>
             </div>
         </div>
-        """, unsafe_allow_html=True)
+        """,
+            unsafe_allow_html=True,
+        )
 
     with col2:
-        st.markdown("""
+        st.markdown(
+            """
         <div style="
             background: linear-gradient(135deg, #f0fdf4 0%, #ecfdf5 100%);
             border: 1px solid #bbf7d0;
@@ -471,4 +495,6 @@ def _render_3d_info_boxes(
                 <div><strong>Pan:</strong> Right click + drag</div>
             </div>
         </div>
-        """, unsafe_allow_html=True)
+        """,
+            unsafe_allow_html=True,
+        )

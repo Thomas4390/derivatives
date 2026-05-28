@@ -14,8 +14,8 @@ All 14 Greeks are supported:
 - Second order: vanna, volga/vomma, charm, veta
 - Third order: speed, zomma, color, ultima
 
-Author: Thomas
-Created: 2025
+Author: Thomas Vaudescal
+Created: 2026
 """
 
 from backend.greeks.analytic import (

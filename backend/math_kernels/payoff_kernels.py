@@ -6,9 +6,11 @@ Numba-optimized kernels for vectorized payoff evaluation.
 
 These are the low-level computational primitives used by option instruments.
 
-Author: Thomas
-Created: 2025
+Author: Thomas Vaudescal
+Created: 2026
 """
+
+from __future__ import annotations
 
 import numpy as np
 from numba import njit, prange
@@ -16,6 +18,7 @@ from numba import njit, prange
 # =============================================================================
 # Vanilla Option Payoffs
 # =============================================================================
+
 
 @njit(fastmath=True, cache=True)
 def call_payoff(spot: float, strike: float) -> float:
@@ -109,6 +112,7 @@ def put_payoff_vec(spots: np.ndarray, strike: float) -> np.ndarray:
 # Digital/Binary Option Payoffs
 # =============================================================================
 
+
 @njit(fastmath=True, cache=True)
 def digital_call_payoff(spot: float, strike: float, payout: float = 1.0) -> float:
     """
@@ -155,9 +159,7 @@ def digital_put_payoff(spot: float, strike: float, payout: float = 1.0) -> float
 
 @njit(parallel=True, fastmath=True, cache=True)
 def digital_call_payoff_vec(
-    spots: np.ndarray,
-    strike: float,
-    payout: float = 1.0
+    spots: np.ndarray, strike: float, payout: float = 1.0
 ) -> np.ndarray:
     """Vectorized digital call payoff."""
     n = len(spots)
@@ -169,9 +171,7 @@ def digital_call_payoff_vec(
 
 @njit(parallel=True, fastmath=True, cache=True)
 def digital_put_payoff_vec(
-    spots: np.ndarray,
-    strike: float,
-    payout: float = 1.0
+    spots: np.ndarray, strike: float, payout: float = 1.0
 ) -> np.ndarray:
     """Vectorized digital put payoff."""
     n = len(spots)
@@ -184,6 +184,7 @@ def digital_put_payoff_vec(
 # =============================================================================
 # Strategy Payoffs (Combinations)
 # =============================================================================
+
 
 @njit(parallel=True, fastmath=True, cache=True)
 def straddle_payoff(spots: np.ndarray, strike: float) -> np.ndarray:
@@ -211,9 +212,7 @@ def straddle_payoff(spots: np.ndarray, strike: float) -> np.ndarray:
 
 @njit(parallel=True, fastmath=True, cache=True)
 def strangle_payoff(
-    spots: np.ndarray,
-    strike_put: float,
-    strike_call: float
+    spots: np.ndarray, strike_put: float, strike_call: float
 ) -> np.ndarray:
     """
     Strangle payoff: max(K_put - S, 0) + max(S - K_call, 0).
@@ -243,10 +242,7 @@ def strangle_payoff(
 
 @njit(parallel=True, fastmath=True, cache=True)
 def butterfly_payoff(
-    spots: np.ndarray,
-    k_low: float,
-    k_mid: float,
-    k_high: float
+    spots: np.ndarray, k_low: float, k_mid: float, k_high: float
 ) -> np.ndarray:
     """
     Butterfly spread payoff.
@@ -273,18 +269,14 @@ def butterfly_payoff(
     result = np.empty(n, dtype=np.float64)
     for i in prange(n):
         s = spots[i]
-        payoff = (max(s - k_low, 0.0) -
-                  2.0 * max(s - k_mid, 0.0) +
-                  max(s - k_high, 0.0))
+        payoff = max(s - k_low, 0.0) - 2.0 * max(s - k_mid, 0.0) + max(s - k_high, 0.0)
         result[i] = payoff
     return result
 
 
 @njit(parallel=True, fastmath=True, cache=True)
 def bull_call_spread_payoff(
-    spots: np.ndarray,
-    k_low: float,
-    k_high: float
+    spots: np.ndarray, k_low: float, k_high: float
 ) -> np.ndarray:
     """
     Bull call spread payoff: long call at K_low, short call at K_high.
@@ -315,12 +307,9 @@ def bull_call_spread_payoff(
 # Path-Dependent Payoffs
 # =============================================================================
 
+
 @njit(fastmath=True, cache=True)
-def asian_arithmetic_payoff(
-    path: np.ndarray,
-    strike: float,
-    is_call: bool
-) -> float:
+def asian_arithmetic_payoff(path: np.ndarray, strike: float, is_call: bool) -> float:
     """
     Arithmetic Asian option payoff based on average price.
 
@@ -345,10 +334,32 @@ def asian_arithmetic_payoff(
 
 
 @njit(fastmath=True, cache=True)
-def lookback_floating_payoff(
-    path: np.ndarray,
-    is_call: bool
-) -> float:
+def asian_geometric_payoff(path: np.ndarray, strike: float, is_call: bool) -> float:
+    """
+    Geometric Asian option payoff based on geometric average price.
+
+    Parameters
+    ----------
+    path : np.ndarray
+        Price path (all time steps)
+    strike : float
+        Strike price
+    is_call : bool
+        True for call, False for put
+
+    Returns
+    -------
+    float
+        Geometric Asian option payoff
+    """
+    geo_avg = np.exp(np.mean(np.log(path)))
+    if is_call:
+        return max(geo_avg - strike, 0.0)
+    return max(strike - geo_avg, 0.0)
+
+
+@njit(fastmath=True, cache=True)
+def lookback_floating_payoff(path: np.ndarray, is_call: bool) -> float:
     """
     Floating strike lookback option payoff.
 
@@ -375,9 +386,7 @@ def lookback_floating_payoff(
 
 @njit(fastmath=True, cache=True)
 def barrier_up_out_call_payoff(
-    path: np.ndarray,
-    strike: float,
-    barrier: float
+    path: np.ndarray, strike: float, barrier: float
 ) -> float:
     """
     Up-and-out call: call payoff if barrier never breached.
@@ -407,9 +416,7 @@ def barrier_up_out_call_payoff(
 
 @njit(fastmath=True, cache=True)
 def barrier_down_out_put_payoff(
-    path: np.ndarray,
-    strike: float,
-    barrier: float
+    path: np.ndarray, strike: float, barrier: float
 ) -> float:
     """
     Down-and-out put: put payoff if barrier never breached.

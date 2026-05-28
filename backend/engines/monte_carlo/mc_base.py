@@ -8,9 +8,11 @@ Prices options for any model that provides a terminal price simulator.
 The Monte Carlo payoff computation and discounting is the same for all models;
 only the simulation of terminal prices changes.
 
-Author: Thomas
-Created: 2025
+Author: Thomas Vaudescal
+Created: 2026
 """
+
+from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -36,12 +38,13 @@ class MCConfig:
     seed : int, optional
         Random seed for reproducibility
     """
+
     n_paths: int = 100_000
     n_steps: int = 252
     antithetic: bool = True
     seed: int | None = None
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if self.n_paths <= 0:
             raise ValueError(f"n_paths must be positive, got {self.n_paths}")
         if self.n_steps <= 0:
@@ -50,6 +53,7 @@ class MCConfig:
 
 class MCResult(NamedTuple):
     """Result from Monte Carlo pricing."""
+
     price: float
     std_error: float
     n_paths: int
@@ -61,11 +65,7 @@ TerminalSimulator = Callable[[float, float, float, int, int, int | None], np.nda
 
 
 @njit(fastmath=True, cache=True)
-def _compute_payoffs(
-    terminals: np.ndarray,
-    k: float,
-    is_call: bool
-) -> np.ndarray:
+def _compute_payoffs(terminals: np.ndarray, k: float, is_call: bool) -> np.ndarray:
     """Compute option payoffs from terminal prices."""
     n = len(terminals)
     payoffs = np.empty(n, dtype=np.float64)
@@ -80,10 +80,7 @@ def _compute_payoffs(
 
 
 @njit(fastmath=True, cache=True)
-def _compute_price_and_se(
-    payoffs: np.ndarray,
-    discount: float
-) -> tuple[float, float]:
+def _compute_price_and_se(payoffs: np.ndarray, discount: float) -> tuple[float, float]:
     """Compute discounted price and standard error."""
     n = len(payoffs)
 
@@ -135,8 +132,8 @@ class GenericMCEngine:
     print(f"Price: ${result.price:.4f} +/- ${result.std_error:.4f}")
     """
 
-    def __init__(self, config: MCConfig = None):
-        self._config = config or MCConfig()
+    def __init__(self, config: MCConfig | None = None) -> None:
+        self._config: MCConfig = config or MCConfig()
 
     @property
     def config(self) -> MCConfig:
@@ -153,7 +150,7 @@ class GenericMCEngine:
         is_call: bool = True,
         n_paths: int | None = None,
         n_steps: int | None = None,
-        seed: int | None = None
+        seed: int | None = None,
     ) -> MCResult:
         """
         Price a European option using Monte Carlo simulation.
@@ -201,11 +198,7 @@ class GenericMCEngine:
         # Compute price and standard error
         price, std_error = _compute_price_and_se(payoffs, discount)
 
-        return MCResult(
-            price=max(price, 0.0),
-            std_error=std_error,
-            n_paths=n_paths
-        )
+        return MCResult(price=max(price, 0.0), std_error=std_error, n_paths=n_paths)
 
     def price_strikes(
         self,
@@ -217,7 +210,7 @@ class GenericMCEngine:
         is_call: bool = True,
         n_paths: int | None = None,
         n_steps: int | None = None,
-        seed: int | None = None
+        seed: int | None = None,
     ) -> tuple[np.ndarray, np.ndarray]:
         """
         Price multiple strikes efficiently with a single simulation.
@@ -285,7 +278,7 @@ class GenericMCEngine:
         is_call: bool = True,
         n_paths: int | None = None,
         n_steps_per_year: int = 252,
-        seed: int | None = None
+        seed: int | None = None,
     ) -> tuple[np.ndarray, np.ndarray]:
         """
         Price options across a strike-maturity surface.
@@ -334,8 +327,15 @@ class GenericMCEngine:
 
             # Price all strikes for this maturity
             p, se = self.price_strikes(
-                terminal_simulator, s0, strikes, t, r, is_call,
-                n_paths=n_paths, n_steps=n_steps, seed=mat_seed
+                terminal_simulator,
+                s0,
+                strikes,
+                t,
+                r,
+                is_call,
+                n_paths=n_paths,
+                n_steps=n_steps,
+                seed=mat_seed,
             )
             prices[:, j] = p
             std_errors[:, j] = se
@@ -347,6 +347,7 @@ class GenericMCEngine:
 # Convenience function for quick pricing
 # =============================================================================
 
+
 def mc_price(
     terminal_simulator: TerminalSimulator,
     s0: float,
@@ -356,7 +357,7 @@ def mc_price(
     is_call: bool = True,
     n_paths: int = 100_000,
     n_steps: int = 252,
-    seed: int | None = None
+    seed: int | None = None,
 ) -> MCResult:
     """
     Quick Monte Carlo pricing with default configuration.
@@ -447,11 +448,14 @@ if __name__ == "__main__":
 
     # Compare with Black-Scholes (approximate check)
     from backend.utils.math import bs_price
+
     bs_call = bs_price(s0, k, t, r, sigma, is_call=True)
     bs_put = bs_price(s0, k, t, r, sigma, is_call=False)
     print(f"\nBS Call: ${bs_call:.4f}, MC Call: ${result.price:.4f}")
     print(f"BS Put:  ${bs_put:.4f}, MC Put:  ${result_put.price:.4f}")
-    print(f"Call difference: ${abs(result.price - bs_call):.4f} ({abs(result.price - bs_call)/bs_call*100:.2f}%)")
+    print(
+        f"Call difference: ${abs(result.price - bs_call):.4f} ({abs(result.price - bs_call) / bs_call * 100:.2f}%)"
+    )
 
     # Test multiple strikes
     print("\n--- Multiple Strikes ---")
@@ -463,7 +467,9 @@ if __name__ == "__main__":
     print("-" * 44)
     for i, strike in enumerate(strikes):
         bs_price_i = bs_price(s0, strike, t, r, sigma, is_call=True)
-        print(f"{strike:>8.0f} ${prices[i]:>11.4f} ${std_errors[i]:>9.4f} ${bs_price_i:>11.4f}")
+        print(
+            f"{strike:>8.0f} ${prices[i]:>11.4f} ${std_errors[i]:>9.4f} ${bs_price_i:>11.4f}"
+        )
 
     # Test convenience function
     print("\n--- Convenience Function ---")

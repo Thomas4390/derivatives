@@ -10,34 +10,48 @@ Provides:
 - Feller condition checks for Heston model
 - Arbitrage constraint validation
 
-Author: Thomas
-Created: 2025
+Author: Thomas Vaudescal
+Created: 2026
 """
 
+from __future__ import annotations
 
 import numpy as np
+
+from backend.utils.constants.numerical import (
+    DIVIDEND_YIELD_MAX,
+    PUT_CALL_PARITY_TOLERANCE,
+    RATE_MAX,
+    RATE_MIN,
+    VOLATILITY_MAX,
+)
 
 # =============================================================================
 # Validation Exceptions
 # =============================================================================
 
+
 class ValidationError(ValueError):
     """Exception raised for validation failures."""
+
     pass
 
 
 class ParameterOutOfRangeError(ValidationError):
     """Exception raised when a parameter is out of valid range."""
+
     pass
 
 
 class ArbitrageViolationError(ValidationError):
     """Exception raised when arbitrage constraints are violated."""
+
     pass
 
 
 class FellerConditionError(ValidationError):
     """Exception raised when Feller condition is violated."""
+
     pass
 
 
@@ -45,11 +59,8 @@ class FellerConditionError(ValidationError):
 # Basic Parameter Validation
 # =============================================================================
 
-def validate_positive(
-    value: float,
-    name: str,
-    strict: bool = True
-) -> float:
+
+def validate_positive(value: float, name: str, strict: bool = True) -> float:
     """
     Validate that a value is positive.
 
@@ -73,13 +84,9 @@ def validate_positive(
         If validation fails
     """
     if strict and value <= 0:
-        raise ParameterOutOfRangeError(
-            f"{name} must be strictly positive, got {value}"
-        )
+        raise ParameterOutOfRangeError(f"{name} must be strictly positive, got {value}")
     if not strict and value < 0:
-        raise ParameterOutOfRangeError(
-            f"{name} must be non-negative, got {value}"
-        )
+        raise ParameterOutOfRangeError(f"{name} must be non-negative, got {value}")
     return value
 
 
@@ -89,7 +96,7 @@ def validate_in_range(
     min_val: float | None = None,
     max_val: float | None = None,
     min_inclusive: bool = True,
-    max_inclusive: bool = True
+    max_inclusive: bool = True,
 ) -> float:
     """
     Validate that a value is within a specified range.
@@ -121,23 +128,15 @@ def validate_in_range(
     """
     if min_val is not None:
         if min_inclusive and value < min_val:
-            raise ParameterOutOfRangeError(
-                f"{name} must be >= {min_val}, got {value}"
-            )
+            raise ParameterOutOfRangeError(f"{name} must be >= {min_val}, got {value}")
         if not min_inclusive and value <= min_val:
-            raise ParameterOutOfRangeError(
-                f"{name} must be > {min_val}, got {value}"
-            )
+            raise ParameterOutOfRangeError(f"{name} must be > {min_val}, got {value}")
 
     if max_val is not None:
         if max_inclusive and value > max_val:
-            raise ParameterOutOfRangeError(
-                f"{name} must be <= {max_val}, got {value}"
-            )
+            raise ParameterOutOfRangeError(f"{name} must be <= {max_val}, got {value}")
         if not max_inclusive and value >= max_val:
-            raise ParameterOutOfRangeError(
-                f"{name} must be < {max_val}, got {value}"
-            )
+            raise ParameterOutOfRangeError(f"{name} must be < {max_val}, got {value}")
 
     return value
 
@@ -159,6 +158,7 @@ def validate_finite(value: float, name: str) -> float:
 # =============================================================================
 # Market Parameter Validation
 # =============================================================================
+
 
 def validate_spot(spot: float) -> float:
     """Validate spot price."""
@@ -183,9 +183,11 @@ def validate_rate(rate: float, name: str = "Interest rate") -> float:
     Validate interest rate.
 
     Allows negative rates (as seen in some markets), but warns.
+    Bounds come from :data:`backend.utils.constants.numerical.RATE_MIN`
+    and :data:`RATE_MAX`.
     """
     validate_finite(rate, name)
-    validate_in_range(rate, name, min_val=-0.10, max_val=0.50)
+    validate_in_range(rate, name, min_val=RATE_MIN, max_val=RATE_MAX)
     return rate
 
 
@@ -205,14 +207,14 @@ def validate_volatility(sigma: float) -> float:
     """
     validate_finite(sigma, "Volatility")
     validate_positive(sigma, "Volatility", strict=True)
-    validate_in_range(sigma, "Volatility", max_val=5.0)  # 500% vol cap
+    validate_in_range(sigma, "Volatility", max_val=VOLATILITY_MAX)
     return sigma
 
 
 def validate_dividend_yield(q: float) -> float:
     """Validate dividend yield."""
     validate_finite(q, "Dividend yield")
-    validate_in_range(q, "Dividend yield", min_val=0.0, max_val=0.50)
+    validate_in_range(q, "Dividend yield", min_val=0.0, max_val=DIVIDEND_YIELD_MAX)
     return q
 
 
@@ -220,9 +222,12 @@ def validate_correlation(rho: float) -> float:
     """Validate correlation coefficient."""
     validate_finite(rho, "Correlation")
     return validate_in_range(
-        rho, "Correlation",
-        min_val=-1.0, max_val=1.0,
-        min_inclusive=True, max_inclusive=True
+        rho,
+        "Correlation",
+        min_val=-1.0,
+        max_val=1.0,
+        min_inclusive=True,
+        max_inclusive=True,
     )
 
 
@@ -230,13 +235,14 @@ def validate_correlation(rho: float) -> float:
 # Option Validation
 # =============================================================================
 
+
 def validate_vanilla_option(
     spot: float,
     strike: float,
     maturity: float,
     rate: float,
     sigma: float,
-    dividend_yield: float = 0.0
+    dividend_yield: float = 0.0,
 ) -> None:
     """
     Validate all inputs for vanilla option pricing.
@@ -273,13 +279,32 @@ def validate_vanilla_option(
 # Model-Specific Validation
 # =============================================================================
 
+
+def feller_ratio(kappa: float, theta: float, alpha: float) -> float:
+    """Feller ratio 2·κ·θ / ξ² for Heston-family variance processes.
+
+    >1 : Feller satisfied (variance stays strictly positive).
+    <1 : Feller violated (variance can touch zero — needs truncation/reflection).
+    Returns ``+inf`` when ``alpha`` is zero (degenerate deterministic variance).
+    """
+    xi_sq = alpha**2
+    if xi_sq == 0.0:
+        return float("inf")
+    return (2.0 * kappa * theta) / xi_sq
+
+
+def feller_satisfied(kappa: float, theta: float, alpha: float) -> bool:
+    """Boolean form of :func:`feller_ratio` — strict ``>`` comparison."""
+    return 2.0 * kappa * theta > alpha**2
+
+
 def validate_heston_parameters(
     v0: float,
     kappa: float,
     theta: float,
-    xi: float,
+    alpha: float,
     rho: float,
-    check_feller: bool = True
+    check_feller: bool = True,
 ) -> None:
     """
     Validate Heston model parameters.
@@ -292,12 +317,12 @@ def validate_heston_parameters(
         Mean reversion speed
     theta : float
         Long-run variance
-    xi : float
+    alpha : float
         Volatility of volatility
     rho : float
         Correlation between spot and variance
     check_feller : bool, default True
-        Check Feller condition (2*kappa*theta > xi^2).
+        Check Feller condition (2*kappa*theta > alpha^2).
         **Strongly recommended to keep enabled.** The Feller condition
         ensures variance stays positive in continuous-time limit.
         Disabling may cause numerical instabilities in Monte Carlo.
@@ -319,47 +344,45 @@ def validate_heston_parameters(
     validate_positive(v0, "Initial variance (v0)", strict=True)
     validate_positive(kappa, "Mean reversion (kappa)", strict=True)
     validate_positive(theta, "Long-run variance (theta)", strict=True)
-    validate_positive(xi, "Vol of vol (xi)", strict=True)
+    validate_positive(alpha, "Vol of vol (alpha)", strict=True)
     validate_correlation(rho)
 
     if not check_feller:
         # Warn when Feller check is disabled
         feller_lhs = 2 * kappa * theta
-        feller_rhs = xi ** 2
+        feller_rhs = alpha**2
         if feller_lhs <= feller_rhs:
             warnings.warn(
                 f"Feller condition is violated (2κθ={feller_lhs:.4f} <= ξ²={feller_rhs:.4f}) "
                 "and check_feller=False. This may cause negative variance in simulations. "
                 "Consider using truncation/reflection schemes or adjusting parameters.",
                 UserWarning,
-                stacklevel=2
+                stacklevel=2,
             )
 
     if check_feller:
         feller_lhs = 2 * kappa * theta
-        feller_rhs = xi ** 2
+        feller_rhs = alpha**2
 
         if feller_lhs <= feller_rhs:
             raise FellerConditionError(
                 f"Feller condition violated: 2*kappa*theta = {feller_lhs:.6f} "
-                f"must be > xi^2 = {feller_rhs:.6f}. "
+                f"must be > alpha^2 = {feller_rhs:.6f}. "
                 "This may cause variance to become negative in simulations."
             )
 
 
 def validate_merton_jump_parameters(
-    lambda_j: float,
-    mu_j: float,
-    sigma_j: float
+    lam: float, alpha_j: float, sigma_j: float
 ) -> None:
     """
     Validate Merton jump-diffusion parameters.
 
     Parameters
     ----------
-    lambda_j : float
+    lam : float
         Jump intensity (jumps per year)
-    mu_j : float
+    alpha_j : float
         Mean jump size (log)
     sigma_j : float
         Jump size volatility
@@ -369,14 +392,15 @@ def validate_merton_jump_parameters(
     ValidationError
         If parameters are invalid
     """
-    validate_positive(lambda_j, "Jump intensity", strict=False)
-    validate_finite(mu_j, "Mean jump size")
+    validate_positive(lam, "Jump intensity", strict=False)
+    validate_finite(alpha_j, "Mean jump size")
     validate_positive(sigma_j, "Jump volatility", strict=False)
 
 
 # =============================================================================
 # Arbitrage Validation
 # =============================================================================
+
 
 def check_put_call_parity(
     call_price: float,
@@ -386,7 +410,7 @@ def check_put_call_parity(
     maturity: float,
     rate: float,
     dividend_yield: float = 0.0,
-    tolerance: float = 0.01
+    tolerance: float = PUT_CALL_PARITY_TOLERANCE,
 ) -> bool:
     """
     Check put-call parity relation.
@@ -431,7 +455,7 @@ def validate_no_arbitrage(
     maturity: float,
     rate: float,
     is_call: bool,
-    dividend_yield: float = 0.0
+    dividend_yield: float = 0.0,
 ) -> float:
     """
     Validate option price satisfies no-arbitrage bounds.
@@ -498,28 +522,23 @@ def validate_no_arbitrage(
 # Array Validation
 # =============================================================================
 
+
 def validate_array_positive(arr: np.ndarray, name: str) -> np.ndarray:
     """Validate all elements of array are positive."""
     if np.any(arr <= 0):
-        raise ParameterOutOfRangeError(
-            f"All elements of {name} must be positive"
-        )
+        raise ParameterOutOfRangeError(f"All elements of {name} must be positive")
     return arr
 
 
 def validate_array_finite(arr: np.ndarray, name: str) -> np.ndarray:
     """Validate all elements of array are finite."""
     if not np.all(np.isfinite(arr)):
-        raise ValidationError(
-            f"All elements of {name} must be finite"
-        )
+        raise ValidationError(f"All elements of {name} must be finite")
     return arr
 
 
 def validate_monotonic_increasing(
-    arr: np.ndarray,
-    name: str,
-    strict: bool = False
+    arr: np.ndarray, name: str, strict: bool = False
 ) -> np.ndarray:
     """Validate array is monotonically increasing."""
     diff = np.diff(arr)
@@ -551,8 +570,7 @@ if __name__ == "__main__":
     print("\n--- Market Parameter Validation ---")
     try:
         validate_vanilla_option(
-            spot=100, strike=100, maturity=1.0,
-            rate=0.05, sigma=0.20
+            spot=100, strike=100, maturity=1.0, rate=0.05, sigma=0.20
         )
         print("  Valid vanilla option: OK")
     except ValidationError as e:
@@ -560,8 +578,7 @@ if __name__ == "__main__":
 
     try:
         validate_vanilla_option(
-            spot=-100, strike=100, maturity=1.0,
-            rate=0.05, sigma=0.20
+            spot=-100, strike=100, maturity=1.0, rate=0.05, sigma=0.20
         )
         print("  ERROR: Should have raised for negative spot")
     except ValidationError as e:
@@ -570,17 +587,13 @@ if __name__ == "__main__":
     # Test Heston validation
     print("\n--- Heston Validation ---")
     try:
-        validate_heston_parameters(
-            v0=0.04, kappa=2.0, theta=0.04, xi=0.3, rho=-0.7
-        )
+        validate_heston_parameters(v0=0.04, kappa=2.0, theta=0.04, alpha=0.3, rho=-0.7)
         print("  Valid Heston params (Feller OK): OK")
     except ValidationError as e:
         print(f"  ERROR: {e}")
 
     try:
-        validate_heston_parameters(
-            v0=0.04, kappa=1.0, theta=0.04, xi=1.0, rho=-0.7
-        )
+        validate_heston_parameters(v0=0.04, kappa=1.0, theta=0.04, alpha=1.0, rho=-0.7)
         print("  ERROR: Should have raised FellerConditionError")
     except FellerConditionError:
         print("  Feller violation: Caught FellerConditionError")
@@ -589,8 +602,7 @@ if __name__ == "__main__":
     print("\n--- Arbitrage Validation ---")
     try:
         validate_no_arbitrage(
-            price=10, spot=100, strike=90,
-            maturity=1.0, rate=0.05, is_call=True
+            price=10, spot=100, strike=90, maturity=1.0, rate=0.05, is_call=True
         )
         print("  Valid call price: OK")
     except ArbitrageViolationError as e:
@@ -598,8 +610,7 @@ if __name__ == "__main__":
 
     try:
         validate_no_arbitrage(
-            price=200, spot=100, strike=90,
-            maturity=1.0, rate=0.05, is_call=True
+            price=200, spot=100, strike=90, maturity=1.0, rate=0.05, is_call=True
         )
         print("  ERROR: Should have raised for price > spot")
     except ArbitrageViolationError:

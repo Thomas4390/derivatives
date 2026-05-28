@@ -13,39 +13,35 @@ import streamlit as st
 
 COLORS = {
     # Primary - Deep teal (innovation, data science)
-    'primary': '#0d9488',
-    'primary_light': '#14b8a6',
-    'primary_dark': '#0f766e',
-
+    "primary": "#0d9488",
+    "primary_light": "#14b8a6",
+    "primary_dark": "#0f766e",
     # Secondary - Deep navy (trust, professionalism)
-    'secondary': '#1a365d',
-    'secondary_light': '#2c5282',
-    'secondary_dark': '#0f2942',
-
+    "secondary": "#1a365d",
+    "secondary_light": "#2c5282",
+    "secondary_dark": "#0f2942",
     # Accent - Warm amber (energy, insights)
-    'accent': '#d97706',
-    'accent_light': '#f59e0b',
-    'accent_dark': '#b45309',
-
+    "accent": "#d97706",
+    "accent_light": "#f59e0b",
+    "accent_dark": "#b45309",
     # Semantic colors
-    'success': '#059669',
-    'success_bg': '#d1fae5',
-    'warning': '#d97706',
-    'warning_bg': '#fef3c7',
-    'danger': '#dc2626',
-    'danger_bg': '#fee2e2',
-    'info': '#0284c7',
-    'info_bg': '#e0f2fe',
-
+    "success": "#059669",
+    "success_bg": "#d1fae5",
+    "warning": "#d97706",
+    "warning_bg": "#fef3c7",
+    "danger": "#dc2626",
+    "danger_bg": "#fee2e2",
+    "info": "#0284c7",
+    "info_bg": "#e0f2fe",
     # Neutrals
-    'text_primary': '#1e293b',
-    'text_secondary': '#475569',
-    'text_muted': '#94a3b8',
-    'border': '#e2e8f0',
-    'border_light': '#f1f5f9',
-    'background': '#ffffff',
-    'background_alt': '#f8fafc',
-    'background_dark': '#0f172a',
+    "text_primary": "#1e293b",
+    "text_secondary": "#475569",
+    "text_muted": "#94a3b8",
+    "border": "#e2e8f0",
+    "border_light": "#f1f5f9",
+    "background": "#ffffff",
+    "background_alt": "#f8fafc",
+    "background_dark": "#0f172a",
 }
 
 # =============================================================================
@@ -499,6 +495,26 @@ CUSTOM_CSS = """
     .p-measure-badge:hover {
         background: linear-gradient(135deg, #14b8a6, #0d9488);
         box-shadow: 0 2px 4px rgba(13, 148, 136, 0.3);
+    }
+
+    /* ========== Q-Measure Badge (risk-neutral) ========== */
+    .q-measure-badge {
+        background: linear-gradient(135deg, #6366f1, #4338ca);
+        color: white;
+        font-size: 0.65rem;
+        padding: 2px 6px;
+        border-radius: 4px;
+        margin-left: 4px;
+        font-weight: 600;
+        letter-spacing: 0.02em;
+        vertical-align: middle;
+        display: inline-block;
+        cursor: help;
+    }
+
+    .q-measure-badge:hover {
+        background: linear-gradient(135deg, #818cf8, #6366f1);
+        box-shadow: 0 2px 4px rgba(99, 102, 241, 0.3);
     }
 
     /* ========== Configuration Cards ========== */
@@ -1019,26 +1035,27 @@ def inject_styles() -> None:
 # HTML COMPONENT TEMPLATES
 # =============================================================================
 
+
 def render_header(title: str, subtitle: str, badge: str = None) -> None:
     """Render the main application header."""
-    badge_html = f'<span class="header-badge">{badge}</span>' if badge else ''
-    st.markdown(f"""
+    badge_html = f'<span class="header-badge">{badge}</span>' if badge else ""
+    st.markdown(
+        f"""
     <div class="main-header animate-in">
         {badge_html}
         <h1>{title}</h1>
         <p>{subtitle}</p>
     </div>
-    """, unsafe_allow_html=True)
+    """,
+        unsafe_allow_html=True,
+    )
 
 
 def metric_card_html(
-    label: str,
-    value: str,
-    value_class: str = "",
-    subtext: str = None
+    label: str, value: str, value_class: str = "", subtext: str = None
 ) -> str:
     """Generate HTML for a metric card."""
-    subtext_html = f'<div class="subtext">{subtext}</div>' if subtext else ''
+    subtext_html = f'<div class="subtext">{subtext}</div>' if subtext else ""
     return f"""
     <div class="metric-card animate-in">
         <div class="label">{label}</div>
@@ -1046,6 +1063,27 @@ def metric_card_html(
         {subtext_html}
     </div>
     """
+
+
+def render_metric_row(
+    metrics: list[tuple[str, str] | tuple[str, str, str]], columns: int | None = None
+) -> None:
+    """Render a row of metric cards.
+
+    Each item in *metrics* is ``(label, value)`` or ``(label, value, subtext)``.
+    *columns* defaults to ``len(metrics)`` when not provided.
+    """
+    if not metrics:
+        return
+    n_cols = columns or len(metrics)
+    cols = st.columns(n_cols)
+    for col, item in zip(cols, metrics):
+        label, value = item[0], item[1]
+        subtext = item[2] if len(item) > 2 else None
+        with col:
+            st.markdown(
+                metric_card_html(label, value, subtext=subtext), unsafe_allow_html=True
+            )
 
 
 def section_header_html(icon: str, title: str) -> str:
@@ -1090,8 +1128,9 @@ def footer_html() -> str:
 
 def render_compact_header(title: str, subtitle: str, badge: str = None) -> None:
     """Render a compact application header for full-width layout."""
-    badge_html = f'<span class="compact-header-badge">{badge}</span>' if badge else ''
-    st.markdown(f"""
+    badge_html = f'<span class="compact-header-badge">{badge}</span>' if badge else ""
+    st.markdown(
+        f"""
     <div class="compact-header animate-in">
         <div class="compact-header-left">
             <h1>{title}</h1>
@@ -1099,12 +1138,22 @@ def render_compact_header(title: str, subtitle: str, badge: str = None) -> None:
         </div>
         {badge_html}
     </div>
-    """, unsafe_allow_html=True)
+    """,
+        unsafe_allow_html=True,
+    )
 
 
 def p_measure_badge_html() -> str:
     """Generate HTML for the P-measure badge."""
     return '<span class="p-measure-badge" title="Physical measure - uses expected return as drift">P</span>'
+
+
+def q_measure_badge_html() -> str:
+    """Generate HTML for the Q-measure (risk-neutral) badge."""
+    return (
+        '<span class="q-measure-badge" title="Risk-neutral measure - '
+        'drift is the risk-free rate; calibrated to option prices">Q</span>'
+    )
 
 
 def config_card_html(icon: str, title: str) -> str:
@@ -1128,10 +1177,7 @@ def stale_results_warning_html() -> str:
 
 
 def strategy_collapsed_html(
-    strategy_name: str,
-    num_legs: int,
-    has_stock: bool,
-    net_cost: float
+    strategy_name: str, num_legs: int, has_stock: bool, net_cost: float
 ) -> str:
     """Generate HTML for collapsed strategy summary."""
     is_debit = net_cost < 0
@@ -1157,11 +1203,9 @@ def strategy_collapsed_html(
 # STYLED STATISTICS COMPONENTS
 # =============================================================================
 
+
 def stats_card_html(
-    label: str,
-    value: str,
-    subtitle: str = None,
-    variant: str = "teal"
+    label: str, value: str, subtitle: str = None, variant: str = "teal"
 ) -> str:
     """
     Generate HTML for a styled statistics card.
@@ -1172,7 +1216,7 @@ def stats_card_html(
         subtitle: Optional subtitle text
         variant: Color variant ('teal', 'blue', 'amber', 'red', 'green', 'purple', 'slate')
     """
-    subtitle_html = f'<div class="stats-subtitle">{subtitle}</div>' if subtitle else ''
+    subtitle_html = f'<div class="stats-subtitle">{subtitle}</div>' if subtitle else ""
     return f"""
     <div class="stats-card {variant}">
         <div class="stats-label">{label}</div>
@@ -1191,7 +1235,7 @@ def render_stats_row(stats: list, variants: list = None) -> None:
         variants: Optional list of color variants for each card
     """
     if variants is None:
-        variants = ['teal', 'blue', 'amber', 'green', 'purple', 'red', 'slate']
+        variants = ["teal", "blue", "amber", "green", "purple", "red", "slate"]
 
     cols = st.columns(len(stats))
 
@@ -1202,8 +1246,7 @@ def render_stats_row(stats: list, variants: list = None) -> None:
 
         with col:
             st.markdown(
-                stats_card_html(label, value, subtitle, variant),
-                unsafe_allow_html=True
+                stats_card_html(label, value, subtitle, variant), unsafe_allow_html=True
             )
 
 
@@ -1215,20 +1258,20 @@ def stats_table_html(headers: list, rows: list) -> str:
         headers: List of header strings
         rows: List of row tuples/lists
     """
-    header_html = ''.join(f'<th>{h}</th>' for h in headers)
+    header_html = "".join(f"<th>{h}</th>" for h in headers)
 
-    rows_html = ''
+    rows_html = ""
     for row in rows:
-        cells_html = ''
+        cells_html = ""
         for i, cell in enumerate(row):
-            cell_class = 'value-cell' if i > 0 else ''
+            cell_class = "value-cell" if i > 0 else ""
             # Check for positive/negative values
-            if isinstance(cell, str) and cell.startswith('+'):
-                cell_class += ' positive'
-            elif isinstance(cell, str) and cell.startswith('-') and '$' in cell:
-                cell_class += ' negative'
+            if isinstance(cell, str) and cell.startswith("+"):
+                cell_class += " positive"
+            elif isinstance(cell, str) and cell.startswith("-") and "$" in cell:
+                cell_class += " negative"
             cells_html += f'<td class="{cell_class}">{cell}</td>'
-        rows_html += f'<tr>{cells_html}</tr>'
+        rows_html += f"<tr>{cells_html}</tr>"
 
     return f"""
     <div style="overflow-x: auto;">
@@ -1240,11 +1283,7 @@ def stats_table_html(headers: list, rows: list) -> str:
     """
 
 
-def comparison_table_html(
-    title: str,
-    rows: list,
-    headers: list = None
-) -> str:
+def comparison_table_html(title: str, rows: list, headers: list = None) -> str:
     """
     Generate HTML for a comparison table (e.g., Theoretical vs Simulated).
 
@@ -1254,11 +1293,11 @@ def comparison_table_html(
         headers: Optional custom headers (default: Metric, Theoretical, Simulated, Error)
     """
     if headers is None:
-        headers = ['Metric', 'Theoretical', 'Simulated', 'Error']
+        headers = ["Metric", "Theoretical", "Simulated", "Error"]
 
-    header_html = ''.join(f'<th>{h}</th>' for h in headers)
+    header_html = "".join(f"<th>{h}</th>" for h in headers)
 
-    rows_html = ''
+    rows_html = ""
     for row in rows:
         cells_html = f'<td class="label-cell">{row[0]}</td>'
         cells_html += f'<td class="value-cell">{row[1]}</td>'
@@ -1268,18 +1307,18 @@ def comparison_table_html(
         if len(row) > 3:
             error_val = row[3]
             try:
-                error_num = float(error_val.replace('%', ''))
+                error_num = float(error_val.replace("%", ""))
                 if error_num < 1:
-                    error_class = 'good'
+                    error_class = "good"
                 elif error_num < 5:
-                    error_class = 'warning'
+                    error_class = "warning"
                 else:
-                    error_class = 'bad'
+                    error_class = "bad"
             except Exception:
-                error_class = ''
+                error_class = ""
             cells_html += f'<td class="error-cell {error_class}">{error_val}</td>'
 
-        rows_html += f'<tr>{cells_html}</tr>'
+        rows_html += f"<tr>{cells_html}</tr>"
 
     return f"""
     <div style="margin: 1rem 0;">
@@ -1291,7 +1330,7 @@ def comparison_table_html(
     """
 
 
-def var_table_html(var_data: list, cvar_data: list, unit: str = '$') -> str:
+def var_table_html(var_data: list, cvar_data: list, unit: str = "$") -> str:
     """
     Generate HTML for VaR/CVaR risk metrics table.
 
@@ -1300,11 +1339,11 @@ def var_table_html(var_data: list, cvar_data: list, unit: str = '$') -> str:
         cvar_data: List of (confidence_level, cvar_value) tuples
         unit: Currency/unit symbol
     """
-    rows_html = ''
+    rows_html = ""
     for (cl_var, var_val), (cl_cvar, cvar_val) in zip(var_data, cvar_data):
         rows_html += f"""
         <tr>
-            <td class="label-cell">{int(cl_var*100)}%</td>
+            <td class="label-cell">{int(cl_var * 100)}%</td>
             <td class="value-cell">{unit}{var_val:,.2f}</td>
             <td class="value-cell">{unit}{cvar_val:,.2f}</td>
         </tr>

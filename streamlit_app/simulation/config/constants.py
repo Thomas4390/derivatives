@@ -14,7 +14,7 @@ PRICE_MODELS = {
     "heston": "Heston Stochastic Volatility",
     "merton": "Merton Jump Diffusion",
     "bates": "Bates Model (Heston + Jumps)",
-    "sabr": "SABR Model"
+    "sabr": "SABR Model",
 }
 
 # Volatility models
@@ -22,14 +22,14 @@ VOLATILITY_MODELS = {
     "garch": "GARCH(1,1)",
     "ngarch": "NGARCH (NAGARCH)",
     "gjr_garch": "GJR-GARCH",
-    "egarch": "EGARCH"
+    "egarch": "EGARCH",
 }
 
 # Simulation modes
 SIMULATION_MODES = {
     "price": "Price Path Simulation",
     "volatility": "Volatility Simulation",
-    "option_pnl": "Option P&L Analysis"
+    "option_pnl": "Option P&L Analysis",
 }
 
 # Model descriptions for educational purposes
@@ -55,7 +55,7 @@ Extends GBM with stochastic variance:
 
 **SDEs:**
 - dS = r·S·dt + √V·S·dW_S
-- dV = κ(θ - V)dt + ξ·√V·dW_V
+- dV = κ(σ² - V)dt + α·√V·dW_V
 """,
     "merton": """
 **Merton Jump Diffusion Model**
@@ -77,7 +77,7 @@ Combines Heston stochastic volatility with Merton-style jumps:
 
 **SDEs:**
 - dS = (μ - λk)·S·dt + √V·S·dW_S + (J-1)·S·dN
-- dV = κ(θ - V)dt + ξ·√V·dW_V
+- dV = κ(σ² - V)dt + α·√V·dW_V
 """,
     "sabr": """
 **SABR Stochastic Volatility Model**
@@ -110,7 +110,7 @@ Captures the leverage effect:
 - More realistic for equity markets
 - Engle & Ng (1993)
 
-**Equation:** σ²_t = ω + α(ε_{t-1} - θσ_{t-1})² + βσ²_{t-1}
+**Equation:** σ²_t = ω + α(ε_{t-1} - γσ_{t-1})² + βσ²_{t-1}
 """,
     "gjr_garch": """
 **GJR-GARCH - Asymmetric GARCH**
@@ -130,7 +130,7 @@ Log-volatility model:
 - Asymmetric response
 
 **Equation:** ln(σ²_t) = ω + α(|z_{t-1}| - E[|z|]) + γz_{t-1} + βln(σ²_{t-1})
-"""
+""",
 }
 
 # =============================================================================
@@ -209,7 +209,7 @@ MODEL_COLORS = {
     "garch": "#9467bd",
     "ngarch": "#8c564b",
     "gjr_garch": "#e377c2",
-    "egarch": "#17becf"
+    "egarch": "#17becf",
 }
 
 # Path visualization colors
@@ -218,7 +218,7 @@ PATH_COLORS = {
     "mean_path": "#1a365d",
     "percentile_band": "rgba(13, 148, 136, 0.3)",
     "initial_price": "#dc2626",
-    "terminal_dist": "#059669"
+    "terminal_dist": "#059669",
 }
 
 # =============================================================================
@@ -229,28 +229,29 @@ PATH_COLORS = {
 PARAMETER_SYMBOLS = {
     "s0": "S₀",
     "r": "r",
+    "y": "y",
     "sigma": "σ",
     "t": "T",
     "v0": "V₀",
     "kappa": "κ",
-    "theta": "θ",
-    "xi": "ξ",
+    "theta": "σ²",  # Heston/Bates long-run variance
     "rho": "ρ",
-    "lambda_j": "λ",
-    "mu_j": "μⱼ",
-    "sigma_j": "σⱼ",
+    "lam": "λ",
+    "alpha_j": "α_J",
+    "sigma_j": "σ_J",
     "beta": "β",
     "nu": "ν",
     "omega": "ω",
-    "alpha": "α"
+    "alpha": "α",  # GARCH ARCH effect / Heston vol-of-vol
+    "gamma": "γ",  # NGARCH & GJR leverage
 }
 
 # Stationarity conditions
 STATIONARITY_CONDITIONS = {
     "garch": "α + β < 1",
-    "ngarch": "α(1 + θ²) + β < 1",
+    "ngarch": "α(1 + γ²) + β < 1",
     "gjr_garch": "α + β + γ/2 < 1",
-    "egarch": "|β| < 1"
+    "egarch": "|β| < 1",
 }
 
 # =============================================================================
@@ -271,7 +272,7 @@ PNL_COLORS = {
     "var_line": "#f59e0b",
     "cvar_region": "rgba(239, 68, 68, 0.2)",
     "breakeven": "#8b5cf6",
-    "payoff_curve": "#3b82f6"
+    "payoff_curve": "#3b82f6",
 }
 
 # Risk metric display settings
@@ -285,7 +286,7 @@ RISK_METRICS = {
     "max_profit": {"label": "Max Profit", "format": "${:.2f}", "color": "#059669"},
     "max_loss": {"label": "Max Loss", "format": "${:.2f}", "color": "#b91c1c"},
     "skewness": {"label": "Skewness", "format": "{:.3f}", "color": "#6366f1"},
-    "kurtosis": {"label": "Kurtosis", "format": "{:.3f}", "color": "#8b5cf6"}
+    "kurtosis": {"label": "Kurtosis", "format": "{:.3f}", "color": "#8b5cf6"},
 }
 
 # P&L histogram settings
@@ -304,7 +305,7 @@ MAIN_TABS = {
     "config": {"icon": "⚙️", "label": "Configuration"},
     "price": {"icon": "📈", "label": "Price Paths"},
     "volatility": {"icon": "📊", "label": "Volatility"},
-    "pnl": {"icon": "💰", "label": "Option P&L"}
+    "pnl": {"icon": "💰", "label": "Option P&L"},
 }
 
 # Analysis sub-tabs for each mode
@@ -312,21 +313,17 @@ PRICE_ANALYSIS_TABS = [
     "🎛️ Interactive Path",
     "📈 Sample Paths",
     "📊 Terminal Distribution",
-    "📋 Statistics"
+    "📋 Statistics",
 ]
 
 VOLATILITY_ANALYSIS_TABS = [
     "🎛️ Interactive Path",
     "📈 Volatility Paths",
     "📊 Terminal Distribution",
-    "📋 Statistics"
+    "📋 Statistics",
 ]
 
-PNL_ANALYSIS_TABS = [
-    "📊 P&L Distribution",
-    "📋 Risk Metrics",
-    "🎯 Scenario Analysis"
-]
+PNL_ANALYSIS_TABS = ["📊 P&L Distribution", "📋 Risk Metrics", "🎯 Scenario Analysis"]
 
 # Configuration section groupings
 CONFIG_SECTIONS = {
@@ -335,5 +332,38 @@ CONFIG_SECTIONS = {
     "price_model": "Price Model",
     "vol_model": "Volatility Model",
     "strategy": "Option Strategy",
-    "visualization": "Visualization Options"
+    "visualization": "Visualization Options",
+}
+
+# =============================================================================
+# STRUCTURED PRODUCT CONSTANTS
+# =============================================================================
+
+SP_DEFAULT_NOTIONAL = 1000.0
+SP_DEFAULT_PATHS_SCENARIO = 10_000
+
+SP_PRODUCT_COLORS = {
+    "bond_floor": "#0d9488",  # teal
+    "option_value": "#f59e0b",  # amber
+    "coupon_pv": "#6366f1",  # indigo
+    "autocall": "#10b981",  # green
+    "barrier": "#ef4444",  # red
+    "trigger": "#f97316",  # orange
+}
+
+SP_PRODUCT_DESCRIPTIONS = {
+    "cpn": "Capital Protected Note: 100% capital protection + capped upside participation",
+    "reverse_convertible": "Reverse Convertible: High fixed coupon with capital at risk via knock-in put",
+    "autocallable": "Autocallable: Conditional coupons with early redemption trigger and capital protection barrier",
+    "phoenix": "Phoenix Autocallable: Monthly conditional coupons with memory + annual autocall + knock-in put",
+    "shark_note": "Shark Note: Capital protected + capped upside with knock-out barrier and rebate",
+    "twin_win": "Twin Win: Profit from both up and down moves, capital at risk if knock-in barrier breached",
+    "snowball": "Snowball Autocallable: Autocall + growing snowball coupon + knock-in put",
+}
+
+SP_PRODUCT_COLORS_NEW = {
+    "phoenix": "#8b5cf6",  # purple
+    "shark_note": "#06b6d4",  # cyan
+    "twin_win": "#ec4899",  # pink
+    "snowball": "#84cc16",  # lime
 }

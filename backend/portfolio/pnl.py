@@ -37,9 +37,11 @@ Usage:
     # Get risk metrics
     metrics = compute_risk_metrics(pnl)
 
-Author: Thomas
-Created: 2025
+Author: Thomas Vaudescal
+Created: 2026
 """
+
+from __future__ import annotations
 
 from typing import NamedTuple
 
@@ -50,8 +52,10 @@ from numba import njit, prange
 # Data Classes for Results
 # =============================================================================
 
+
 class RiskMetrics(NamedTuple):
     """Risk metrics computed from P&L distribution."""
+
     mean_pnl: float
     std_pnl: float
     var_95: float
@@ -69,6 +73,7 @@ class RiskMetrics(NamedTuple):
 # Core P&L Calculation (Numba-optimized)
 # =============================================================================
 
+
 @njit(parallel=True, cache=True, fastmath=True)
 def calculate_portfolio_pnl_vectorized(
     terminal_prices: np.ndarray,
@@ -77,7 +82,7 @@ def calculate_portfolio_pnl_vectorized(
     position_types: np.ndarray,
     quantities: np.ndarray,
     premiums: np.ndarray,
-    multiplier: float = 100.0
+    multiplier: float = 100.0,
 ) -> np.ndarray:
     """
     Calculate portfolio P&L for all terminal prices in parallel.
@@ -131,7 +136,12 @@ def calculate_portfolio_pnl_vectorized(
                 intrinsic = max(0.0, strikes[j] - spot)
 
             # P&L = position * (payoff - premium) * quantity * multiplier
-            leg_pnl = position_types[j] * (intrinsic - premiums[j]) * quantities[j] * multiplier
+            leg_pnl = (
+                position_types[j]
+                * (intrinsic - premiums[j])
+                * quantities[j]
+                * multiplier
+            )
             path_pnl += leg_pnl
 
         pnl[i] = path_pnl
@@ -149,7 +159,7 @@ def calculate_portfolio_pnl_with_stock(
     premiums: np.ndarray,
     stock_quantity: float,
     stock_entry_price: float,
-    multiplier: float = 100.0
+    multiplier: float = 100.0,
 ) -> np.ndarray:
     """
     Calculate portfolio P&L including stock position.
@@ -197,7 +207,12 @@ def calculate_portfolio_pnl_with_stock(
             else:  # Put
                 intrinsic = max(0.0, strikes[j] - spot)
 
-            leg_pnl = position_types[j] * (intrinsic - premiums[j]) * quantities[j] * multiplier
+            leg_pnl = (
+                position_types[j]
+                * (intrinsic - premiums[j])
+                * quantities[j]
+                * multiplier
+            )
             path_pnl += leg_pnl
 
         # Stock P&L
@@ -212,6 +227,7 @@ def calculate_portfolio_pnl_with_stock(
 # =============================================================================
 # Risk Metrics Computation (Numba-optimized)
 # =============================================================================
+
 
 @njit(cache=True, fastmath=True)
 def compute_risk_metrics_core(pnl: np.ndarray) -> tuple[float, ...]:
@@ -244,8 +260,8 @@ def compute_risk_metrics_core(pnl: np.ndarray) -> tuple[float, ...]:
     var_99 = sorted_pnl[var_99_idx]
 
     # CVaR (Expected Shortfall) - mean of worst cases
-    cvar_95 = np.mean(sorted_pnl[:var_95_idx + 1]) if var_95_idx > 0 else sorted_pnl[0]
-    cvar_99 = np.mean(sorted_pnl[:var_99_idx + 1]) if var_99_idx > 0 else sorted_pnl[0]
+    cvar_95 = np.mean(sorted_pnl[: var_95_idx + 1]) if var_95_idx > 0 else sorted_pnl[0]
+    cvar_99 = np.mean(sorted_pnl[: var_99_idx + 1]) if var_99_idx > 0 else sorted_pnl[0]
 
     # Probability of profit
     n_profit = 0
@@ -258,8 +274,17 @@ def compute_risk_metrics_core(pnl: np.ndarray) -> tuple[float, ...]:
     max_profit = np.max(pnl)
     max_loss = np.min(pnl)
 
-    return (mean_pnl, std_pnl, var_95, var_99, cvar_95, cvar_99,
-            prob_profit, max_profit, max_loss)
+    return (
+        mean_pnl,
+        std_pnl,
+        var_95,
+        var_99,
+        cvar_95,
+        cvar_99,
+        prob_profit,
+        max_profit,
+        max_loss,
+    )
 
 
 @njit(cache=True, fastmath=True)
@@ -330,13 +355,14 @@ def compute_risk_metrics(pnl: np.ndarray) -> RiskMetrics:
         max_profit=core_metrics[7],
         max_loss=core_metrics[8],
         skewness=skew,
-        kurtosis=kurt
+        kurtosis=kurt,
     )
 
 
 # =============================================================================
 # Percentile Computation (for distributions)
 # =============================================================================
+
 
 @njit(cache=True, fastmath=True)
 def compute_percentiles(pnl: np.ndarray, percentiles: np.ndarray) -> np.ndarray:
@@ -372,6 +398,7 @@ def compute_percentiles(pnl: np.ndarray, percentiles: np.ndarray) -> np.ndarray:
 # Payoff Curve Generation
 # =============================================================================
 
+
 @njit(cache=True, fastmath=True)
 def compute_payoff_curve(
     spot_range: np.ndarray,
@@ -382,7 +409,7 @@ def compute_payoff_curve(
     premiums: np.ndarray,
     stock_quantity: float = 0.0,
     stock_entry_price: float = 0.0,
-    multiplier: float = 100.0
+    multiplier: float = 100.0,
 ) -> np.ndarray:
     """
     Compute theoretical payoff curve at expiration.
@@ -431,7 +458,12 @@ def compute_payoff_curve(
             else:  # Put
                 intrinsic = max(0.0, strikes[j] - spot)
 
-            leg_pnl = position_types[j] * (intrinsic - premiums[j]) * quantities[j] * multiplier
+            leg_pnl = (
+                position_types[j]
+                * (intrinsic - premiums[j])
+                * quantities[j]
+                * multiplier
+            )
             total_pnl += leg_pnl
 
         # Stock payoff
@@ -447,11 +479,9 @@ def compute_payoff_curve(
 # Breakeven Analysis
 # =============================================================================
 
+
 @njit(cache=True)
-def find_breakeven_points(
-    payoff: np.ndarray,
-    spot_range: np.ndarray
-) -> np.ndarray:
+def find_breakeven_points(payoff: np.ndarray, spot_range: np.ndarray) -> np.ndarray:
     """
     Find approximate breakeven points from payoff curve.
 
@@ -485,7 +515,8 @@ def find_breakeven_points(
 # Utility Functions
 # =============================================================================
 
-def prepare_position_arrays(positions: list) -> tuple[np.ndarray, ...]:
+
+def prepare_position_arrays(positions: list[dict]) -> tuple[np.ndarray, ...]:
     """
     Convert list of position dictionaries to numpy arrays for Numba functions.
 
@@ -510,16 +541,16 @@ def prepare_position_arrays(positions: list) -> tuple[np.ndarray, ...]:
     premiums = np.zeros(n_legs, dtype=np.float64)
 
     for i, pos in enumerate(positions):
-        strikes[i] = pos['strike']
-        option_types[i] = 1.0 if pos['option_type'].lower() == 'call' else -1.0
-        position_types[i] = 1.0 if pos['position_type'].lower() == 'long' else -1.0
-        quantities[i] = pos.get('quantity', 1)
-        premiums[i] = pos.get('premium', 0.0)
+        strikes[i] = pos["strike"]
+        option_types[i] = 1.0 if pos["option_type"].lower() == "call" else -1.0
+        position_types[i] = 1.0 if pos["position_type"].lower() == "long" else -1.0
+        quantities[i] = pos.get("quantity", 1)
+        premiums[i] = pos.get("premium", 0.0)
 
     return strikes, option_types, position_types, quantities, premiums
 
 
-def warm_up_jit():
+def warm_up_jit() -> None:
     """
     Warm up JIT compilation by running small calculations.
 
@@ -535,8 +566,7 @@ def warm_up_jit():
 
     # Trigger compilation
     pnl = calculate_portfolio_pnl_vectorized(
-        terminal_prices, strikes, option_types,
-        position_types, quantities, premiums
+        terminal_prices, strikes, option_types, position_types, quantities, premiums
     )
     _ = compute_risk_metrics(pnl)
     _ = compute_percentiles(pnl, np.array([5.0, 50.0, 95.0]))
@@ -593,8 +623,13 @@ if __name__ == "__main__":
     # Test calculate_portfolio_pnl_vectorized
     print("\n--- P&L Calculation (multiplier=1.0) ---")
     pnl = calculate_portfolio_pnl_vectorized(
-        terminal_prices, strikes, option_types,
-        position_types, quantities, premiums, multiplier=1.0
+        terminal_prices,
+        strikes,
+        option_types,
+        position_types,
+        quantities,
+        premiums,
+        multiplier=1.0,
     )
     for s, p in zip(terminal_prices, pnl):
         print(f"  Spot={s:6.1f}: P&L=${p:+7.2f}")
@@ -613,9 +648,15 @@ if __name__ == "__main__":
     call_premiums = np.array([3.0], dtype=np.float64)
 
     pnl_covered = calculate_portfolio_pnl_with_stock(
-        terminal_prices, call_strikes, call_types, call_positions,
-        call_quantities, call_premiums,
-        stock_quantity=100.0, stock_entry_price=100.0, multiplier=1.0
+        terminal_prices,
+        call_strikes,
+        call_types,
+        call_positions,
+        call_quantities,
+        call_premiums,
+        stock_quantity=100.0,
+        stock_entry_price=100.0,
+        multiplier=1.0,
     )
     for s, p in zip(terminal_prices, pnl_covered):
         print(f"  Spot={s:6.1f}: P&L=${p:+9.2f}")
@@ -641,8 +682,13 @@ if __name__ == "__main__":
     print("\n--- Payoff Curve ---")
     spot_range = np.linspace(80, 120, 9)
     payoff = compute_payoff_curve(
-        spot_range, strikes, option_types,
-        position_types, quantities, premiums, multiplier=1.0
+        spot_range,
+        strikes,
+        option_types,
+        position_types,
+        quantities,
+        premiums,
+        multiplier=1.0,
     )
     print("  Spot    P&L")
     for s, p in zip(spot_range, payoff):

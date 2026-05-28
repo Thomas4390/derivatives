@@ -29,9 +29,15 @@ class MyGBM(Model):
     Produces log-normal terminal distribution."""
 
     PARAMETER_SPECS = [
-        {"name": "sigma", "display_name": "Volatility (sigma)",
-         "default": 0.20, "min_value": 0.01, "max_value": 1.0,
-         "step": 0.01, "description": "Annualized volatility (0.20 = 20%)"},
+        {
+            "name": "sigma",
+            "display_name": "Volatility (sigma)",
+            "default": 0.20,
+            "min_value": 0.01,
+            "max_value": 1.0,
+            "step": 0.01,
+            "description": "Annualized volatility (0.20 = 20%)",
+        },
     ]
 
     EQUATION_LATEX = {
@@ -39,27 +45,26 @@ class MyGBM(Model):
         "mc": r"S_{t+\\Delta t} = S_t \\exp\\!\\left[\\left(r - q - \\tfrac{1}{2}\\sigma^2\\right)\\!\\Delta t + \\sigma\\sqrt{\\Delta t}\\, Z\\right]",
     }
 
-    def __init__(self, sigma=0.20):
+    def __init__(self, sigma: float = 0.20) -> None:
         self._sigma = sigma
 
     @property
-    def name(self):
+    def name(self) -> str:
         return "Custom GBM"
 
     @property
-    def supported_engines(self):
+    def supported_engines(self) -> list[PricingCapability]:
         return [PricingCapability.MONTE_CARLO]
 
-    def get_parameters(self):
+    def get_parameters(self) -> dict[str, float]:
         return {"sigma": self._sigma}
 
-    def drift(self, s, v, t, r, q):
+    def drift(self, s: float, v: float, t: float, r: float, q: float) -> float:
         return (r - q) * s
 
-    def diffusion(self, s, v, t):
+    def diffusion(self, s: float, v: float, t: float) -> float:
         return self._sigma * s
 ''',
-
     "CEV (Constant Elasticity of Variance)": '''\
 import numpy as np
 from backend.core.interfaces import Model
@@ -84,36 +89,47 @@ class CEVModel(Model):
     }
 
     PARAMETER_SPECS = [
-        {"name": "sigma", "display_name": "Volatility (sigma)",
-         "default": 0.65, "min_value": 0.01, "max_value": 5.0,
-         "step": 0.01, "description": "CEV vol param (effective vol = sigma * S^(gamma-1))"},
-        {"name": "gamma", "display_name": "Elasticity (gamma)",
-         "default": 0.75, "min_value": 0.0, "max_value": 1.5,
-         "step": 0.05, "description": "Elasticity of variance (1=GBM, 0.5=sqrt, 0=normal)"},
+        {
+            "name": "sigma",
+            "display_name": "Volatility (sigma)",
+            "default": 0.65,
+            "min_value": 0.01,
+            "max_value": 5.0,
+            "step": 0.01,
+            "description": "CEV vol param (effective vol = sigma * S^(gamma-1))",
+        },
+        {
+            "name": "gamma",
+            "display_name": "Elasticity (gamma)",
+            "default": 0.75,
+            "min_value": 0.0,
+            "max_value": 1.5,
+            "step": 0.05,
+            "description": "Elasticity of variance (1=GBM, 0.5=sqrt, 0=normal)",
+        },
     ]
 
-    def __init__(self, sigma=0.65, gamma=0.75):
+    def __init__(self, sigma: float = 0.65, gamma: float = 0.75) -> None:
         self._sigma = sigma
         self._gamma = gamma
 
     @property
-    def name(self):
+    def name(self) -> str:
         return "CEV Model"
 
     @property
-    def supported_engines(self):
+    def supported_engines(self) -> list[PricingCapability]:
         return [PricingCapability.MONTE_CARLO]
 
-    def get_parameters(self):
+    def get_parameters(self) -> dict[str, float]:
         return {"sigma": self._sigma, "gamma": self._gamma}
 
-    def drift(self, s, v, t, r, q):
+    def drift(self, s: float, v: float, t: float, r: float, q: float) -> float:
         return (r - q) * s
 
-    def diffusion(self, s, v, t):
+    def diffusion(self, s: float, v: float, t: float) -> float:
         return self._sigma * np.power(np.maximum(s, 1e-10), self._gamma)
 ''',
-
     "Mean-Reverting (Ornstein-Uhlenbeck)": '''\
 import numpy as np
 from backend.core.interfaces import Model
@@ -134,40 +150,57 @@ class OUModel(Model):
     }
 
     PARAMETER_SPECS = [
-        {"name": "kappa", "display_name": "Mean Reversion (kappa)",
-         "default": 2.0, "min_value": 0.1, "max_value": 10.0,
-         "step": 0.1, "description": "Speed of mean reversion (half-life = ln(2)/kappa)"},
-        {"name": "theta", "display_name": "Long-Run Level (theta)",
-         "default": 100.0, "min_value": 10.0, "max_value": 500.0,
-         "step": 1.0, "description": "Long-run equilibrium price level"},
-        {"name": "sigma", "display_name": "Volatility (sigma)",
-         "default": 0.20, "min_value": 0.01, "max_value": 1.0,
-         "step": 0.01, "description": "Annualized volatility (0.20 = 20%)"},
+        {
+            "name": "kappa",
+            "display_name": "Mean Reversion (kappa)",
+            "default": 2.0,
+            "min_value": 0.1,
+            "max_value": 10.0,
+            "step": 0.1,
+            "description": "Speed of mean reversion (half-life = ln(2)/kappa)",
+        },
+        {
+            "name": "theta",
+            "display_name": "Long-Run Level (theta)",
+            "default": 100.0,
+            "min_value": 10.0,
+            "max_value": 500.0,
+            "step": 1.0,
+            "description": "Long-run equilibrium price level",
+        },
+        {
+            "name": "sigma",
+            "display_name": "Volatility (sigma)",
+            "default": 0.20,
+            "min_value": 0.01,
+            "max_value": 1.0,
+            "step": 0.01,
+            "description": "Annualized volatility (0.20 = 20%)",
+        },
     ]
 
-    def __init__(self, kappa=2.0, theta=100.0, sigma=0.20):
+    def __init__(self, kappa: float = 2.0, theta: float = 100.0, sigma: float = 0.20) -> None:
         self._kappa = kappa
         self._theta = theta
         self._sigma = sigma
 
     @property
-    def name(self):
+    def name(self) -> str:
         return "OU Mean-Reverting"
 
     @property
-    def supported_engines(self):
+    def supported_engines(self) -> list[PricingCapability]:
         return [PricingCapability.MONTE_CARLO]
 
-    def get_parameters(self):
+    def get_parameters(self) -> dict[str, float]:
         return {"kappa": self._kappa, "theta": self._theta, "sigma": self._sigma}
 
-    def drift(self, s, v, t, r, q):
+    def drift(self, s: float, v: float, t: float, r: float, q: float) -> float:
         return self._kappa * (self._theta - s)
 
-    def diffusion(self, s, v, t):
+    def diffusion(self, s: float, v: float, t: float) -> float:
         return self._sigma * s
 ''',
-
     "Merton Jump-Diffusion": '''\
 import numpy as np
 from backend.core.interfaces import Model
@@ -179,7 +212,7 @@ class MertonJD(Model):
 
     Combines GBM diffusion with compound Poisson jumps:
       - dN ~ Poisson(lambda*dt): jump arrival
-      - J ~ N(mu_j, sigma_j^2): log-jump size
+      - J ~ N(alpha_j, sigma_j^2): log-jump size
       - k = E[exp(J)-1]: jump compensator
 
     Defines jump() for MC and characteristic_function() for FFT.
@@ -193,49 +226,83 @@ class MertonJD(Model):
     }
 
     PARAMETER_SPECS = [
-        {"name": "sigma", "display_name": "Diffusion Vol (sigma)",
-         "default": 0.18, "min_value": 0.01, "max_value": 1.0,
-         "step": 0.01, "description": "Diffusive volatility (continuous part)"},
-        {"name": "lambda_j", "display_name": "Jump Intensity (lambda)",
-         "default": 0.5, "min_value": 0.0, "max_value": 5.0,
-         "step": 0.1, "description": "Expected number of jumps per year"},
-        {"name": "mu_j", "display_name": "Mean Log-Jump (mu_j)",
-         "default": -0.10, "min_value": -0.5, "max_value": 0.5,
-         "step": 0.01, "description": "Mean of log-jump size (negative = downward jumps)"},
-        {"name": "sigma_j", "display_name": "Jump Vol (sigma_j)",
-         "default": 0.15, "min_value": 0.01, "max_value": 0.5,
-         "step": 0.01, "description": "Std dev of log-jump size"},
+        {
+            "name": "sigma",
+            "display_name": "Diffusion Vol (sigma)",
+            "default": 0.18,
+            "min_value": 0.01,
+            "max_value": 1.0,
+            "step": 0.01,
+            "description": "Diffusive volatility (continuous part)",
+        },
+        {
+            "name": "lam",
+            "display_name": "Jump Intensity (lambda)",
+            "default": 0.5,
+            "min_value": 0.0,
+            "max_value": 5.0,
+            "step": 0.1,
+            "description": "Expected number of jumps per year",
+        },
+        {
+            "name": "alpha_j",
+            "display_name": "Mean Log-Jump (alpha_j)",
+            "default": -0.10,
+            "min_value": -0.5,
+            "max_value": 0.5,
+            "step": 0.01,
+            "description": "Mean of log-jump size (negative = downward jumps)",
+        },
+        {
+            "name": "sigma_j",
+            "display_name": "Jump Vol (sigma_j)",
+            "default": 0.15,
+            "min_value": 0.01,
+            "max_value": 0.5,
+            "step": 0.01,
+            "description": "Std dev of log-jump size",
+        },
     ]
 
-    def __init__(self, sigma=0.18, lambda_j=0.5, mu_j=-0.10, sigma_j=0.15):
+    def __init__(
+        self,
+        sigma: float = 0.18,
+        lam: float = 0.5,
+        alpha_j: float = -0.10,
+        sigma_j: float = 0.15,
+    ) -> None:
         self._sigma = sigma
-        self._lambda_j = lambda_j
-        self._mu_j = mu_j
+        self._lambda_j = lam
+        self._mu_j = alpha_j
         self._sigma_j = sigma_j
         # Jump compensator: k = E[exp(J) - 1]
-        self._k = np.exp(mu_j + 0.5 * sigma_j**2) - 1
+        self._k = np.exp(alpha_j + 0.5 * sigma_j**2) - 1
 
     @property
-    def name(self):
+    def name(self) -> str:
         return "Merton Jump-Diffusion"
 
     @property
-    def supported_engines(self):
+    def supported_engines(self) -> list[PricingCapability]:
         return [PricingCapability.MONTE_CARLO, PricingCapability.FFT]
 
-    def get_parameters(self):
-        return {"sigma": self._sigma, "lambda_j": self._lambda_j,
-                "mu_j": self._mu_j, "sigma_j": self._sigma_j}
+    def get_parameters(self) -> dict[str, float]:
+        return {
+            "sigma": self._sigma,
+            "lam": self._lambda_j,
+            "alpha_j": self._mu_j,
+            "sigma_j": self._sigma_j,
+        }
 
     # ── Monte Carlo: drift + diffusion + jump ──
-    def drift(self, s, v, t, r, q):
+    def drift(self, s: float, v: float, t: float, r: float, q: float) -> float:
         # Compensated drift: subtract jump premium
         return (r - q - self._lambda_j * self._k) * s
 
-    def diffusion(self, s, v, t):
+    def diffusion(self, s: float, v: float, t: float) -> float:
         return self._sigma * s
 
-    def jump(self, s, dt):
+    def jump(self, s: np.ndarray, dt: float) -> np.ndarray:
         """Compound Poisson jump at each timestep.
         Returns additive jump increment: S * sum(exp(J_i) - 1)."""
         n = len(s) if hasattr(s, \'__len__\') else 1
@@ -249,7 +316,9 @@ class MertonJD(Model):
         return s * total
 
     # ── Characteristic function for FFT ──
-    def characteristic_function(self, u, s0, t, r, q=0.0):
+    def characteristic_function(
+        self, u: complex, s0: float, t: float, r: float, q: float = 0.0
+    ) -> complex:
         """Merton CF: GBM CF * jump CF."""
         sigma2 = self._sigma**2
         x = np.log(s0)
@@ -265,7 +334,6 @@ class MertonJD(Model):
 
         return gbm_cf * jump_cf
 ''',
-
     "Square-Root / CIR Process": '''\
 import numpy as np
 from backend.core.interfaces import Model
@@ -289,40 +357,57 @@ class CIRModel(Model):
     }
 
     PARAMETER_SPECS = [
-        {"name": "kappa", "display_name": "Mean Reversion (kappa)",
-         "default": 2.0, "min_value": 0.1, "max_value": 10.0,
-         "step": 0.1, "description": "Speed of mean reversion"},
-        {"name": "theta", "display_name": "Long-Run Level (theta)",
-         "default": 100.0, "min_value": 10.0, "max_value": 500.0,
-         "step": 1.0, "description": "Long-run equilibrium level"},
-        {"name": "sigma", "display_name": "Vol of sqrt(S) (sigma)",
-         "default": 2.0, "min_value": 0.1, "max_value": 10.0,
-         "step": 0.1, "description": "Diffusion param (effective vol = sigma/sqrt(S))"},
+        {
+            "name": "kappa",
+            "display_name": "Mean Reversion (kappa)",
+            "default": 2.0,
+            "min_value": 0.1,
+            "max_value": 10.0,
+            "step": 0.1,
+            "description": "Speed of mean reversion",
+        },
+        {
+            "name": "theta",
+            "display_name": "Long-Run Level (theta)",
+            "default": 100.0,
+            "min_value": 10.0,
+            "max_value": 500.0,
+            "step": 1.0,
+            "description": "Long-run equilibrium level",
+        },
+        {
+            "name": "sigma",
+            "display_name": "Vol of sqrt(S) (sigma)",
+            "default": 2.0,
+            "min_value": 0.1,
+            "max_value": 10.0,
+            "step": 0.1,
+            "description": "Diffusion param (effective vol = sigma/sqrt(S))",
+        },
     ]
 
-    def __init__(self, kappa=2.0, theta=100.0, sigma=2.0):
+    def __init__(self, kappa: float = 2.0, theta: float = 100.0, sigma: float = 2.0) -> None:
         self._kappa = kappa
         self._theta = theta
         self._sigma = sigma
 
     @property
-    def name(self):
+    def name(self) -> str:
         return "CIR Square-Root"
 
     @property
-    def supported_engines(self):
+    def supported_engines(self) -> list[PricingCapability]:
         return [PricingCapability.MONTE_CARLO]
 
-    def get_parameters(self):
+    def get_parameters(self) -> dict[str, float]:
         return {"kappa": self._kappa, "theta": self._theta, "sigma": self._sigma}
 
-    def drift(self, s, v, t, r, q):
+    def drift(self, s: float, v: float, t: float, r: float, q: float) -> float:
         return self._kappa * (self._theta - s)
 
-    def diffusion(self, s, v, t):
+    def diffusion(self, s: float, v: float, t: float) -> float:
         return self._sigma * np.sqrt(np.maximum(s, 1e-10))
 ''',
-
     "Exponential OU (Schwartz)": '''\
 import numpy as np
 from backend.core.interfaces import Model
@@ -345,42 +430,59 @@ class ExpOUModel(Model):
     }
 
     PARAMETER_SPECS = [
-        {"name": "kappa", "display_name": "Mean Reversion (kappa)",
-         "default": 1.0, "min_value": 0.1, "max_value": 10.0,
-         "step": 0.1, "description": "Speed of log-price mean reversion"},
-        {"name": "theta", "display_name": "Long-Run Price (theta)",
-         "default": 100.0, "min_value": 10.0, "max_value": 500.0,
-         "step": 1.0, "description": "Long-run equilibrium price level"},
-        {"name": "sigma", "display_name": "Volatility (sigma)",
-         "default": 0.20, "min_value": 0.01, "max_value": 1.0,
-         "step": 0.01, "description": "Log-price volatility (0.20 = 20%)"},
+        {
+            "name": "kappa",
+            "display_name": "Mean Reversion (kappa)",
+            "default": 1.0,
+            "min_value": 0.1,
+            "max_value": 10.0,
+            "step": 0.1,
+            "description": "Speed of log-price mean reversion",
+        },
+        {
+            "name": "theta",
+            "display_name": "Long-Run Price (theta)",
+            "default": 100.0,
+            "min_value": 10.0,
+            "max_value": 500.0,
+            "step": 1.0,
+            "description": "Long-run equilibrium price level",
+        },
+        {
+            "name": "sigma",
+            "display_name": "Volatility (sigma)",
+            "default": 0.20,
+            "min_value": 0.01,
+            "max_value": 1.0,
+            "step": 0.01,
+            "description": "Log-price volatility (0.20 = 20%)",
+        },
     ]
 
-    def __init__(self, kappa=1.0, theta=100.0, sigma=0.20):
+    def __init__(self, kappa: float = 1.0, theta: float = 100.0, sigma: float = 0.20) -> None:
         self._kappa = kappa
         self._theta = theta
         self._sigma = sigma
 
     @property
-    def name(self):
+    def name(self) -> str:
         return "Exp-OU (Schwartz)"
 
     @property
-    def supported_engines(self):
+    def supported_engines(self) -> list[PricingCapability]:
         return [PricingCapability.MONTE_CARLO]
 
-    def get_parameters(self):
+    def get_parameters(self) -> dict[str, float]:
         return {"kappa": self._kappa, "theta": self._theta, "sigma": self._sigma}
 
-    def drift(self, s, v, t, r, q):
+    def drift(self, s: float, v: float, t: float, r: float, q: float) -> float:
         log_s = np.log(np.maximum(s, 1e-10))
         log_theta = np.log(self._theta)
         return s * (self._kappa * (log_theta - log_s) + 0.5 * self._sigma**2)
 
-    def diffusion(self, s, v, t):
+    def diffusion(self, s: float, v: float, t: float) -> float:
         return self._sigma * s
 ''',
-
     "Heston-Like (Stochastic Volatility)": '''\
 import numpy as np
 from backend.core.interfaces import Model
@@ -389,96 +491,139 @@ from backend.core.result_types import PricingCapability
 class HestonLike(Model):
     """Heston-style stochastic volatility model.
     dS = (r - q)*S*dt + sqrt(V)*S*dW_1
-    dV = kappa*(theta - V)*dt + xi*sqrt(V)*dW_2
+    dV = kappa*(theta - V)*dt + alpha*sqrt(V)*dW_2
     corr(dW_1, dW_2) = rho
 
     Variance V follows a CIR process, correlated with price.
-    Feller condition 2*kappa*theta > xi^2 ensures V > 0.
+    Feller condition 2*kappa*theta > alpha^2 ensures V > 0.
 
     The simulator detects variance_drift/variance_diffusion/get_correlation
     and automatically generates correlated Brownian motions."""
 
     EQUATION_LATEX = {
         "main": r"dS = (r - q) \\, S \\, dt + \\sqrt{V} \\, S \\, dW_1",
-        "vol": r"dV = \\kappa(\\theta - V) \\, dt + \\xi \\sqrt{V} \\, dW_2, \\quad \\mathrm{corr}(dW_1, dW_2) = \\rho",
+        "vol": r"dV = \\kappa(\\theta - V) \\, dt + \\alpha \\sqrt{V} \\, dW_2, \\quad \\mathrm{corr}(dW_1, dW_2) = \\rho",
         "cf": r"\\varphi(u) = \\exp\\!\\bigl(C(u,T) + D(u,T)\\,v_0 + iu\\ln S_0\\bigr)",
-        "mc": r"\\begin{aligned} S_{t+\\Delta t} &= S_t \\exp\\!\\left[(r-q-\\tfrac{V_t}{2})\\Delta t + \\sqrt{V_t\\Delta t}\\, Z_1\\right] \\\\ V_{t+\\Delta t} &= V_t + \\kappa(\\theta - V_t)\\Delta t + \\xi\\sqrt{V_t\\Delta t}\\, Z_2 \\end{aligned}",
+        "mc": r"\\begin{aligned} S_{t+\\Delta t} &= S_t \\exp\\!\\left[(r-q-\\tfrac{V_t}{2})\\Delta t + \\sqrt{V_t\\Delta t}\\, Z_1\\right] \\\\ V_{t+\\Delta t} &= V_t + \\kappa(\\theta - V_t)\\Delta t + \\alpha\\sqrt{V_t\\Delta t}\\, Z_2 \\end{aligned}",
     }
 
     PARAMETER_SPECS = [
-        {"name": "v0", "display_name": "Initial Variance (V0)",
-         "default": 0.04, "min_value": 0.001, "max_value": 0.50,
-         "step": 0.005, "description": "Initial variance (0.04 = 20% vol)"},
-        {"name": "kappa", "display_name": "Mean Reversion (kappa)",
-         "default": 2.0, "min_value": 0.1, "max_value": 10.0,
-         "step": 0.1, "description": "Speed of variance mean reversion"},
-        {"name": "theta", "display_name": "Long-Run Variance (theta)",
-         "default": 0.04, "min_value": 0.001, "max_value": 0.50,
-         "step": 0.005, "description": "Long-run variance level (0.04 = 20% vol)"},
-        {"name": "xi", "display_name": "Vol of Vol (xi)",
-         "default": 0.3, "min_value": 0.01, "max_value": 1.5,
-         "step": 0.01, "description": "Volatility of variance (vol-of-vol)"},
-        {"name": "rho", "display_name": "Correlation (rho)",
-         "default": -0.7, "min_value": -0.99, "max_value": 0.99,
-         "step": 0.01, "description": "Price-variance correlation (negative = leverage)"},
+        {
+            "name": "v0",
+            "display_name": "Initial Variance (V0)",
+            "default": 0.04,
+            "min_value": 0.001,
+            "max_value": 0.50,
+            "step": 0.005,
+            "description": "Initial variance (0.04 = 20% vol)",
+        },
+        {
+            "name": "kappa",
+            "display_name": "Mean Reversion (kappa)",
+            "default": 2.0,
+            "min_value": 0.1,
+            "max_value": 10.0,
+            "step": 0.1,
+            "description": "Speed of variance mean reversion",
+        },
+        {
+            "name": "theta",
+            "display_name": "Long-Run Variance (theta)",
+            "default": 0.04,
+            "min_value": 0.001,
+            "max_value": 0.50,
+            "step": 0.005,
+            "description": "Long-run variance level (0.04 = 20% vol)",
+        },
+        {
+            "name": "alpha",
+            "display_name": "Vol of Vol (alpha)",
+            "default": 0.3,
+            "min_value": 0.01,
+            "max_value": 1.5,
+            "step": 0.01,
+            "description": "Volatility of variance (vol-of-vol)",
+        },
+        {
+            "name": "rho",
+            "display_name": "Correlation (rho)",
+            "default": -0.7,
+            "min_value": -0.99,
+            "max_value": 0.99,
+            "step": 0.01,
+            "description": "Price-variance correlation (negative = leverage)",
+        },
     ]
 
-    def __init__(self, v0=0.04, kappa=2.0, theta=0.04, xi=0.3, rho=-0.7):
+    def __init__(
+        self,
+        v0: float = 0.04,
+        kappa: float = 2.0,
+        theta: float = 0.04,
+        alpha: float = 0.3,
+        rho: float = -0.7,
+    ) -> None:
         self._v0 = v0
         self._kappa = kappa
         self._theta = theta
-        self._xi = xi
+        self._xi = alpha
         self._rho = rho
 
     @property
-    def name(self):
+    def name(self) -> str:
         return "Heston-Like Stoch Vol"
 
     @property
-    def supported_engines(self):
+    def supported_engines(self) -> list[PricingCapability]:
         return [PricingCapability.MONTE_CARLO, PricingCapability.FFT]
 
-    def get_parameters(self):
-        return {"v0": self._v0, "kappa": self._kappa,
-                "theta": self._theta, "xi": self._xi, "rho": self._rho}
+    def get_parameters(self) -> dict[str, float]:
+        return {
+            "v0": self._v0,
+            "kappa": self._kappa,
+            "theta": self._theta,
+            "alpha": self._xi,
+            "rho": self._rho,
+        }
 
     # ── Price SDE coefficients ──
-    def drift(self, s, v, t, r, q):
+    def drift(self, s: float, v: float, t: float, r: float, q: float) -> float:
         return (r - q) * s
 
-    def diffusion(self, s, v, t):
+    def diffusion(self, s: float, v: float, t: float) -> float:
         return np.sqrt(np.maximum(v, 1e-10)) * s
 
     # ── Variance SDE coefficients (detected by simulator) ──
-    def variance_drift(self, v, s, t):
+    def variance_drift(self, v: np.ndarray, s: np.ndarray, t: float) -> np.ndarray:
         return self._kappa * (self._theta - v)
 
-    def variance_diffusion(self, v, s, t):
+    def variance_diffusion(self, v: np.ndarray, s: np.ndarray, t: float) -> np.ndarray:
         return self._xi * np.sqrt(np.maximum(v, 1e-10))
 
-    def get_correlation(self):
+    def get_correlation(self) -> float:
         return self._rho
 
     # ── Characteristic function for FFT pricing ──
-    def characteristic_function(self, u, s0, t, r, q=0.0):
+    def characteristic_function(
+        self, u: complex, s0: float, t: float, r: float, q: float = 0.0
+    ) -> complex:
         """Heston semi-analytical CF."""
-        kappa, theta, xi, rho, v0 = (
+        kappa, theta, alpha, rho, v0 = (
             self._kappa, self._theta, self._xi, self._rho, self._v0
         )
         x = np.log(s0)
-        d = np.sqrt((rho * xi * 1j * u - kappa) ** 2
-                     + xi ** 2 * (1j * u + u ** 2))
-        g = (kappa - rho * xi * 1j * u - d) / (kappa - rho * xi * 1j * u + d)
-        C = (r - q) * 1j * u * t + (kappa * theta / xi ** 2) * (
-            (kappa - rho * xi * 1j * u - d) * t
+        d = np.sqrt((rho * alpha * 1j * u - kappa) ** 2
+                     + alpha ** 2 * (1j * u + u ** 2))
+        g = (kappa - rho * alpha * 1j * u - d) / (kappa - rho * alpha * 1j * u + d)
+        C = (r - q) * 1j * u * t + (kappa * theta / alpha ** 2) * (
+            (kappa - rho * alpha * 1j * u - d) * t
             - 2.0 * np.log((1.0 - g * np.exp(-d * t)) / (1.0 - g))
         )
-        D = ((kappa - rho * xi * 1j * u - d) / xi ** 2) * (
+        D = ((kappa - rho * alpha * 1j * u - d) / alpha ** 2) * (
             (1.0 - np.exp(-d * t)) / (1.0 - g * np.exp(-d * t))
         )
         return np.exp(C + D * v0 + 1j * u * x)
 ''',
-
     "GBM with FFT (Characteristic Function)": '''\
 import numpy as np
 from backend.core.interfaces import Model
@@ -501,34 +646,42 @@ class GBMWithFFT(Model):
     }
 
     PARAMETER_SPECS = [
-        {"name": "sigma", "display_name": "Volatility (sigma)",
-         "default": 0.20, "min_value": 0.01, "max_value": 1.0,
-         "step": 0.01, "description": "Annualized volatility (0.20 = 20%)"},
+        {
+            "name": "sigma",
+            "display_name": "Volatility (sigma)",
+            "default": 0.20,
+            "min_value": 0.01,
+            "max_value": 1.0,
+            "step": 0.01,
+            "description": "Annualized volatility (0.20 = 20%)",
+        },
     ]
 
-    def __init__(self, sigma=0.20):
+    def __init__(self, sigma: float = 0.20) -> None:
         self._sigma = sigma
 
     @property
-    def name(self):
+    def name(self) -> str:
         return "GBM + FFT"
 
     @property
-    def supported_engines(self):
+    def supported_engines(self) -> list[PricingCapability]:
         return [PricingCapability.MONTE_CARLO, PricingCapability.FFT]
 
-    def get_parameters(self):
+    def get_parameters(self) -> dict[str, float]:
         return {"sigma": self._sigma}
 
     # ── Monte Carlo SDE coefficients ──
-    def drift(self, s, v, t, r, q):
+    def drift(self, s: float, v: float, t: float, r: float, q: float) -> float:
         return (r - q) * s
 
-    def diffusion(self, s, v, t):
+    def diffusion(self, s: float, v: float, t: float) -> float:
         return self._sigma * s
 
     # ── Characteristic function for FFT ──
-    def characteristic_function(self, u, s0, t, r, q=0.0):
+    def characteristic_function(
+        self, u: complex, s0: float, t: float, r: float, q: float = 0.0
+    ) -> complex:
         """phi(u) = exp(i*u*x + i*u*(r-q-0.5*sigma^2)*t - 0.5*sigma^2*t*u^2)
         where x = ln(s0)."""
         sigma2 = self._sigma ** 2
@@ -554,6 +707,7 @@ _EDITOR_BUTTONS = [
 
 
 # ── Main component ──────────────────────────────────────────────────────
+
 
 def render_custom_model_editor():
     """Render the Custom Model tab with editor, validation, and registration."""
@@ -624,7 +778,11 @@ def render_custom_model_editor():
 
     if st.button("Validate Model", key="validate_custom_btn", type="primary"):
         # Get current code from editor response or session state
-        code = response.get("text") if (response and response.get("text")) else st.session_state.custom_editor_code
+        code = (
+            response.get("text")
+            if (response and response.get("text"))
+            else st.session_state.custom_editor_code
+        )
         st.session_state.custom_editor_code = code
 
         with st.spinner("Running validation suite..."):
@@ -666,7 +824,11 @@ def render_custom_model_editor():
     # Show registration confirmation (survives rerun)
     just_registered = st.session_state.pop("custom_just_registered", None)
     if just_registered:
-        st.success(f"Model **{just_registered}** registered and selected in the sidebar.")
+        st.success(
+            f"Model **{just_registered}** registered and selected in the sidebar."
+        )
 
     if not can_register:
-        st.caption("Validate your model first. All tests must pass before registration.")
+        st.caption(
+            "Validate your model first. All tests must pass before registration."
+        )

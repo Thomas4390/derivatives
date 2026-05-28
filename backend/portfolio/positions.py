@@ -11,19 +11,26 @@ This module provides:
 
 The Instrument (VanillaOption) encapsulates the payoff structure.
 
-Author: Thomas
-Created: 2025
+Author: Thomas Vaudescal
+Created: 2026
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import numpy as np
 
 from backend.instruments.options import VanillaOption
 
+if TYPE_CHECKING:
+    from backend.core.structured_product import StructuredProduct
+
 # =============================================================================
 # POSITION CLASSES
 # =============================================================================
+
 
 @dataclass(frozen=True)
 class PortfolioPosition:
@@ -41,11 +48,12 @@ class PortfolioPosition:
     premium : float
         Premium paid (>0) or received (<0) per unit
     """
+
     instrument: VanillaOption
     quantity: int
     premium: float = 0.0
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         """Validate position."""
         if self.quantity == 0:
             raise ValueError("quantity cannot be zero")
@@ -137,10 +145,11 @@ class StockPosition:
     entry_price : float
         Average entry price per share
     """
+
     quantity: int
     entry_price: float = 0.0
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         """Validate position."""
         if self.quantity == 0:
             raise ValueError("quantity cannot be zero")
@@ -188,6 +197,7 @@ class StockPosition:
 # FACTORY FUNCTIONS
 # =============================================================================
 
+
 def long_call(
     strike: float,
     maturity: float,
@@ -214,7 +224,9 @@ def long_call(
         Long call position
     """
     instrument = VanillaOption(strike=strike, maturity=maturity, is_call=True)
-    return PortfolioPosition(instrument=instrument, quantity=abs(quantity), premium=premium)
+    return PortfolioPosition(
+        instrument=instrument, quantity=abs(quantity), premium=premium
+    )
 
 
 def short_call(
@@ -243,7 +255,9 @@ def short_call(
         Short call position
     """
     instrument = VanillaOption(strike=strike, maturity=maturity, is_call=True)
-    return PortfolioPosition(instrument=instrument, quantity=-abs(quantity), premium=premium)
+    return PortfolioPosition(
+        instrument=instrument, quantity=-abs(quantity), premium=premium
+    )
 
 
 def long_put(
@@ -272,7 +286,9 @@ def long_put(
         Long put position
     """
     instrument = VanillaOption(strike=strike, maturity=maturity, is_call=False)
-    return PortfolioPosition(instrument=instrument, quantity=abs(quantity), premium=premium)
+    return PortfolioPosition(
+        instrument=instrument, quantity=abs(quantity), premium=premium
+    )
 
 
 def short_put(
@@ -301,7 +317,9 @@ def short_put(
         Short put position
     """
     instrument = VanillaOption(strike=strike, maturity=maturity, is_call=False)
-    return PortfolioPosition(instrument=instrument, quantity=-abs(quantity), premium=premium)
+    return PortfolioPosition(
+        instrument=instrument, quantity=-abs(quantity), premium=premium
+    )
 
 
 def long_stock(quantity: int = 100, entry_price: float = 0.0) -> StockPosition:
@@ -321,6 +339,48 @@ def long_stock(quantity: int = 100, entry_price: float = 0.0) -> StockPosition:
         Long stock position
     """
     return StockPosition(quantity=abs(quantity), entry_price=entry_price)
+
+
+@dataclass(frozen=True)
+class StructuredProductPosition:
+    """
+    Position in a structured product.
+
+    Parameters
+    ----------
+    product : StructuredProduct
+        The structured product.
+    quantity : int
+        Number of units (positive = long, negative = short).
+    entry_price : float
+        Price paid as % of notional (e.g., 100.0 = par).
+    """
+
+    product: StructuredProduct
+    quantity: int
+    entry_price: float = 0.0
+
+    def __post_init__(self) -> None:
+        if self.quantity == 0:
+            raise ValueError("quantity cannot be zero")
+
+    @property
+    def sign(self) -> int:
+        """Position direction: +1 long, -1 short."""
+        return 1 if self.quantity > 0 else -1
+
+    @property
+    def is_long(self) -> bool:
+        return self.quantity > 0
+
+    @property
+    def is_short(self) -> bool:
+        return self.quantity < 0
+
+    @property
+    def notional_exposure(self) -> float:
+        """Total notional exposure = |quantity| * product notional."""
+        return abs(self.quantity) * self.product.notional
 
 
 def short_stock(quantity: int = 100, entry_price: float = 0.0) -> StockPosition:
@@ -356,10 +416,14 @@ if __name__ == "__main__":
     # Test factory functions
     print("\n--- Factory Functions ---")
     call = long_call(strike=100, maturity=0.5, quantity=1, premium=5.0)
-    print(f"Long Call: strike={call.strike}, is_long={call.is_long}, is_call={call.is_call}")
+    print(
+        f"Long Call: strike={call.strike}, is_long={call.is_long}, is_call={call.is_call}"
+    )
 
     put = short_put(strike=95, maturity=0.5, quantity=2, premium=3.0)
-    print(f"Short Put: strike={put.strike}, quantity={put.quantity}, is_short={put.is_short}")
+    print(
+        f"Short Put: strike={put.strike}, quantity={put.quantity}, is_short={put.is_short}"
+    )
 
     stock = long_stock(quantity=100, entry_price=100.0)
     print(f"Long Stock: quantity={stock.quantity}, entry={stock.entry_price}")

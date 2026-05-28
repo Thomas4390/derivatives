@@ -24,9 +24,11 @@ References:
       Approximation for the GARCH Option Pricing Model."
       Journal of Computational Finance, 2(4), 75-116.
 
-Author: Thomas
-Created: 2025
+Author: Thomas Vaudescal
+Created: 2026
 """
+
+from __future__ import annotations
 
 import time
 from dataclasses import dataclass
@@ -40,8 +42,10 @@ from numba import njit, prange
 # Types and Enums
 # =============================================================================
 
+
 class GARCHType(Enum):
     """GARCH model type enumeration."""
+
     GARCH = "garch"
     NGARCH = "ngarch"
     GJR_GARCH = "gjr_garch"
@@ -49,6 +53,7 @@ class GARCHType(Enum):
 
 class OptionType(Enum):
     """Option type enumeration."""
+
     CALL = "call"
     PUT = "put"
 
@@ -73,6 +78,7 @@ class GARCHPricingResult:
     parameters : Dict[str, Any]
         Dictionary of model and pricing parameters
     """
+
     price: float
     std_error: float
     computation_time: float
@@ -85,6 +91,7 @@ class GARCHPricingResult:
 # Numba-Optimized Monte Carlo Kernels
 # =============================================================================
 
+
 @njit(parallel=True, cache=True, fastmath=True)
 def _simulate_garch_terminal_rn(
     s0: float,
@@ -95,7 +102,7 @@ def _simulate_garch_terminal_rn(
     beta: float,
     t: float,
     n_paths: int,
-    n_steps: int
+    n_steps: int,
 ) -> np.ndarray:
     """
     GARCH(1,1) terminal simulation under risk-neutral measure (LRNVR).
@@ -137,15 +144,15 @@ def _simulate_ngarch_terminal_rn(
     omega: float,
     alpha: float,
     beta: float,
-    theta: float,
+    gamma: float,
     t: float,
     n_paths: int,
-    n_steps: int
+    n_steps: int,
 ) -> np.ndarray:
     """
     NGARCH terminal simulation under risk-neutral measure.
 
-    Variance: σ²_t = ω + α·σ²_{t-1}·(z_{t-1} - θ)² + β·σ²_{t-1}
+    Variance: σ²_t = ω + α·σ²_{t-1}·(z_{t-1} - γ)² + β·σ²_{t-1}
     """
     dt = t / n_steps
     var0 = sigma0 * sigma0
@@ -164,7 +171,7 @@ def _simulate_ngarch_terminal_rn(
             s = s * np.exp(log_return)
 
             # NGARCH variance update with leverage
-            shifted = z - theta
+            shifted = z - gamma
             var_next = omega + alpha * var_t * shifted * shifted + beta * var_t
             var_t = max(var_next, 1e-10)
 
@@ -184,7 +191,7 @@ def _simulate_gjr_garch_terminal_rn(
     gamma: float,
     t: float,
     n_paths: int,
-    n_steps: int
+    n_steps: int,
 ) -> np.ndarray:
     """
     GJR-GARCH terminal simulation under risk-neutral measure.
@@ -221,11 +228,7 @@ def _simulate_gjr_garch_terminal_rn(
 
 @njit(fastmath=True, cache=True)
 def _compute_mc_price_and_se(
-    terminals: np.ndarray,
-    k: float,
-    r: float,
-    t: float,
-    is_call: bool
+    terminals: np.ndarray, k: float, r: float, t: float, is_call: bool
 ) -> tuple[float, float]:
     """Compute Monte Carlo price and standard error."""
     n = len(terminals)
@@ -263,6 +266,7 @@ def _compute_mc_price_and_se(
 # GARCH Monte Carlo Pricer Class
 # =============================================================================
 
+
 class GARCHMCPricer:
     """
     GARCH family option pricer using Monte Carlo simulation.
@@ -272,7 +276,7 @@ class GARCHMCPricer:
 
     Supported models:
     - GARCH(1,1): σ²_t = ω + α·σ²_{t-1}·z² + β·σ²_{t-1}
-    - NGARCH: σ²_t = ω + α·σ²_{t-1}·(z - θ)² + β·σ²_{t-1}
+    - NGARCH: σ²_t = ω + α·σ²_{t-1}·(z - γ)² + β·σ²_{t-1}
     - GJR-GARCH: σ²_t = ω + (α + γ·I)·σ²_{t-1}·z² + β·σ²_{t-1}
 
     Parameters
@@ -287,7 +291,7 @@ class GARCHMCPricer:
         ARCH coefficient
     beta : float
         GARCH coefficient
-    theta : float, optional
+    gamma : float, optional
         Leverage parameter for NGARCH (default 0)
     gamma : float, optional
         Asymmetry parameter for GJR-GARCH (default 0)
@@ -308,7 +312,7 @@ class GARCHMCPricer:
     # NGARCH with leverage
     pricer = GARCHMCPricer(
         garch_type="ngarch",
-        sigma0=0.20, omega=0.000002, alpha=0.05, beta=0.90, theta=0.5
+        sigma0=0.20, omega=0.000002, alpha=0.05, beta=0.90, gamma=0.5
     )
     """
 
@@ -319,11 +323,10 @@ class GARCHMCPricer:
         omega: float,
         alpha: float,
         beta: float,
-        theta: float = 0.0,
         gamma: float = 0.0,
         n_paths: int = 100000,
-        n_steps: int = 252
-    ):
+        n_steps: int = 252,
+    ) -> None:
         # Parse GARCH type
         if isinstance(garch_type, str):
             garch_type = GARCHType(garch_type.lower())
@@ -336,7 +339,6 @@ class GARCHMCPricer:
         self._omega = omega
         self._alpha = alpha
         self._beta = beta
-        self._theta = theta
         self._gamma = gamma
 
         # MC parameters
@@ -363,16 +365,20 @@ class GARCHMCPricer:
                 raise ValueError(f"Non-stationary: α + β = {persistence:.4f} >= 1")
 
         elif self._garch_type == GARCHType.NGARCH:
-            persistence = self._alpha * (1 + self._theta ** 2) + self._beta
+            persistence = self._alpha * (1 + self._gamma**2) + self._beta
             if persistence >= 1:
-                raise ValueError(f"Non-stationary: α(1+θ²) + β = {persistence:.4f} >= 1")
+                raise ValueError(
+                    f"Non-stationary: α(1+γ²) + β = {persistence:.4f} >= 1"
+                )
 
         elif self._garch_type == GARCHType.GJR_GARCH:
             if self._gamma < 0:
                 raise ValueError(f"Gamma must be non-negative, got {self._gamma}")
             persistence = self._alpha + 0.5 * self._gamma + self._beta
             if persistence >= 1:
-                raise ValueError(f"Non-stationary: α + 0.5γ + β = {persistence:.4f} >= 1")
+                raise ValueError(
+                    f"Non-stationary: α + 0.5γ + β = {persistence:.4f} >= 1"
+                )
 
     # Properties
     @property
@@ -396,10 +402,6 @@ class GARCHMCPricer:
         return self._beta
 
     @property
-    def theta(self) -> float:
-        return self._theta
-
-    @property
     def gamma(self) -> float:
         return self._gamma
 
@@ -411,7 +413,7 @@ class GARCHMCPricer:
     def n_paths(self, value: int) -> None:
         if value <= 0:
             raise ValueError(f"n_paths must be positive, got {value}")
-        self._n_paths = value
+        self._n_paths: int = value
 
     @property
     def persistence(self) -> float:
@@ -419,17 +421,17 @@ class GARCHMCPricer:
         if self._garch_type == GARCHType.GARCH:
             return self._alpha + self._beta
         if self._garch_type == GARCHType.NGARCH:
-            return self._alpha * (1 + self._theta ** 2) + self._beta
+            return self._alpha * (1 + self._gamma**2) + self._beta
         # GJR_GARCH
         return self._alpha + 0.5 * self._gamma + self._beta
 
     def long_run_variance(self) -> float:
         """Returns the theoretical long-run variance."""
-        return self._omega / (1 - self.persistence)
+        return float(self._omega / (1 - self.persistence))
 
     def long_run_volatility(self) -> float:
         """Returns the theoretical long-run volatility."""
-        return np.sqrt(self.long_run_variance())
+        return float(np.sqrt(self.long_run_variance()))
 
     def simulate_terminal(
         self,
@@ -439,7 +441,7 @@ class GARCHMCPricer:
         n_paths: int,
         n_steps: int,
         seed: int | None = None,
-        **kwargs
+        **kwargs,
     ) -> np.ndarray:
         """Simulate terminal prices under risk-neutral measure."""
         if seed is not None:
@@ -447,18 +449,41 @@ class GARCHMCPricer:
 
         if self._garch_type == GARCHType.GARCH:
             return _simulate_garch_terminal_rn(
-                s0, r, self._sigma0, self._omega, self._alpha, self._beta,
-                t, n_paths, n_steps
+                s0,
+                r,
+                self._sigma0,
+                self._omega,
+                self._alpha,
+                self._beta,
+                t,
+                n_paths,
+                n_steps,
             )
         if self._garch_type == GARCHType.NGARCH:
             return _simulate_ngarch_terminal_rn(
-                s0, r, self._sigma0, self._omega, self._alpha, self._beta,
-                self._theta, t, n_paths, n_steps
+                s0,
+                r,
+                self._sigma0,
+                self._omega,
+                self._alpha,
+                self._beta,
+                self._gamma,
+                t,
+                n_paths,
+                n_steps,
             )
         # GJR_GARCH
         return _simulate_gjr_garch_terminal_rn(
-            s0, r, self._sigma0, self._omega, self._alpha, self._beta,
-            self._gamma, t, n_paths, n_steps
+            s0,
+            r,
+            self._sigma0,
+            self._omega,
+            self._alpha,
+            self._beta,
+            self._gamma,
+            t,
+            n_paths,
+            n_steps,
         )
 
     def price(
@@ -471,7 +496,7 @@ class GARCHMCPricer:
         n_paths: int | None = None,
         n_steps: int | None = None,
         seed: int | None = None,
-        **kwargs
+        **kwargs,
     ) -> GARCHPricingResult:
         """
         Price a European option using Monte Carlo simulation.
@@ -533,12 +558,17 @@ class GARCHMCPricer:
             n_paths=n_paths,
             garch_type=self._garch_type.value,
             parameters={
-                "s0": s0, "k": k, "t": t, "r": r,
-                "sigma0": self._sigma0, "omega": self._omega,
-                "alpha": self._alpha, "beta": self._beta,
-                "theta": self._theta, "gamma": self._gamma,
-                "option_type": option_type.value
-            }
+                "s0": s0,
+                "k": k,
+                "t": t,
+                "r": r,
+                "sigma0": self._sigma0,
+                "omega": self._omega,
+                "alpha": self._alpha,
+                "beta": self._beta,
+                "gamma": self._gamma,
+                "option_type": option_type.value,
+            },
         )
 
     def price_surface(
@@ -550,7 +580,7 @@ class GARCHMCPricer:
         option_type: str | OptionType = OptionType.CALL,
         n_paths: int | None = None,
         n_steps: int | None = None,
-        **kwargs
+        **kwargs,
     ) -> np.ndarray:
         """
         Price options across strike-maturity surface.
@@ -585,18 +615,22 @@ class GARCHMCPricer:
 # Convenience Factory Functions
 # =============================================================================
 
+
 def create_garch_pricer(
     sigma0: float,
     omega: float,
     alpha: float,
     beta: float,
-    n_paths: int = 100000
+    n_paths: int = 100000,
 ) -> GARCHMCPricer:
     """Create a GARCH(1,1) Monte Carlo pricer."""
     return GARCHMCPricer(
         garch_type=GARCHType.GARCH,
-        sigma0=sigma0, omega=omega, alpha=alpha, beta=beta,
-        n_paths=n_paths
+        sigma0=sigma0,
+        omega=omega,
+        alpha=alpha,
+        beta=beta,
+        n_paths=n_paths,
     )
 
 
@@ -605,14 +639,18 @@ def create_ngarch_pricer(
     omega: float,
     alpha: float,
     beta: float,
-    theta: float,
-    n_paths: int = 100000
+    gamma: float,
+    n_paths: int = 100000,
 ) -> GARCHMCPricer:
     """Create an NGARCH Monte Carlo pricer."""
     return GARCHMCPricer(
         garch_type=GARCHType.NGARCH,
-        sigma0=sigma0, omega=omega, alpha=alpha, beta=beta, theta=theta,
-        n_paths=n_paths
+        sigma0=sigma0,
+        omega=omega,
+        alpha=alpha,
+        beta=beta,
+        gamma=gamma,
+        n_paths=n_paths,
     )
 
 
@@ -622,13 +660,17 @@ def create_gjr_garch_pricer(
     alpha: float,
     beta: float,
     gamma: float,
-    n_paths: int = 100000
+    n_paths: int = 100000,
 ) -> GARCHMCPricer:
     """Create a GJR-GARCH Monte Carlo pricer."""
     return GARCHMCPricer(
         garch_type=GARCHType.GJR_GARCH,
-        sigma0=sigma0, omega=omega, alpha=alpha, beta=beta, gamma=gamma,
-        n_paths=n_paths
+        sigma0=sigma0,
+        omega=omega,
+        alpha=alpha,
+        beta=beta,
+        gamma=gamma,
+        n_paths=n_paths,
     )
 
 
@@ -656,25 +698,29 @@ if __name__ == "__main__":
     pricer = create_garch_pricer(sigma0, omega, alpha, beta, n_paths=100000)
     result = pricer.price(s0, k, t, r, seed=42)
     print(f"Call Price: ${result.price:.4f} ± ${result.std_error:.4f}")
-    print(f"Time: {result.computation_time*1000:.2f} ms")
+    print(f"Time: {result.computation_time * 1000:.2f} ms")
     print(f"Paths: {result.n_paths:,}")
-    print(f"Long-run vol: {pricer.long_run_volatility()*100:.2f}%")
+    print(f"Long-run vol: {pricer.long_run_volatility() * 100:.2f}%")
 
     # 2. NGARCH pricing
     print("\n2. NGARCH Pricing (with leverage)")
     print("-" * 40)
-    pricer_ngarch = create_ngarch_pricer(sigma0, omega, 0.05, 0.90, theta=0.5, n_paths=100000)
+    pricer_ngarch = create_ngarch_pricer(
+        sigma0, omega, 0.05, 0.90, gamma=0.5, n_paths=100000
+    )
     result = pricer_ngarch.price(s0, k, t, r, seed=42)
     print(f"Call Price: ${result.price:.4f} ± ${result.std_error:.4f}")
-    print(f"Long-run vol: {pricer_ngarch.long_run_volatility()*100:.2f}%")
+    print(f"Long-run vol: {pricer_ngarch.long_run_volatility() * 100:.2f}%")
 
     # 3. GJR-GARCH pricing
     print("\n3. GJR-GARCH Pricing (asymmetric)")
     print("-" * 40)
-    pricer_gjr = create_gjr_garch_pricer(sigma0, omega, 0.03, 0.90, gamma=0.07, n_paths=100000)
+    pricer_gjr = create_gjr_garch_pricer(
+        sigma0, omega, 0.03, 0.90, gamma=0.07, n_paths=100000
+    )
     result = pricer_gjr.price(s0, k, t, r, seed=42)
     print(f"Call Price: ${result.price:.4f} ± ${result.std_error:.4f}")
-    print(f"Long-run vol: {pricer_gjr.long_run_volatility()*100:.2f}%")
+    print(f"Long-run vol: {pricer_gjr.long_run_volatility() * 100:.2f}%")
 
     # 4. Convergence test
     print("\n4. Convergence Test (GARCH)")
@@ -687,6 +733,8 @@ if __name__ == "__main__":
 
     for n in path_counts:
         result = pricer.price(s0, k, t, r, n_paths=n, seed=42)
-        print(f"{n:>12,} ${result.price:>9.4f} ${result.std_error:>9.4f} {result.computation_time*1000:>11.2f}")
+        print(
+            f"{n:>12,} ${result.price:>9.4f} ${result.std_error:>9.4f} {result.computation_time * 1000:>11.2f}"
+        )
 
     print()

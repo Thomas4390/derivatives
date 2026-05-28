@@ -20,7 +20,6 @@ import json
 
 import numpy as np
 import streamlit as st
-from charts.exotic_charts import render_exotic_tab
 from charts.greeks_chart import (
     render_first_order_greeks,
     render_second_order_greeks,
@@ -34,14 +33,16 @@ from config.constants import (
     DEFAULT_IV,
     DTE_RANGE,
     IV_RANGE,
+    SP_SPOT_RANGE_FACTOR,
+    SP_SPOT_RANGE_POINTS,
     SPOT_RANGE_FACTOR,
     SPOT_RANGE_POINTS,
 )
 
 # Local imports
-from config.styles import footer_html, inject_styles, render_header
+from config.styles import inject_styles
+from config.templates import footer_html, render_header
 from guide_formula import render_guide_section
-from services.exotic_pricing_adapter import calculate_exotic_all_greeks
 from services.portfolio_calculator import calculate_all_surfaces, prepare_portfolio_data
 
 # Pricing functions (using backend architecture, no classes)
@@ -57,6 +58,11 @@ from services.pricing_adapter import (
     calculate_pnl_at_expiry_arrays as calculate_portfolio_pnl_at_expiry,
 )
 from services.state_manager import init_session_state
+from services.structured_pricing_adapter import (
+    calculate_structured_greeks_3d_dte,
+    calculate_structured_greeks_3d_iv,
+    calculate_structured_surfaces,
+)
 
 # =============================================================================
 # PAGE CONFIGURATION
@@ -66,7 +72,7 @@ st.set_page_config(
     page_title="Options Greeks Explorer",
     page_icon="📊",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="expanded",
 )
 
 # Inject custom CSS styles
@@ -81,8 +87,7 @@ init_session_state()
 # =============================================================================
 
 spot_price, risk_free_rate = render_sidebar(
-    positions=st.session_state.positions,
-    stock_position=st.session_state.stock_position
+    positions=st.session_state.positions, stock_position=st.session_state.stock_position
 )
 
 
@@ -93,13 +98,14 @@ spot_price, risk_free_rate = render_sidebar(
 render_header(
     title="Options Greeks Explorer",
     subtitle="Interactive visualization of option pricing and risk metrics using the Black-Scholes model",
-    badge="Educational Tool"
+    badge="Educational Tool",
 )
 
 
 # =============================================================================
 # DATA PREPARATION
 # =============================================================================
+
 
 def get_default_premium() -> float:
     """Calculate default premium for a long call ATM using Black-Scholes."""
@@ -109,7 +115,7 @@ def get_default_premium() -> float:
         dte_days=DEFAULT_DTE,
         risk_free_rate=risk_free_rate,
         volatility=DEFAULT_IV / 100,  # Convert from percentage
-        option_type='call'
+        option_type="call",
     )
 
 
@@ -122,48 +128,130 @@ def get_portfolio_json() -> str:
         portfolio_data = prepare_portfolio_data(positions, stock_position, spot_price)
     else:
         # Empty portfolio - no default position
-        portfolio_data = {
-            'spot_price': spot_price,
-            'options': [],
-            'stock': None
-        }
+        portfolio_data = {"spot_price": spot_price, "options": [], "stock": None}
 
     return json.dumps(portfolio_data)
 
 
-# Prepare calculation parameters
-portfolio_json = get_portfolio_json()
-spot_range = np.linspace(
-    spot_price * (1 - SPOT_RANGE_FACTOR),
-    spot_price * (1 + SPOT_RANGE_FACTOR),
-    SPOT_RANGE_POINTS
-)
-has_positions = bool(st.session_state.positions) or st.session_state.stock_position is not None
+# =============================================================================
+# MAIN CONTENT — Unified flow for Options and Structured Products
+# =============================================================================
 
-# Calculate all data
-with st.spinner('Calculating options data...'):
-    all_data = calculate_all_surfaces(
-        portfolio_json=portfolio_json,
-        spot_range=tuple(spot_range),
-        dte_values=tuple(DTE_RANGE),
-        iv_values=tuple(IV_RANGE),
-        risk_free_rate=risk_free_rate,
-        _calculate_all_greeks_func=calculate_all_greeks,
-        _calculate_pnl_at_expiry_func=calculate_portfolio_pnl_at_expiry,
-        _find_breakeven_func=find_breakeven_points,
-        has_positions=has_positions,
-        _calculate_exotic_greeks_func=calculate_exotic_all_greeks,
+sp_mode = st.session_state.get("sp_mode", False)
+sp_config = st.session_state.get("sp_config")
+
+if sp_mode and sp_config:
+    # ------------------------------------------------------------------
+    # STRUCTURED PRODUCTS MODE — MC surfaces + shared tabs
+    # ------------------------------------------------------------------
+
+    # Build spot range for structured products (wider to capture barriers)
+    spot_range = np.linspace(
+        spot_price * (1 - SP_SPOT_RANGE_FACTOR),
+        spot_price * (1 + SP_SPOT_RANGE_FACTOR),
+        SP_SPOT_RANGE_POINTS,
     )
 
+    # Entry price from sidebar pricing
+    sp_result = st.session_state.get("sp_result", {})
+    entry_price = sp_result.get("price", 0.0)
+
+    with st.spinner(
+        "Calculating structured product surfaces (MC, may take a few minutes)..."
+    ):
+        all_data = calculate_structured_surfaces(
+            product_type=sp_config["product_type"],
+            product_params_json=sp_config["product_params_json"],
+            model_type=sp_config["model_type"],
+            model_params_json=sp_config["model_params_json"],
+            spot=sp_config["spot"],
+            rate=sp_config["rate"],
+            dividend_yield=sp_config.get("dividend_yield", 0.0),
+            spot_range_tuple=tuple(spot_range.tolist()),
+            entry_price=entry_price,
+            seed=sp_config.get("seed"),
+        )
+
+    # 3D functions: wrap sp_config into the JSON expected by surface_3d.py
+    sp_config_with_entry = dict(sp_config)
+    sp_config_with_entry["entry_price"] = entry_price
+    sp_config_json_3d = json.dumps(sp_config_with_entry)
+
+    greeks_3d_dte_func = calculate_structured_greeks_3d_dte
+    greeks_3d_iv_func = calculate_structured_greeks_3d_iv
+
+    # Portfolio JSON for 3D tab (uses sp_config_json_3d)
+    portfolio_json = sp_config_json_3d
+    has_positions = True
+    has_exotic_legs = False
+
+    # No-op functions for features not applicable to structured products
+    def _noop_greeks(*args, **kwargs):
+        return np.zeros(14)
+
+    def _noop_pnl(*args, **kwargs):
+        return 0.0
+
+    def _noop_breakeven(*args, **kwargs):
+        return None
+
+    calculate_all_greeks_func = _noop_greeks
+    calculate_pnl_at_expiry_func = _noop_pnl
+    find_breakeven_func = _noop_breakeven
+    calculate_exotic_greeks_func = None
+    calculate_greeks_3d_strike_func = None
+
+    # Positions/stock for tab rendering (empty — no legs to show)
+    positions_for_tabs = []
+    stock_position_for_tabs = None
+
+elif sp_mode and not sp_config:
+    # Defensive: auto-pricing should always populate sp_config, but just in case
+    st.stop()
+
+else:
+    # ------------------------------------------------------------------
+    # NORMAL OPTIONS MODE — unchanged
+    # ------------------------------------------------------------------
+    portfolio_json = get_portfolio_json()
+    spot_range = np.linspace(
+        spot_price * (1 - SPOT_RANGE_FACTOR),
+        spot_price * (1 + SPOT_RANGE_FACTOR),
+        SPOT_RANGE_POINTS,
+    )
+    has_positions = (
+        bool(st.session_state.positions) or st.session_state.stock_position is not None
+    )
+
+    with st.spinner("Calculating options data..."):
+        all_data = calculate_all_surfaces(
+            portfolio_json=portfolio_json,
+            spot_range=tuple(spot_range),
+            dte_values=tuple(DTE_RANGE),
+            iv_values=tuple(IV_RANGE),
+            risk_free_rate=risk_free_rate,
+            _calculate_all_greeks_func=calculate_all_greeks,
+            _calculate_pnl_at_expiry_func=calculate_portfolio_pnl_at_expiry,
+            _find_breakeven_func=find_breakeven_points,
+            has_positions=has_positions,
+        )
+
+    has_exotic_legs = False
+
+    greeks_3d_dte_func = calculate_portfolio_greeks_3d_dte
+    greeks_3d_iv_func = calculate_portfolio_greeks_3d_iv
+    calculate_greeks_3d_strike_func = calculate_greeks_3d_strike
+    calculate_all_greeks_func = calculate_all_greeks
+    calculate_pnl_at_expiry_func = calculate_portfolio_pnl_at_expiry
+    find_breakeven_func = find_breakeven_points
+    calculate_exotic_greeks_func = None
+    positions_for_tabs = st.session_state.positions
+    stock_position_for_tabs = st.session_state.stock_position
+
 
 # =============================================================================
-# MAIN TABS
+# SHARED TABS
 # =============================================================================
-
-has_exotic_legs = any(
-    pos.get('instrument_class', 'vanilla') != 'vanilla'
-    for pos in st.session_state.positions
-)
 
 tab_names = [
     "P&L Profile",
@@ -171,113 +259,140 @@ tab_names = [
     "Second-Order Greeks",
     "Third-Order Greeks",
     "3D Surface",
+    "Reference Guide",
 ]
-if has_exotic_legs:
-    tab_names.append("Exotic Options")
-tab_names.append("Reference Guide")
 
 tabs = st.tabs(tab_names)
 
 tab1, tab2, tab3, tab4, tab5 = tabs[0], tabs[1], tabs[2], tabs[3], tabs[4]
-if has_exotic_legs:
-    tab6 = tabs[5]
-    tab7 = tabs[6]
-else:
-    tab6 = None
-    tab7 = tabs[5]
+tab7 = tabs[5]
 
+# Extract custom ranges for structured products (None for normal options mode)
+sp_dte_range = all_data.get("dte_range")
+sp_iv_range = all_data.get("iv_range")
 
 # Tab 1: P&L Profile
 with tab1:
-    default_premium = get_default_premium() if not has_positions else 10.0
-    render_pnl_tab(
-        all_data=all_data,
-        spot_range=spot_range,
-        spot_price=spot_price,
-        positions=st.session_state.positions,
-        stock_position=st.session_state.stock_position,
-        default_premium=default_premium,
-        risk_free_rate=risk_free_rate,
-        calculate_all_greeks_func=calculate_all_greeks,
-        calculate_pnl_at_expiry_func=calculate_portfolio_pnl_at_expiry,
-        find_breakeven_func=find_breakeven_points,
-        has_exotic_legs=all_data.get('has_exotic_legs', False),
-    )
-
+    if sp_mode:
+        st.info(
+            "P&L Profile pour produits structurés — en cours de développement. "
+            "Cette fonctionnalité sera disponible dans une prochaine mise à jour."
+        )
+    else:
+        default_premium = get_default_premium() if not has_positions else 10.0
+        render_pnl_tab(
+            all_data=all_data,
+            spot_range=spot_range,
+            spot_price=spot_price,
+            positions=positions_for_tabs,
+            stock_position=stock_position_for_tabs,
+            default_premium=default_premium,
+            risk_free_rate=risk_free_rate,
+            calculate_all_greeks_func=calculate_all_greeks_func,
+            calculate_pnl_at_expiry_func=calculate_pnl_at_expiry_func,
+            find_breakeven_func=find_breakeven_func,
+            has_exotic_legs=all_data.get("has_exotic_legs", False),
+            sp_mode=sp_mode,
+            dte_range=sp_dte_range,
+            iv_range=sp_iv_range,
+        )
 
 # Tab 2: First-Order Greeks
 with tab2:
-    render_first_order_greeks(
-        greeks_data=all_data['greeks_data'],
-        spot_range=spot_range,
-        spot_price=spot_price,
-        positions=st.session_state.positions,
-        stock_position=st.session_state.stock_position,
-        risk_free_rate=risk_free_rate,
-        calculate_all_greeks_func=calculate_all_greeks,
-        calculate_pnl_at_expiry_func=calculate_portfolio_pnl_at_expiry,
-        portfolio_json=portfolio_json,
-        calculate_exotic_greeks_func=calculate_exotic_all_greeks,
-    )
-
+    if sp_mode:
+        st.info(
+            "Greeks pour produits structurés — en cours de développement. "
+            "Cette fonctionnalité sera disponible dans une prochaine mise à jour."
+        )
+    else:
+        render_first_order_greeks(
+            greeks_data=all_data["greeks_data"],
+            spot_range=spot_range,
+            spot_price=spot_price,
+            positions=positions_for_tabs,
+            stock_position=stock_position_for_tabs,
+            risk_free_rate=risk_free_rate,
+            calculate_all_greeks_func=calculate_all_greeks_func,
+            calculate_pnl_at_expiry_func=calculate_pnl_at_expiry_func,
+            portfolio_json=portfolio_json,
+            calculate_exotic_greeks_func=calculate_exotic_greeks_func,
+            sp_mode=sp_mode,
+            dte_range=sp_dte_range,
+            iv_range=sp_iv_range,
+        )
 
 # Tab 3: Second-Order Greeks
 with tab3:
-    render_second_order_greeks(
-        greeks_data=all_data['greeks_data'],
-        spot_range=spot_range,
-        spot_price=spot_price,
-        positions=st.session_state.positions,
-        stock_position=st.session_state.stock_position,
-        risk_free_rate=risk_free_rate,
-        calculate_all_greeks_func=calculate_all_greeks,
-        calculate_pnl_at_expiry_func=calculate_portfolio_pnl_at_expiry,
-        portfolio_json=portfolio_json,
-        has_exotic_legs=all_data.get('has_exotic_legs', False),
-        calculate_exotic_greeks_func=calculate_exotic_all_greeks,
-    )
-
+    if sp_mode:
+        st.info(
+            "Greeks pour produits structurés — en cours de développement. "
+            "Cette fonctionnalité sera disponible dans une prochaine mise à jour."
+        )
+    else:
+        render_second_order_greeks(
+            greeks_data=all_data["greeks_data"],
+            spot_range=spot_range,
+            spot_price=spot_price,
+            positions=positions_for_tabs,
+            stock_position=stock_position_for_tabs,
+            risk_free_rate=risk_free_rate,
+            calculate_all_greeks_func=calculate_all_greeks_func,
+            calculate_pnl_at_expiry_func=calculate_pnl_at_expiry_func,
+            portfolio_json=portfolio_json,
+            has_exotic_legs=all_data.get("has_exotic_legs", False),
+            calculate_exotic_greeks_func=calculate_exotic_greeks_func,
+            sp_mode=sp_mode,
+            dte_range=sp_dte_range,
+            iv_range=sp_iv_range,
+        )
 
 # Tab 4: Third-Order Greeks
 with tab4:
-    render_third_order_greeks(
-        greeks_data=all_data['greeks_data'],
-        spot_range=spot_range,
-        spot_price=spot_price,
-        positions=st.session_state.positions,
-        stock_position=st.session_state.stock_position,
-        risk_free_rate=risk_free_rate,
-        calculate_all_greeks_func=calculate_all_greeks,
-        calculate_pnl_at_expiry_func=calculate_portfolio_pnl_at_expiry,
-        portfolio_json=portfolio_json,
-        has_exotic_legs=all_data.get('has_exotic_legs', False),
-        calculate_exotic_greeks_func=calculate_exotic_all_greeks,
-    )
-
+    if sp_mode:
+        st.info(
+            "Greeks pour produits structurés — en cours de développement. "
+            "Cette fonctionnalité sera disponible dans une prochaine mise à jour."
+        )
+    else:
+        render_third_order_greeks(
+            greeks_data=all_data["greeks_data"],
+            spot_range=spot_range,
+            spot_price=spot_price,
+            positions=positions_for_tabs,
+            stock_position=stock_position_for_tabs,
+            risk_free_rate=risk_free_rate,
+            calculate_all_greeks_func=calculate_all_greeks_func,
+            calculate_pnl_at_expiry_func=calculate_pnl_at_expiry_func,
+            portfolio_json=portfolio_json,
+            has_exotic_legs=all_data.get("has_exotic_legs", False),
+            calculate_exotic_greeks_func=calculate_exotic_greeks_func,
+            sp_mode=sp_mode,
+            dte_range=sp_dte_range,
+            iv_range=sp_iv_range,
+        )
 
 # Tab 5: 3D Surface
 with tab5:
-    render_3d_tab(
-        portfolio_json=portfolio_json,
-        spot_price=spot_price,
-        risk_free_rate=risk_free_rate,
-        volatility=DEFAULT_IV / 100,  # Convert percentage to decimal
-        dte=DEFAULT_DTE,
-        positions=st.session_state.positions,
-        stock_position=st.session_state.stock_position,
-        _calculate_greeks_3d_dte_func=calculate_portfolio_greeks_3d_dte,
-        _calculate_greeks_3d_iv_func=calculate_portfolio_greeks_3d_iv,
-        _calculate_greeks_3d_strike_func=calculate_greeks_3d_strike
-    )
+    if sp_mode:
+        st.info(
+            "Greeks pour produits structurés — en cours de développement. "
+            "Cette fonctionnalité sera disponible dans une prochaine mise à jour."
+        )
+    else:
+        render_3d_tab(
+            portfolio_json=portfolio_json,
+            spot_price=spot_price,
+            risk_free_rate=risk_free_rate,
+            volatility=DEFAULT_IV / 100,
+            dte=DEFAULT_DTE,
+            positions=positions_for_tabs,
+            stock_position=stock_position_for_tabs,
+            _calculate_greeks_3d_dte_func=greeks_3d_dte_func,
+            _calculate_greeks_3d_iv_func=greeks_3d_iv_func,
+            _calculate_greeks_3d_strike_func=calculate_greeks_3d_strike_func,
+        )
 
-
-# Tab 6: Exotic Options (conditional)
-if tab6 is not None:
-    with tab6:
-        render_exotic_tab(spot_price=spot_price, risk_free_rate=risk_free_rate, positions=st.session_state.positions)
-
-
-# Tab 7: Reference Guide
+# Tab 6: Reference Guide
 with tab7:
     render_guide_section()
 

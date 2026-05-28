@@ -4,11 +4,147 @@ Market Environment
 
 Immutable snapshot of market conditions for option pricing.
 
-Author: Thomas
-Created: 2025
+Author: Thomas Vaudescal
+Created: 2026
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass
+
+import numpy as np
+
+from backend.utils.constants.numerical import DEFAULT_YIELD_CURVE_TENORS
+
+
+# =============================================================================
+# Yield Curve
+# =============================================================================
+
+
+@dataclass(frozen=True)
+class YieldCurve:
+    """
+    Zero-coupon yield curve for discounting.
+
+    Interpolates linearly between tenors. Extrapolates flat beyond
+    the shortest and longest tenors.
+
+    Parameters
+    ----------
+    tenors : np.ndarray
+        Maturities in years (e.g., [0.25, 0.5, 1.0, 2.0, 5.0]).
+    rates : np.ndarray
+        Continuously compounded zero rates at each tenor.
+    """
+
+    tenors: np.ndarray
+    rates: np.ndarray
+
+    def __post_init__(self) -> None:
+        if len(self.tenors) != len(self.rates):
+            raise ValueError(
+                f"tenors and rates must have same length, "
+                f"got {len(self.tenors)} and {len(self.rates)}"
+            )
+        if len(self.tenors) == 0:
+            raise ValueError("Yield curve must have at least one tenor")
+        if any(t <= 0 for t in self.tenors):
+            raise ValueError("All tenors must be positive")
+
+    def _interpolate_rate(self, t: float) -> float:
+        """Linearly interpolate the zero rate at time t."""
+        if t <= 0:
+            return float(self.rates[0])
+        return float(np.interp(t, self.tenors, self.rates))
+
+    def discount_factor(self, t: float) -> float:
+        """
+        Compute discount factor D(0, t) = exp(-r(t) * t).
+
+        Parameters
+        ----------
+        t : float
+            Time in years.
+
+        Returns
+        -------
+        float
+            Discount factor.
+        """
+        if t <= 0:
+            return 1.0
+        r = self._interpolate_rate(t)
+        return float(np.exp(-r * t))
+
+    def discount_factors(self, times: np.ndarray) -> np.ndarray:
+        """
+        Vectorized discount factors for an array of times.
+
+        Parameters
+        ----------
+        times : np.ndarray
+            Times in years.
+
+        Returns
+        -------
+        np.ndarray
+            Discount factors D(0, t_i).
+        """
+        rates = np.interp(times, self.tenors, self.rates)
+        return np.exp(-rates * times)
+
+    def forward_rate(self, t1: float, t2: float) -> float:
+        """
+        Compute continuously compounded forward rate f(t1, t2).
+
+        f(t1,t2) = [r(t2)*t2 - r(t1)*t1] / (t2 - t1)
+
+        Parameters
+        ----------
+        t1 : float
+            Start time.
+        t2 : float
+            End time (must be > t1).
+
+        Returns
+        -------
+        float
+            Forward rate.
+        """
+        if t2 <= t1:
+            raise ValueError(f"t2 must be > t1, got t1={t1}, t2={t2}")
+        r1 = self._interpolate_rate(t1)
+        r2 = self._interpolate_rate(t2)
+        return (r2 * t2 - r1 * t1) / (t2 - t1)
+
+    @classmethod
+    def flat(cls, rate: float) -> YieldCurve:
+        """
+        Create a flat yield curve.
+
+        Parameters
+        ----------
+        rate : float
+            Flat rate for all maturities.
+
+        Returns
+        -------
+        YieldCurve
+        """
+        tenors = np.asarray(DEFAULT_YIELD_CURVE_TENORS, dtype=np.float64)
+        return cls(tenors=tenors, rates=np.full(tenors.size, rate))
+
+    def __repr__(self) -> str:
+        return (
+            f"YieldCurve(tenors=[{self.tenors[0]:.2f}..{self.tenors[-1]:.2f}], "
+            f"rates=[{self.rates[0]:.4f}..{self.rates[-1]:.4f}])"
+        )
+
+
+# =============================================================================
+# Market Environment
+# =============================================================================
 
 
 @dataclass(frozen=True)
@@ -38,12 +174,13 @@ class MarketEnvironment:
     market_bumped = market.bump_spot(1.0)  # spot = 101
     market_bumped.spot  # 101.0
     """
+
     spot: float
     rate: float
     dividend_yield: float = 0.0
     valuation_date: str | None = None
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         """Validate market parameters."""
         if self.spot <= 0:
             raise ValueError(f"Spot must be positive, got {self.spot}")
@@ -67,7 +204,7 @@ class MarketEnvironment:
     @classmethod
     def _create_without_validation(
         cls, spot: float, rate: float, dividend_yield: float, valuation_date: str | None
-    ) -> 'MarketEnvironment':
+    ) -> "MarketEnvironment":
         """
         Create MarketEnvironment bypassing __post_init__ validation.
 
@@ -75,13 +212,13 @@ class MarketEnvironment:
         extreme values for stress testing.
         """
         obj = object.__new__(cls)
-        object.__setattr__(obj, 'spot', spot)
-        object.__setattr__(obj, 'rate', rate)
-        object.__setattr__(obj, 'dividend_yield', dividend_yield)
-        object.__setattr__(obj, 'valuation_date', valuation_date)
+        object.__setattr__(obj, "spot", spot)
+        object.__setattr__(obj, "rate", rate)
+        object.__setattr__(obj, "dividend_yield", dividend_yield)
+        object.__setattr__(obj, "valuation_date", valuation_date)
         return obj
 
-    def bump_spot(self, delta: float) -> 'MarketEnvironment':
+    def bump_spot(self, delta: float) -> "MarketEnvironment":
         """
         Create new environment with bumped spot.
 
@@ -102,7 +239,7 @@ class MarketEnvironment:
             valuation_date=self.valuation_date,
         )
 
-    def bump_rate(self, delta: float, validate: bool = True) -> 'MarketEnvironment':
+    def bump_rate(self, delta: float, validate: bool = True) -> "MarketEnvironment":
         """
         Create new environment with bumped rate.
 
@@ -134,7 +271,7 @@ class MarketEnvironment:
             valuation_date=self.valuation_date,
         )
 
-    def bump_dividend(self, delta: float, validate: bool = True) -> 'MarketEnvironment':
+    def bump_dividend(self, delta: float, validate: bool = True) -> "MarketEnvironment":
         """
         Create new environment with bumped dividend yield.
 
@@ -166,7 +303,7 @@ class MarketEnvironment:
             valuation_date=self.valuation_date,
         )
 
-    def with_spot(self, spot: float) -> 'MarketEnvironment':
+    def with_spot(self, spot: float) -> "MarketEnvironment":
         """
         Create new environment with different spot.
 
@@ -187,7 +324,7 @@ class MarketEnvironment:
             valuation_date=self.valuation_date,
         )
 
-    def with_rate(self, rate: float, validate: bool = False) -> 'MarketEnvironment':
+    def with_rate(self, rate: float, validate: bool = False) -> "MarketEnvironment":
         """
         Create new environment with different rate.
 
@@ -221,7 +358,9 @@ class MarketEnvironment:
             valuation_date=self.valuation_date,
         )
 
-    def with_dividend(self, dividend_yield: float, validate: bool = False) -> 'MarketEnvironment':
+    def with_dividend(
+        self, dividend_yield: float, validate: bool = False
+    ) -> "MarketEnvironment":
         """
         Create new environment with different dividend yield.
 
@@ -256,28 +395,83 @@ class MarketEnvironment:
         )
 
 
-if __name__ == "__main__":
-    # Smoke test
-    market = MarketEnvironment(spot=100.0, rate=0.05, dividend_yield=0.02)
-    print(f"Market: spot={market.spot}, rate={market.rate}, q={market.dividend_yield}")
+# =============================================================================
+# Enriched Market Environment (for structured products)
+# =============================================================================
 
-    # Test bumping
-    bumped = market.bump_spot(5.0)
-    print(f"After bump_spot(5): spot={bumped.spot}")
 
-    bumped_rate = market.bump_rate(0.01)
-    print(f"After bump_rate(0.01): rate={bumped_rate.rate}")
+@dataclass(frozen=True)
+class EnrichedMarketEnvironment(MarketEnvironment):
+    """
+    Market environment extended with a yield curve and credit spread.
 
-    # Test with_spot
-    new_spot = market.with_spot(110.0)
-    print(f"After with_spot(110): spot={new_spot.spot}")
+    Backward-compatible with MarketEnvironment — all existing engines
+    continue to work. The `rate` field serves as fallback when
+    `yield_curve` is None.
 
-    # Test with_dividend
-    new_div = market.with_dividend(0.03)
-    print(f"After with_dividend(0.03): dividend_yield={new_div.dividend_yield}")
-    assert new_div.dividend_yield == 0.03, "with_dividend() failed"
+    Parameters
+    ----------
+    yield_curve : YieldCurve, optional
+        Term structure of interest rates. If None, uses flat `rate`.
+    credit_spread : float
+        Issuer credit spread (annualized, e.g. 0.01 = 100bp).
+    """
 
-    # Test immutability (original unchanged)
-    print(f"Original market unchanged: spot={market.spot}")
+    yield_curve: YieldCurve | None = None
+    credit_spread: float = 0.0
 
-    print("✓ Market smoke test passed")
+    def discount_factor(self, t: float) -> float:
+        """
+        Compute risk-free discount factor D(0, t).
+
+        Uses yield curve if available, otherwise exp(-rate * t).
+
+        Parameters
+        ----------
+        t : float
+            Time in years.
+
+        Returns
+        -------
+        float
+            Discount factor.
+        """
+        if self.yield_curve is not None:
+            return self.yield_curve.discount_factor(t)
+        return float(np.exp(-self.rate * t))
+
+    def risky_discount_factor(self, t: float) -> float:
+        """
+        Compute risky discount factor including credit spread.
+
+        D_risky(0, t) = D(0, t) * exp(-credit_spread * t)
+
+        Parameters
+        ----------
+        t : float
+            Time in years.
+
+        Returns
+        -------
+        float
+            Risky discount factor.
+        """
+        return self.discount_factor(t) * float(np.exp(-self.credit_spread * t))
+
+    def discount_factors(self, times: np.ndarray) -> np.ndarray:
+        """
+        Vectorized risk-free discount factors.
+
+        Parameters
+        ----------
+        times : np.ndarray
+            Times in years.
+
+        Returns
+        -------
+        np.ndarray
+            Discount factors D(0, t_i).
+        """
+        if self.yield_curve is not None:
+            return self.yield_curve.discount_factors(times)
+        return np.exp(-self.rate * times)

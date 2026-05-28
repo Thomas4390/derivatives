@@ -9,13 +9,19 @@ This module provides:
 
 Uses the Model/Engine/Market architecture for pricing.
 
-Author: Thomas
-Created: 2025
+Author: Thomas Vaudescal
+Created: 2026
 """
 
+from __future__ import annotations
 
 import numpy as np
 
+from backend.utils.constants.monte_carlo import (
+    DEFAULT_RATE_BUMP,
+    DEFAULT_SPOT_BUMP,
+    DEFAULT_VOL_BUMP,
+)
 from backend.core.interfaces import Model, PricingEngine
 from backend.core.market import MarketEnvironment
 from backend.core.result_types import GreeksResult
@@ -29,11 +35,16 @@ from backend.portfolio.pnl import (
     compute_risk_metrics,
     find_breakeven_points,
 )
-from backend.portfolio.positions import PortfolioPosition, StockPosition
+from backend.portfolio.positions import (
+    PortfolioPosition,
+    StockPosition,
+    StructuredProductPosition,
+)
 
 # =============================================================================
 # OPTIONS PORTFOLIO CLASS
 # =============================================================================
+
 
 class OptionsPortfolio:
     """
@@ -51,7 +62,7 @@ class OptionsPortfolio:
         - Others: FFTEngine
     """
 
-    def __init__(self, model: Model, engine: PricingEngine | None = None):
+    def __init__(self, model: Model, engine: PricingEngine | None = None) -> None:
         """
         Initialize portfolio.
 
@@ -66,29 +77,38 @@ class OptionsPortfolio:
         self._engine = engine or self._auto_select_engine(model)
         self._positions: list[PortfolioPosition] = []
         self._stock: StockPosition | None = None
+        self._structured_positions: list[StructuredProductPosition] = []
 
     @staticmethod
     def _auto_select_engine(model: Model) -> PricingEngine:
-        """Auto-select appropriate engine for the model."""
-        from backend.engines import BSAnalyticEngine, FFTEngine
-        from backend.models.gbm import GBMModel
+        """Auto-select appropriate engine for the model.
 
-        if isinstance(model, GBMModel):
+        Picks the analytic engine when the model advertises
+        :attr:`PricingCapability.ANALYTICAL`, else falls back to FFT.
+        Avoids ``isinstance(model, GBMModel)`` so adding a new analytic
+        model only requires updating its ``supported_engines`` list.
+        """
+        from backend.core.result_types import PricingCapability
+        from backend.engines import BSAnalyticEngine, FFTEngine
+
+        if PricingCapability.ANALYTICAL in model.supported_engines:
             return BSAnalyticEngine()
-        # FFT works with any model that has characteristic function
+        # FFT works with any model that has a characteristic function.
         return FFTEngine()
 
     # =========================================================================
     # Position Management
     # =========================================================================
 
-    def add(self, position: PortfolioPosition | StockPosition) -> 'OptionsPortfolio':
+    def add(
+        self, position: PortfolioPosition | StockPosition | StructuredProductPosition
+    ) -> "OptionsPortfolio":
         """
         Add a position to the portfolio.
 
         Parameters
         ----------
-        position : PortfolioPosition or StockPosition
+        position : PortfolioPosition, StockPosition, or StructuredProductPosition
             Position to add
 
         Returns
@@ -98,11 +118,13 @@ class OptionsPortfolio:
         """
         if isinstance(position, StockPosition):
             self._stock = position
+        elif isinstance(position, StructuredProductPosition):
+            self._structured_positions.append(position)
         else:
             self._positions.append(position)
         return self
 
-    def clear(self) -> 'OptionsPortfolio':
+    def clear(self) -> "OptionsPortfolio":
         """
         Remove all positions.
 
@@ -113,6 +135,7 @@ class OptionsPortfolio:
         """
         self._positions.clear()
         self._stock = None
+        self._structured_positions.clear()
         return self
 
     def remove_position(self, index: int) -> PortfolioPosition:
@@ -150,6 +173,11 @@ class OptionsPortfolio:
         return list(self._positions)
 
     @property
+    def structured_positions(self) -> list[StructuredProductPosition]:
+        """Structured product positions (read-only copy)."""
+        return list(self._structured_positions)
+
+    @property
     def stock(self) -> StockPosition | None:
         """Stock position if any."""
         return self._stock
@@ -160,7 +188,7 @@ class OptionsPortfolio:
         return self._model
 
     @model.setter
-    def model(self, value: Model):
+    def model(self, value: Model) -> None:
         """Set new model and auto-select engine."""
         self._model = value
         self._engine = self._auto_select_engine(value)
@@ -171,7 +199,7 @@ class OptionsPortfolio:
         return self._engine
 
     @engine.setter
-    def engine(self, value: PricingEngine):
+    def engine(self, value: PricingEngine) -> None:
         """Set new engine."""
         self._engine = value
 
@@ -183,6 +211,8 @@ class OptionsPortfolio:
         """
         Calculate current portfolio value.
 
+        Unified pricing for all position types via EngineRegistry dispatch.
+
         Parameters
         ----------
         market : MarketEnvironment
@@ -193,6 +223,8 @@ class OptionsPortfolio:
         float
             Portfolio mark-to-market value
         """
+        from backend.core.registry import EngineRegistry
+
         total = 0.0
 
         for pos in self._positions:
@@ -201,6 +233,11 @@ class OptionsPortfolio:
 
         if self._stock:
             total += self._stock.quantity * market.spot
+
+        # Structured product positions — unified via EngineRegistry
+        for sp_pos in self._structured_positions:
+            result = EngineRegistry.price(sp_pos.product, self._model, market)
+            total += sp_pos.quantity * result.price
 
         return total
 
@@ -233,7 +270,9 @@ class OptionsPortfolio:
     # Numba-Optimized P&L Calculation
     # =========================================================================
 
-    def _positions_to_arrays(self) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    def _positions_to_arrays(
+        self,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """
         Convert portfolio positions to numpy arrays for Numba functions.
 
@@ -262,9 +301,7 @@ class OptionsPortfolio:
         return strikes, option_types, position_types, quantities, premiums
 
     def pnl_at_expiry_fast(
-        self,
-        spot: np.ndarray,
-        multiplier: float = 100.0
+        self, spot: np.ndarray, multiplier: float = 100.0
     ) -> np.ndarray:
         """
         Calculate P&L at expiry using Numba-optimized functions.
@@ -284,26 +321,34 @@ class OptionsPortfolio:
         np.ndarray
             P&L for each spot price
         """
-        strikes, option_types, position_types, quantities, premiums = self._positions_to_arrays()
+        strikes, option_types, position_types, quantities, premiums = (
+            self._positions_to_arrays()
+        )
 
         if self._stock:
             return calculate_portfolio_pnl_with_stock(
                 spot,
-                strikes, option_types, position_types, quantities, premiums,
+                strikes,
+                option_types,
+                position_types,
+                quantities,
+                premiums,
                 stock_quantity=self._stock.quantity,
                 stock_entry_price=self._stock.entry_price,
-                multiplier=multiplier
+                multiplier=multiplier,
             )
         return calculate_portfolio_pnl_vectorized(
             spot,
-            strikes, option_types, position_types, quantities, premiums,
-            multiplier=multiplier
+            strikes,
+            option_types,
+            position_types,
+            quantities,
+            premiums,
+            multiplier=multiplier,
         )
 
     def payoff_curve(
-        self,
-        spot_range: np.ndarray,
-        multiplier: float = 100.0
+        self, spot_range: np.ndarray, multiplier: float = 100.0
     ) -> np.ndarray:
         """
         Compute theoretical payoff curve at expiration using Numba.
@@ -320,17 +365,23 @@ class OptionsPortfolio:
         np.ndarray
             P&L values for each spot price
         """
-        strikes, option_types, position_types, quantities, premiums = self._positions_to_arrays()
+        strikes, option_types, position_types, quantities, premiums = (
+            self._positions_to_arrays()
+        )
 
         stock_qty = self._stock.quantity if self._stock else 0.0
         stock_entry = self._stock.entry_price if self._stock else 0.0
 
         return compute_payoff_curve(
             spot_range,
-            strikes, option_types, position_types, quantities, premiums,
+            strikes,
+            option_types,
+            position_types,
+            quantities,
+            premiums,
             stock_quantity=stock_qty,
             stock_entry_price=stock_entry,
-            multiplier=multiplier
+            multiplier=multiplier,
         )
 
     def find_breakevens(
@@ -338,7 +389,7 @@ class OptionsPortfolio:
         spot_min: float = 50.0,
         spot_max: float = 150.0,
         n_points: int = 1000,
-        multiplier: float = 100.0
+        multiplier: float = 100.0,
     ) -> np.ndarray:
         """
         Find breakeven points using Numba-optimized functions.
@@ -364,9 +415,7 @@ class OptionsPortfolio:
         return find_breakeven_points(payoff, spot_range)
 
     def risk_metrics_from_simulation(
-        self,
-        terminal_prices: np.ndarray,
-        multiplier: float = 100.0
+        self, terminal_prices: np.ndarray, multiplier: float = 100.0
     ) -> RiskMetrics:
         """
         Compute risk metrics from simulated terminal prices.
@@ -393,9 +442,9 @@ class OptionsPortfolio:
     def greeks(
         self,
         market: MarketEnvironment,
-        spot_bump: float = 0.01,
-        rate_bump: float = 0.0001,
-        vol_bump: float = 0.01,
+        spot_bump: float = DEFAULT_SPOT_BUMP,
+        rate_bump: float = DEFAULT_RATE_BUMP,
+        vol_bump: float = DEFAULT_VOL_BUMP,
     ) -> GreeksResult:
         """
         Calculate portfolio Greeks via central finite differences.
@@ -424,7 +473,7 @@ class OptionsPortfolio:
         v_up = self.value(market.bump_spot(h_s))
         v_down = self.value(market.bump_spot(-h_s))
         delta = (v_up - v_down) / (2 * h_s)
-        gamma = (v_up - 2 * v0 + v_down) / (h_s ** 2)
+        gamma = (v_up - 2 * v0 + v_down) / (h_s**2)
 
         # Rho
         h_r = rate_bump
@@ -468,7 +517,7 @@ class OptionsPortfolio:
             f"Cannot compute vega for model '{self._model.name}': "
             f"unsupported model type for vol bumping. "
             f"Available parameters: {list(self._model.get_parameters().keys())}",
-            UserWarning
+            UserWarning,
         )
         return 0.0
 
@@ -487,6 +536,7 @@ class OptionsPortfolio:
         for pos in self._positions:
             new_maturity = max(pos.maturity - dt, 0.001)
             from backend.instruments.options import VanillaOption
+
             decayed_instrument = VanillaOption(
                 strike=pos.strike,
                 maturity=new_maturity,
@@ -503,6 +553,8 @@ class OptionsPortfolio:
 
     def _value_with_model(self, market: MarketEnvironment, model: Model) -> float:
         """Value portfolio with a different model."""
+        from backend.core.registry import EngineRegistry
+
         total = 0.0
         for pos in self._positions:
             result = self._engine.price(pos.instrument, model, market)
@@ -510,6 +562,10 @@ class OptionsPortfolio:
 
         if self._stock:
             total += self._stock.quantity * market.spot
+
+        for sp_pos in self._structured_positions:
+            result = EngineRegistry.price(sp_pos.product, model, market)
+            total += sp_pos.quantity * result.price
 
         return total
 
@@ -521,7 +577,7 @@ class OptionsPortfolio:
         self,
         market: MarketEnvironment,
         spot_range: np.ndarray,
-        greek: str = 'delta',
+        greek: str = "delta",
     ) -> np.ndarray:
         """
         Calculate a Greek across spot prices.
@@ -569,7 +625,7 @@ class OptionsPortfolio:
             direction = "Long" if pos.is_long else "Short"
             opt_type = "Call" if pos.is_call else "Put"
             lines.append(
-                f"{i+1}. {direction} {abs(pos.quantity)}x {opt_type} @ K={pos.strike:.2f} "
+                f"{i + 1}. {direction} {abs(pos.quantity)}x {opt_type} @ K={pos.strike:.2f} "
                 f"T={pos.maturity:.2f}y (premium={pos.premium:.2f})"
             )
 
@@ -635,7 +691,7 @@ if __name__ == "__main__":
 
     # Test with Heston model
     print("\n--- Heston Model ---")
-    heston = HestonModel(v0=0.04, kappa=2.0, theta=0.04, xi=0.3, rho=-0.7)
+    heston = HestonModel(v0=0.04, kappa=2.0, theta=0.04, alpha=0.3, rho=-0.7)
     portfolio_heston = OptionsPortfolio(model=heston)
     portfolio_heston.add(long_call(strike=100, maturity=0.5, premium=5.0))
 

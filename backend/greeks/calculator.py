@@ -7,61 +7,54 @@ High-level interface for Greeks calculation.
 Dispatches to analytic or numerical methods based on model/engine.
 Supports first, second, and third order Greeks.
 
-Author: Thomas
-Created: 2025
+Author: Thomas Vaudescal
+Created: 2026
 """
 
-from typing import NamedTuple
+import logging
 
 import numpy as np
 
-from backend.core.interfaces import Instrument, Model, PricingEngine
+from backend.utils.constants.greeks import (
+    ULTIMA_SCALE,
+    VALID_GREEKS,
+    VANNA_SCALE,
+    VEGA_SCALE,
+    VOLGA_SCALE,
+    ZOMMA_SCALE,
+)
+from backend.utils.constants.monte_carlo import (
+    DEFAULT_RATE_BUMP,
+    DEFAULT_SPOT_BUMP,
+    DEFAULT_TIME_BUMP_DAYS,
+    DEFAULT_VOL_BUMP,
+)
+from backend.utils.constants.time import CALENDAR_DAYS_PER_YEAR
+from backend.core.interfaces import Instrument, Model, Priceable, PricingEngine
 from backend.core.market import MarketEnvironment
 from backend.core.result_types import GreeksResult
 from backend.greeks._instrument_utils import create_decayed_instrument
-from backend.utils.math import DAYS_PER_YEAR
+from backend.greeks.strategies import (
+    DEFAULT_STRATEGIES,
+    GreeksStrategy,
+)
 
-# Valid Greek names for validation
-VALID_GREEKS = frozenset({
-    'price',
-    # First order
-    'delta', 'gamma', 'vega', 'theta', 'rho',
-    # Second order
-    'vanna', 'volga', 'charm', 'veta',
-    # Third order
-    'speed', 'zomma', 'color', 'ultima'
-})
+logger = logging.getLogger(__name__)
 
 
 # =============================================================================
-# Greeks Result Types
+# Backward compatibility
 # =============================================================================
 
-class AllGreeksResult(NamedTuple):
-    """Complete Greeks result with all 14 Greeks."""
-    # Price
-    price: float
-    # First order
-    delta: float
-    gamma: float
-    vega: float
-    theta: float
-    rho: float
-    # Second order
-    vanna: float
-    volga: float
-    charm: float
-    veta: float
-    # Third order
-    speed: float
-    zomma: float
-    color: float
-    ultima: float
+# AllGreeksResult is now unified into GreeksResult (which includes a price field).
+# Keep the alias for any external code that references AllGreeksResult.
+AllGreeksResult = GreeksResult
 
 
 # =============================================================================
 # Unified Calculator
 # =============================================================================
+
 
 class GreeksCalculator:
     """
@@ -87,10 +80,10 @@ class GreeksCalculator:
     def __init__(
         self,
         prefer_analytic: bool = True,
-        spot_bump: float = 0.01,
-        vol_bump: float = 0.01,
-        time_bump_days: float = 1.0,
-        rate_bump: float = 0.0001
+        spot_bump: float = DEFAULT_SPOT_BUMP,
+        vol_bump: float = DEFAULT_VOL_BUMP,
+        time_bump_days: float = DEFAULT_TIME_BUMP_DAYS,
+        rate_bump: float = DEFAULT_RATE_BUMP,
     ):
         self.prefer_analytic = prefer_analytic
         self.spot_bump = spot_bump
@@ -101,224 +94,126 @@ class GreeksCalculator:
     def calculate(
         self,
         engine: PricingEngine,
-        instrument: Instrument,
+        instrument: Priceable,
         model: Model,
         market: MarketEnvironment,
-        include_higher_order: bool = True
-    ) -> GreeksResult | AllGreeksResult:
+        include_higher_order: bool = True,
+        method: str | None = None,
+    ) -> GreeksResult:
         """
-        Calculate Greeks for an instrument.
+        Calculate Greeks for any priceable instrument.
+
+        Uses the Strategy Pattern to dispatch to the best available method.
+        Priority: analytic > numerical (bump-and-reprice).
 
         Parameters
         ----------
         engine : PricingEngine
             Pricing engine
-        instrument : Instrument
-            Option instrument
+        instrument : Priceable
+            Any priceable contract (VanillaOption, Autocallable, etc.)
         model : Model
             Pricing model
         market : MarketEnvironment
             Market conditions
         include_higher_order : bool
             Include second and third order Greeks (default True)
+        method : str, optional
+            Force a specific strategy: "analytic" or "numerical".
+            If None, auto-selects the best available strategy.
 
         Returns
         -------
-        GreeksResult or AllGreeksResult
-            Greeks result
+        GreeksResult
+            Greeks result (with price and all orders)
+
+        Raises
+        ------
+        ValueError
+            If the requested method cannot compute Greeks for this pair.
         """
-        # Check if engine provides its own Greeks (e.g. ExoticAnalyticEngine)
-        if self.prefer_analytic and self._can_use_engine_greeks(engine, instrument, model):
-            return self._engine_greeks(
-                engine, instrument, model, market, include_higher_order
-            )
-        # Check if we can use analytic BS Greeks
-        if self.prefer_analytic and self._can_use_analytic(engine, instrument, model):
-            return self._analytic_greeks(
-                instrument, model, market, include_higher_order
-            )
-        return self._numerical_greeks(
-            engine, instrument, model, market, include_higher_order
-        )
-
-    def _can_use_engine_greeks(self, engine: PricingEngine, instrument: Instrument, model: Model) -> bool:
-        """Check if the engine provides its own Greeks method for this instrument."""
-        from backend.engines.exotic_engine import ExoticAnalyticEngine
-
-        return (
-            isinstance(engine, ExoticAnalyticEngine) and
-            engine.can_price(instrument, model)
-        )
-
-    def _can_use_analytic(self, engine: PricingEngine, instrument: Instrument, model: Model) -> bool:
-        """Check if analytic BS Greeks are available."""
-        from backend.engines import BSAnalyticEngine
-        from backend.instruments.options import VanillaOption
-        from backend.models.gbm import GBMModel
-
-        return (
-            isinstance(engine, BSAnalyticEngine) and
-            isinstance(model, GBMModel) and
-            isinstance(instrument, VanillaOption)
-        )
-
-    def _engine_greeks(
-        self,
-        engine: PricingEngine,
-        instrument: Instrument,
-        model: Model,
-        market: MarketEnvironment,
-        include_higher_order: bool
-    ) -> GreeksResult | AllGreeksResult:
-        """
-        Calculate Greeks using the engine's own greeks() method.
-
-        Used for engines like ExoticAnalyticEngine that provide their own
-        first-order Greeks via internal finite differences.
-        """
-        first_order = engine.greeks(instrument, model, market)
-        price = engine.price(instrument, model, market).price
-
-        if include_higher_order:
-            higher_order = self._numerical_higher_order_greeks(
-                engine, instrument, model, market
-            )
-            return AllGreeksResult(
-                price=price,
-                delta=first_order.delta,
-                gamma=first_order.gamma,
-                vega=first_order.vega,
-                theta=first_order.theta,
-                rho=first_order.rho,
-                vanna=higher_order['vanna'],
-                volga=higher_order['volga'],
-                charm=higher_order['charm'],
-                veta=higher_order['veta'],
-                speed=higher_order['speed'],
-                zomma=higher_order['zomma'],
-                color=higher_order['color'],
-                ultima=higher_order['ultima'],
-            )
-        return first_order
-
-    def _analytic_greeks(
-        self,
-        instrument: Instrument,
-        model: Model,
-        market: MarketEnvironment,
-        include_higher_order: bool
-    ) -> GreeksResult | AllGreeksResult:
-        """Calculate analytic Black-Scholes Greeks."""
-        from backend.greeks.analytic import bs_all_greeks
-
-        # Validate instrument has strike
-        if not hasattr(instrument, 'strike'):
-            raise ValueError(
-                f"Analytic Greeks require an instrument with fixed strike. "
-                f"{type(instrument).__name__} has no strike attribute."
-            )
-
-        params = model.get_parameters()
-        sigma = params['sigma']
-
-        greeks = bs_all_greeks(
-            s=market.spot,
-            k=instrument.strike,
-            t=instrument.maturity,
-            r=market.rate,
-            q=market.dividend_yield,
-            sigma=sigma,
-            is_call=instrument.is_call
-        )
-
-        if include_higher_order:
-            return AllGreeksResult(
-                price=greeks[0],
-                delta=greeks[1],
-                gamma=greeks[2],
-                vega=greeks[3],
-                theta=greeks[4],
-                rho=greeks[5],
-                vanna=greeks[6],
-                volga=greeks[7],
-                charm=greeks[8],
-                veta=greeks[9],
-                speed=greeks[10],
-                zomma=greeks[11],
-                color=greeks[12],
-                ultima=greeks[13]
-            )
-        return GreeksResult(
-            delta=greeks[1],
-            gamma=greeks[2],
-            vega=greeks[3],
-            theta=greeks[4],
-            rho=greeks[5]
-        )
-
-    def _numerical_greeks(
-        self,
-        engine: PricingEngine,
-        instrument: Instrument,
-        model: Model,
-        market: MarketEnvironment,
-        include_higher_order: bool
-    ) -> GreeksResult | AllGreeksResult:
-        """Calculate numerical Greeks via finite differences."""
-        from backend.greeks.numerical import GreeksBumpConfig, ModelNumericalGreeks
+        from backend.greeks.numerical import GreeksBumpConfig
 
         config = GreeksBumpConfig(
             spot_bump=self.spot_bump,
             vol_bump=self.vol_bump,
             time_bump_days=self.time_bump_days,
-            rate_bump=self.rate_bump
+            rate_bump=self.rate_bump,
         )
-        num_calc = ModelNumericalGreeks(config)
 
-        num_greeks = num_calc.calculate(engine, instrument, model, market)
-
-        if include_higher_order:
-            # Calculate second and third order numerically
-            price = engine.price(instrument, model, market).price
-
-            # Calculate higher-order Greeks using cross finite differences
-            higher_order = self._numerical_higher_order_greeks(
-                engine, instrument, model, market
+        if method is not None:
+            strategy = self._get_strategy_by_name(method)
+            # Engine strategy uses engine-aware check
+            can = (
+                strategy.can_compute_with_engine(instrument, model, engine)
+                if hasattr(strategy, "can_compute_with_engine")
+                else strategy.can_compute(instrument, model)
+            )
+            if not can:
+                raise ValueError(
+                    f"Strategy '{method}' cannot compute Greeks for "
+                    f"{type(instrument).__name__} / {model.name}"
+                )
+            logger.debug(
+                "Using %s Greeks (forced) for %s/%s",
+                strategy.name,
+                type(instrument).__name__,
+                model.name,
+            )
+            return strategy.compute(
+                engine, instrument, model, market, config, include_higher_order
             )
 
-            return AllGreeksResult(
-                price=price,
-                delta=num_greeks.delta,
-                gamma=num_greeks.gamma,
-                vega=num_greeks.vega,
-                theta=num_greeks.theta,
-                rho=num_greeks.rho,
-                # Second order
-                vanna=higher_order['vanna'],
-                volga=higher_order['volga'],
-                charm=higher_order['charm'],
-                veta=higher_order['veta'],
-                # Third order
-                speed=higher_order['speed'],
-                zomma=higher_order['zomma'],
-                color=higher_order['color'],
-                ultima=higher_order['ultima']
-            )
-        return GreeksResult(
-            delta=num_greeks.delta,
-            gamma=num_greeks.gamma,
-            vega=num_greeks.vega,
-            theta=num_greeks.theta,
-            rho=num_greeks.rho
+        # Auto-select: try strategies in priority order
+        strategy = self._auto_select(instrument, model, engine)
+        logger.debug(
+            "Using %s Greeks (auto) for %s/%s",
+            strategy.name,
+            type(instrument).__name__,
+            model.name,
         )
+        return strategy.compute(
+            engine, instrument, model, market, config, include_higher_order
+        )
+
+    def _auto_select(
+        self,
+        instrument: Priceable,
+        model: Model,
+        engine: PricingEngine,
+    ) -> GreeksStrategy:
+        """Select the best strategy for this instrument/model pair."""
+        from backend.greeks.strategies import EngineGreeksStrategy
+
+        for strategy in DEFAULT_STRATEGIES:
+            if strategy.name == "analytic" and not self.prefer_analytic:
+                continue
+            # Engine strategy needs the engine to decide compatibility
+            if isinstance(strategy, EngineGreeksStrategy):
+                if strategy.can_compute_with_engine(instrument, model, engine):
+                    return strategy
+                continue
+            if strategy.can_compute(instrument, model):
+                return strategy
+        # Should never reach here — NumericalGreeksStrategy always returns True
+        return DEFAULT_STRATEGIES[-1]
+
+    @staticmethod
+    def _get_strategy_by_name(name: str) -> GreeksStrategy:
+        """Look up a strategy by name."""
+        for strategy in DEFAULT_STRATEGIES:
+            if strategy.name == name:
+                return strategy
+        available = [s.name for s in DEFAULT_STRATEGIES]
+        raise ValueError(f"Unknown Greeks method '{name}'. Available: {available}")
 
     def _numerical_higher_order_greeks(
         self,
         engine: PricingEngine,
-        instrument: Instrument,
+        instrument: Priceable,
         model: Model,
-        market: MarketEnvironment
-    ) -> dict:
+        market: MarketEnvironment,
+    ) -> dict[str, float]:
         """
         Calculate higher-order Greeks using numerical cross finite differences.
 
@@ -334,9 +229,21 @@ class GreeksCalculator:
         """
         from backend.models.vol_bump import create_vol_bumped_model
 
+        # Local cache to avoid redundant engine.price() calls.
+        # We keep references alive to prevent id() reuse after GC.
+        _price_cache: dict[tuple, float] = {}
+        _cache_refs: list = []
+
+        def cached_price(inst, mod, mkt):
+            key = (id(inst), id(mod), id(mkt))
+            if key not in _price_cache:
+                _cache_refs.extend([inst, mod, mkt])
+                _price_cache[key] = engine.price(inst, mod, mkt).price
+            return _price_cache[key]
+
         # Bump sizes
         h_s = market.spot * self.spot_bump
-        h_t = self.time_bump_days / DAYS_PER_YEAR
+        h_t = self.time_bump_days / CALENDAR_DAYS_PER_YEAR
         h_v = self.vol_bump
 
         # Create bumped models once for efficiency
@@ -349,8 +256,8 @@ class GreeksCalculator:
             """Compute delta at market m."""
             s_up = m.bump_spot(h_s)
             s_down = m.bump_spot(-h_s)
-            v_up = engine.price(instrument, model, s_up).price
-            v_down = engine.price(instrument, model, s_down).price
+            v_up = cached_price(instrument, model, s_up)
+            v_down = cached_price(instrument, model, s_down)
             return (v_up - v_down) / (2 * h_s)
 
         # Helper to compute gamma at a given market
@@ -358,18 +265,18 @@ class GreeksCalculator:
             """Compute gamma at market m."""
             s_up = m.bump_spot(h_s)
             s_down = m.bump_spot(-h_s)
-            v_up = engine.price(instrument, model, s_up).price
-            v_mid = engine.price(instrument, model, m).price
-            v_down = engine.price(instrument, model, s_down).price
-            return (v_up - 2 * v_mid + v_down) / (h_s ** 2)
+            v_up = cached_price(instrument, model, s_up)
+            v_mid = cached_price(instrument, model, m)
+            v_down = cached_price(instrument, model, s_down)
+            return (v_up - 2 * v_mid + v_down) / (h_s**2)
 
         # Helper to compute vega at a given market
         def get_vega(m):
             """Compute vega at market m."""
             if not can_bump_vol:
                 return 0.0
-            v_up = engine.price(instrument, mod_up, m).price
-            v_down = engine.price(instrument, mod_down, m).price
+            v_up = cached_price(instrument, mod_up, m)
+            v_down = cached_price(instrument, mod_down, m)
             return (v_up - v_down) / (2 * h_v)
 
         # Create decayed instrument for time derivatives (works for all types)
@@ -379,14 +286,14 @@ class GreeksCalculator:
 
         # Initialize results
         result = {
-            'vanna': 0.0,
-            'volga': 0.0,
-            'charm': 0.0,
-            'veta': 0.0,
-            'speed': 0.0,
-            'zomma': 0.0,
-            'color': 0.0,
-            'ultima': 0.0
+            "vanna": 0.0,
+            "volga": 0.0,
+            "charm": 0.0,
+            "veta": 0.0,
+            "speed": 0.0,
+            "zomma": 0.0,
+            "color": 0.0,
+            "ultima": 0.0,
         }
 
         # VANNA = dDelta/dSigma
@@ -394,58 +301,62 @@ class GreeksCalculator:
             # Delta at vol + h
             s_up = market.bump_spot(h_s)
             s_down = market.bump_spot(-h_s)
-            v_up_vup = engine.price(instrument, mod_up, s_up).price
-            v_down_vup = engine.price(instrument, mod_up, s_down).price
+            v_up_vup = cached_price(instrument, mod_up, s_up)
+            v_down_vup = cached_price(instrument, mod_up, s_down)
             delta_vup = (v_up_vup - v_down_vup) / (2 * h_s)
 
             # Delta at vol - h
-            v_up_vdown = engine.price(instrument, mod_down, s_up).price
-            v_down_vdown = engine.price(instrument, mod_down, s_down).price
+            v_up_vdown = cached_price(instrument, mod_down, s_up)
+            v_down_vdown = cached_price(instrument, mod_down, s_down)
             delta_vdown = (v_up_vdown - v_down_vdown) / (2 * h_s)
 
-            result['vanna'] = (delta_vup - delta_vdown) / (2 * h_v)
+            result["vanna"] = (delta_vup - delta_vdown) / (2 * h_v) / VANNA_SCALE
 
             # VOLGA = dVega/dSigma
             # Need models with double bump for volga
             mod_2up = create_vol_bumped_model(model, 2 * h_v)
             mod_2down = create_vol_bumped_model(model, -2 * h_v)
             if mod_2up is not None and mod_2down is not None:
-                v_2up = engine.price(instrument, mod_2up, market).price
-                v_mid = engine.price(instrument, model, market).price
-                v_2down = engine.price(instrument, mod_2down, market).price
-                # Volga = d²V/dσ² using central difference on vega
-                result['volga'] = (v_2up - 2 * v_mid + v_2down) / (2 * h_v) ** 2
+                v_2up = cached_price(instrument, mod_2up, market)
+                v_mid = cached_price(instrument, model, market)
+                v_2down = cached_price(instrument, mod_2down, market)
+                # Volga = d^2V/d sigma^2 using central difference on vega
+                result["volga"] = (
+                    (v_2up - 2 * v_mid + v_2down) / (2 * h_v) ** 2 / VOLGA_SCALE
+                )
 
             # ZOMMA = dGamma/dSigma
             # Compute gamma at two volatility levels
-            v_up_up = engine.price(instrument, mod_up, s_up).price
-            v_mid_up = engine.price(instrument, mod_up, market).price
-            v_down_up = engine.price(instrument, mod_up, s_down).price
-            gamma_vol_up = (v_up_up - 2 * v_mid_up + v_down_up) / (h_s ** 2)
+            v_up_up = cached_price(instrument, mod_up, s_up)
+            v_mid_up = cached_price(instrument, mod_up, market)
+            v_down_up = cached_price(instrument, mod_up, s_down)
+            gamma_vol_up = (v_up_up - 2 * v_mid_up + v_down_up) / (h_s**2)
 
-            v_up_down = engine.price(instrument, mod_down, s_up).price
-            v_mid_down = engine.price(instrument, mod_down, market).price
-            v_down_down = engine.price(instrument, mod_down, s_down).price
-            gamma_vol_down = (v_up_down - 2 * v_mid_down + v_down_down) / (h_s ** 2)
+            v_up_down = cached_price(instrument, mod_down, s_up)
+            v_mid_down = cached_price(instrument, mod_down, market)
+            v_down_down = cached_price(instrument, mod_down, s_down)
+            gamma_vol_down = (v_up_down - 2 * v_mid_down + v_down_down) / (h_s**2)
 
-            result['zomma'] = (gamma_vol_up - gamma_vol_down) / (2 * h_v)
+            result["zomma"] = (gamma_vol_up - gamma_vol_down) / (2 * h_v) / ZOMMA_SCALE
 
             # ULTIMA = dVolga/dSigma (third derivative wrt sigma)
             # Compute using finite difference on volga
             if mod_2up is not None and mod_2down is not None:
                 # Volga at mod_up
-                v_2up_up = engine.price(instrument, mod_2up, market).price
-                v_at_up = engine.price(instrument, mod_up, market).price
-                v_0 = engine.price(instrument, model, market).price
-                volga_at_up = (v_2up_up - 2 * v_at_up + v_0) / (h_v ** 2)
+                v_2up_up = cached_price(instrument, mod_2up, market)
+                v_at_up = cached_price(instrument, mod_up, market)
+                v_0 = cached_price(instrument, model, market)
+                volga_at_up = (v_2up_up - 2 * v_at_up + v_0) / (h_v**2)
 
                 # Volga at mod_down (requires mod at -2h which we have)
                 v_0_for_down = v_0
-                v_down_mid = engine.price(instrument, mod_down, market).price
-                v_2down_val = engine.price(instrument, mod_2down, market).price
-                volga_at_down = (v_0_for_down - 2 * v_down_mid + v_2down_val) / (h_v ** 2)
+                v_down_mid = cached_price(instrument, mod_down, market)
+                v_2down_val = cached_price(instrument, mod_2down, market)
+                volga_at_down = (v_0_for_down - 2 * v_down_mid + v_2down_val) / (h_v**2)
 
-                result['ultima'] = (volga_at_up - volga_at_down) / (2 * h_v)
+                result["ultima"] = (
+                    (volga_at_up - volga_at_down) / (2 * h_v) / ULTIMA_SCALE
+                )
 
         # CHARM = dDelta/dt (time decay of delta)
         decayed = get_decayed_instrument()
@@ -454,20 +365,20 @@ class GreeksCalculator:
             # Compute delta for decayed instrument
             s_up = market.bump_spot(h_s)
             s_down = market.bump_spot(-h_s)
-            v_up_later = engine.price(decayed, model, s_up).price
-            v_down_later = engine.price(decayed, model, s_down).price
+            v_up_later = cached_price(decayed, model, s_up)
+            v_down_later = cached_price(decayed, model, s_down)
             delta_later = (v_up_later - v_down_later) / (2 * h_s)
 
-            result['charm'] = (delta_later - delta_now) / self.time_bump_days
+            result["charm"] = (delta_later - delta_now) / self.time_bump_days
 
             # COLOR = dGamma/dt
             gamma_now = get_gamma(market)
-            v_up_later = engine.price(decayed, model, s_up).price
-            v_mid_later = engine.price(decayed, model, market).price
-            v_down_later = engine.price(decayed, model, s_down).price
-            gamma_later = (v_up_later - 2 * v_mid_later + v_down_later) / (h_s ** 2)
+            v_up_later = cached_price(decayed, model, s_up)
+            v_mid_later = cached_price(decayed, model, market)
+            v_down_later = cached_price(decayed, model, s_down)
+            gamma_later = (v_up_later - 2 * v_mid_later + v_down_later) / (h_s**2)
 
-            result['color'] = (gamma_later - gamma_now) / self.time_bump_days
+            result["color"] = (gamma_later - gamma_now) / self.time_bump_days
 
         # VETA = dVega/dt
         if can_bump_vol and decayed is not None:
@@ -475,11 +386,11 @@ class GreeksCalculator:
             vega_now = get_vega(market)
 
             # Vega later (with decayed instrument)
-            v_vup_later = engine.price(decayed, mod_up, market).price
-            v_vdown_later = engine.price(decayed, mod_down, market).price
+            v_vup_later = cached_price(decayed, mod_up, market)
+            v_vdown_later = cached_price(decayed, mod_down, market)
             vega_later = (v_vup_later - v_vdown_later) / (2 * h_v)
 
-            result['veta'] = (vega_later - vega_now) / self.time_bump_days
+            result["veta"] = (vega_later - vega_now) / self.time_bump_days / VEGA_SCALE
 
         # SPEED = dGamma/dS (third derivative wrt spot)
         # Using four-point stencil
@@ -488,13 +399,13 @@ class GreeksCalculator:
         s_down = market.bump_spot(-h_s)
         s_2down = market.bump_spot(-2 * h_s)
 
-        v_2up = engine.price(instrument, model, s_2up).price
-        v_up = engine.price(instrument, model, s_up).price
-        v_down = engine.price(instrument, model, s_down).price
-        v_2down = engine.price(instrument, model, s_2down).price
+        v_2up = cached_price(instrument, model, s_2up)
+        v_up = cached_price(instrument, model, s_up)
+        v_down = cached_price(instrument, model, s_down)
+        v_2down = cached_price(instrument, model, s_2down)
 
         # Third derivative approximation
-        result['speed'] = (v_2up - 2 * v_up + 2 * v_down - v_2down) / (2 * h_s ** 3)
+        result["speed"] = (v_2up - 2 * v_up + 2 * v_down - v_2down) / (2 * h_s**3)
 
         return result
 
@@ -505,7 +416,7 @@ class GreeksCalculator:
         model: Model,
         market: MarketEnvironment,
         spot_range: np.ndarray,
-        greek: str = 'delta'
+        greek: str = "delta",
     ) -> np.ndarray:
         """
         Calculate a Greek across spot prices.
@@ -543,14 +454,25 @@ class GreeksCalculator:
 
         results = np.zeros(len(spot_range))
 
-        higher_order_greeks = {'vanna', 'volga', 'charm', 'veta',
-                               'speed', 'zomma', 'color', 'ultima'}
+        higher_order_greeks = {
+            "vanna",
+            "volga",
+            "charm",
+            "veta",
+            "speed",
+            "zomma",
+            "color",
+            "ultima",
+        }
 
         for i, spot in enumerate(spot_range):
             bumped_market = market.with_spot(spot)
             greeks = self.calculate(
-                engine, instrument, model, bumped_market,
-                include_higher_order=(greek in higher_order_greeks)
+                engine,
+                instrument,
+                model,
+                bumped_market,
+                include_higher_order=(greek in higher_order_greeks),
             )
             results[i] = getattr(greeks, greek)
 
@@ -561,13 +483,14 @@ class GreeksCalculator:
 # Convenience Function
 # =============================================================================
 
+
 def calculate_greeks(
     engine: PricingEngine,
     instrument: Instrument,
     model: Model,
     market: MarketEnvironment,
-    include_higher_order: bool = False
-) -> GreeksResult | AllGreeksResult:
+    include_higher_order: bool = False,
+) -> GreeksResult:
     """
     Calculate Greeks for an instrument.
 
@@ -588,8 +511,8 @@ def calculate_greeks(
 
     Returns
     -------
-    GreeksResult or AllGreeksResult
-        Greeks result
+    GreeksResult
+        Greeks result (with price and all orders when include_higher_order=True)
     """
     calc = GreeksCalculator()
     return calc.calculate(engine, instrument, model, market, include_higher_order)
@@ -619,7 +542,7 @@ if __name__ == "__main__":
     calc = GreeksCalculator()
     greeks = calc.calculate(engine, option, model, market, include_higher_order=True)
 
-    print("\nATM Call Greeks (S=K=100, T=0.25, σ=20%):")
+    print("\nATM Call Greeks (S=K=100, T=0.25, sigma=20%):")
     print(f"  Price: ${greeks.price:.4f}")
     print("\n  First Order:")
     print(f"    Delta: {greeks.delta:.6f}")

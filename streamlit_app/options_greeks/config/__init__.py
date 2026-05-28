@@ -1,5 +1,6 @@
 """Configuration module for Options Greeks Explorer."""
 
+from .chart_theme import GREEK_COLORS
 from .constants import (
     CONTRACT_MULTIPLIER,
     DEFAULT_DTE,
@@ -8,7 +9,6 @@ from .constants import (
     DEFAULT_SPOT_PRICE,
     DTE_RANGE,
     FIRST_ORDER,
-    GREEK_COLORS,
     GREEK_NAMES,
     GREEK_TITLES,
     IV_RANGE,

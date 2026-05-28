@@ -17,7 +17,8 @@ def render_guide_section():
     """Main entry point for the mathematical guide."""
 
     # Title with visual styling
-    st.markdown("""
+    st.markdown(
+        """
     <div style="text-align: center; padding: 2rem 0; background: linear-gradient(135deg, #1e3a5f 0%, #2d5a87 100%);
                 border-radius: 15px; margin-bottom: 2rem; box-shadow: 0 4px 15px rgba(0,0,0,0.2);">
         <h1 style="color: #ffffff; margin: 0; font-size: 2.5rem;">
@@ -27,10 +28,13 @@ def render_guide_section():
             Black-Scholes Theory & Greeks Encyclopedia
         </p>
     </div>
-    """, unsafe_allow_html=True)
+    """,
+        unsafe_allow_html=True,
+    )
 
     # Navigation with visual tabs
-    st.markdown("""
+    st.markdown(
+        """
     <style>
     .stTabs [data-baseweb="tab-list"] {
         gap: 8px;
@@ -44,15 +48,19 @@ def render_guide_section():
         font-weight: 500;
     }
     </style>
-    """, unsafe_allow_html=True)
+    """,
+        unsafe_allow_html=True,
+    )
 
-    tabs = st.tabs([
-        "Foundation",
-        "First-Order Greeks",
-        "Second-Order Greeks",
-        "Third-Order Greeks",
-        "Trading Applications"
-    ])
+    tabs = st.tabs(
+        [
+            "Foundation",
+            "First-Order Greeks",
+            "Second-Order Greeks",
+            "Third-Order Greeks",
+            "Trading Applications",
+        ]
+    )
 
     with tabs[0]:
         render_foundation_section()
@@ -70,13 +78,15 @@ def render_guide_section():
 # FOUNDATION SECTION
 # ==============================================================================
 
+
 def render_foundation_section():
     """Render the Black-Scholes foundation section."""
 
     st.markdown("## The Black-Scholes-Merton Framework")
 
     # Historical context box
-    st.markdown("""
+    st.markdown(
+        """
     <div style="background: linear-gradient(135deg, #f5f7fa 0%, #e4e9f2 100%);
                 padding: 1.5rem; border-radius: 12px; margin: 1rem 0;
                 border-left: 5px solid #1e3a5f;">
@@ -88,7 +98,9 @@ def render_foundation_section():
             (Black had passed away in 1995).
         </p>
     </div>
-    """, unsafe_allow_html=True)
+    """,
+        unsafe_allow_html=True,
+    )
 
     # Core assumptions
     st.markdown("### Model Assumptions")
@@ -96,7 +108,8 @@ def render_foundation_section():
     col1, col2 = st.columns(2)
 
     with col1:
-        st.markdown("""
+        st.markdown(
+            """
         <div style="background: #ffffff; padding: 1.2rem; border-radius: 10px;
                     border: 1px solid #e0e0e0; height: 100%;">
             <h5 style="color: #1e3a5f;">Market Assumptions</h5>
@@ -108,10 +121,13 @@ def render_foundation_section():
                 <li><strong>Divisibility:</strong> Assets infinitely divisible</li>
             </ul>
         </div>
-        """, unsafe_allow_html=True)
+        """,
+            unsafe_allow_html=True,
+        )
 
     with col2:
-        st.markdown("""
+        st.markdown(
+            """
         <div style="background: #ffffff; padding: 1.2rem; border-radius: 10px;
                     border: 1px solid #e0e0e0; height: 100%;">
             <h5 style="color: #1e3a5f;">Asset Assumptions</h5>
@@ -123,18 +139,23 @@ def render_foundation_section():
                 <li><strong>European exercise:</strong> Exercise only at expiry</li>
             </ul>
         </div>
-        """, unsafe_allow_html=True)
+        """,
+            unsafe_allow_html=True,
+        )
 
     st.markdown("### The Pricing Formula")
 
     # Main formula display
-    st.markdown("""
+    st.markdown(
+        """
     <div style="background: linear-gradient(135deg, #1e3a5f 0%, #2d5a87 100%);
                 padding: 2rem; border-radius: 15px; margin: 1.5rem 0;
                 box-shadow: 0 4px 15px rgba(0,0,0,0.15);">
         <h4 style="color: #ffffff; text-align: center; margin-top: 0;">Black-Scholes Pricing Equations</h4>
     </div>
-    """, unsafe_allow_html=True)
+    """,
+        unsafe_allow_html=True,
+    )
 
     col1, col2 = st.columns(2)
 
@@ -158,7 +179,8 @@ def render_foundation_section():
     # Intuition section
     st.markdown("### Understanding the Formula")
 
-    st.markdown("""
+    st.markdown(
+        """
     <div style="background: #e8f4f8; padding: 1.5rem; border-radius: 12px; margin: 1rem 0;">
         <h5 style="color: #1e3a5f; margin-top: 0;">Intuitive Interpretation</h5>
         <p>The Black-Scholes formula can be understood as an expected payoff calculation:</p>
@@ -171,7 +193,9 @@ def render_foundation_section():
         <p style="margin-bottom: 0;"><em>The option price is the difference between what you expect to receive
         and what you expect to pay, discounted to present value.</em></p>
     </div>
-    """, unsafe_allow_html=True)
+    """,
+        unsafe_allow_html=True,
+    )
 
     # Put-Call Parity
     render_put_call_parity()
@@ -183,7 +207,8 @@ def render_foundation_section():
 def render_variable_table():
     """Render the variable definitions table."""
 
-    st.markdown("""
+    st.markdown(
+        """
     <div style="background: #f8f9fa; padding: 1.2rem; border-radius: 10px; margin: 1rem 0;">
         <h5 style="color: #1e3a5f; margin-top: 0;">Variable Definitions</h5>
         <table style="width: 100%; border-collapse: collapse;">
@@ -217,7 +242,9 @@ def render_variable_table():
             </tr>
         </table>
     </div>
-    """, unsafe_allow_html=True)
+    """,
+        unsafe_allow_html=True,
+    )
 
 
 def render_put_call_parity():
@@ -225,13 +252,16 @@ def render_put_call_parity():
 
     st.markdown("### Put-Call Parity")
 
-    st.markdown("""
+    st.markdown(
+        """
     <div style="background: linear-gradient(135deg, #2d5a87 0%, #3d7ab7 100%);
                 padding: 1.5rem; border-radius: 12px; margin: 1rem 0; color: white;">
         <h5 style="margin-top: 0;">Fundamental Relationship</h5>
         <p>Put-call parity is a no-arbitrage relationship that must hold for European options:</p>
     </div>
-    """, unsafe_allow_html=True)
+    """,
+        unsafe_allow_html=True,
+    )
 
     st.latex(r"C - P = S_0 e^{-qT} - K e^{-rT}")
 
@@ -273,12 +303,15 @@ def render_normal_distribution():
             st.markdown("**CDF Relationship:**")
             st.latex(r"N'(x) = n(x)")
 
-        st.markdown("""
+        st.markdown(
+            """
         <div style="background: #fff3cd; padding: 1rem; border-radius: 8px; margin-top: 1rem;">
             <strong>Key Identity for Greeks:</strong> The relationship between N(d1) and N(d2)
             appears frequently in Greek calculations:
         </div>
-        """, unsafe_allow_html=True)
+        """,
+            unsafe_allow_html=True,
+        )
 
         st.latex(r"S_0 e^{-qT} n(d_1) = K e^{-rT} n(d_2)")
 
@@ -287,12 +320,14 @@ def render_normal_distribution():
 # FIRST-ORDER GREEKS
 # ==============================================================================
 
+
 def render_first_order_greeks():
     """Render first-order Greeks section."""
 
     st.markdown("## First-Order Greeks")
 
-    st.markdown("""
+    st.markdown(
+        """
     <div style="background: linear-gradient(135deg, #f0f4f8 0%, #d9e2ec 100%);
                 padding: 1.5rem; border-radius: 12px; margin: 1rem 0;">
         <p style="margin: 0;">
@@ -301,7 +336,9 @@ def render_first_order_greeks():
             essential for delta hedging and portfolio construction.
         </p>
     </div>
-    """, unsafe_allow_html=True)
+    """,
+        unsafe_allow_html=True,
+    )
 
     # Greek overview cards
     render_greek_overview_cards()
@@ -331,13 +368,16 @@ def render_greek_overview_cards():
 
     for col, (name, formula, color, desc) in zip(cols, greeks_data):
         with col:
-            st.markdown(f"""
+            st.markdown(
+                f"""
             <div style="background: white; padding: 0.8rem; border-radius: 10px;
                         border-top: 4px solid {color}; text-align: center;
                         box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
                 <h5 style="color: {color}; margin: 0;">{name}</h5>
             </div>
-            """, unsafe_allow_html=True)
+            """,
+                unsafe_allow_html=True,
+            )
             st.latex(formula)
             st.caption(desc)
 
@@ -361,13 +401,16 @@ def render_delta_section():
         """)
 
     with col2:
-        st.markdown("""
+        st.markdown(
+            """
         <div style="background: #d4edda; padding: 1rem; border-radius: 8px;">
             <strong>Range:</strong><br>
             Call: [0, 1]<br>
             Put: [-1, 0]
         </div>
-        """, unsafe_allow_html=True)
+        """,
+            unsafe_allow_html=True,
+        )
 
     # Formulas
     st.markdown("#### Mathematical Definition")
@@ -435,17 +478,22 @@ def render_gamma_section():
         """)
 
     with col2:
-        st.markdown("""
+        st.markdown(
+            """
         <div style="background: #cce5ff; padding: 1rem; border-radius: 8px;">
             <strong>Always positive</strong> for long options<br>
             <strong>Maximum at ATM</strong><br>
             <strong>Increases</strong> near expiry
         </div>
-        """, unsafe_allow_html=True)
+        """,
+            unsafe_allow_html=True,
+        )
 
     st.markdown("#### Mathematical Definition")
 
-    st.latex(r"\Gamma = \frac{\partial \Delta}{\partial S} = \frac{\partial^2 V}{\partial S^2} = \frac{e^{-qT} n(d_1)}{S_0 \sigma \sqrt{T}}")
+    st.latex(
+        r"\Gamma = \frac{\partial \Delta}{\partial S} = \frac{\partial^2 V}{\partial S^2} = \frac{e^{-qT} n(d_1)}{S_0 \sigma \sqrt{T}}"
+    )
 
     # Gamma characteristics
     st.markdown("#### Gamma Characteristics")
@@ -453,28 +501,37 @@ def render_gamma_section():
     col1, col2, col3 = st.columns(3)
 
     with col1:
-        st.markdown("""
+        st.markdown(
+            """
         <div style="background: #f8f9fa; padding: 1rem; border-radius: 8px;">
             <h6>ATM Options</h6>
             <p>Highest gamma - delta changes most rapidly around the strike price</p>
         </div>
-        """, unsafe_allow_html=True)
+        """,
+            unsafe_allow_html=True,
+        )
 
     with col2:
-        st.markdown("""
+        st.markdown(
+            """
         <div style="background: #f8f9fa; padding: 1rem; border-radius: 8px;">
             <h6>Near Expiry</h6>
             <p>Gamma spikes for ATM options as time compresses uncertainty</p>
         </div>
-        """, unsafe_allow_html=True)
+        """,
+            unsafe_allow_html=True,
+        )
 
     with col3:
-        st.markdown("""
+        st.markdown(
+            """
         <div style="background: #f8f9fa; padding: 1rem; border-radius: 8px;">
             <h6>ITM/OTM Options</h6>
             <p>Lower gamma - delta is relatively stable</p>
         </div>
-        """, unsafe_allow_html=True)
+        """,
+            unsafe_allow_html=True,
+        )
 
     with st.expander("Gamma Trading Insights"):
         st.markdown("""
@@ -518,17 +575,22 @@ def render_vega_section():
         """)
 
     with col2:
-        st.markdown("""
+        st.markdown(
+            """
         <div style="background: #e2d5f1; padding: 1rem; border-radius: 8px;">
             <strong>Expressed per 1%</strong> change in IV<br>
             <strong>Maximum at ATM</strong><br>
             <strong>Increases</strong> with time to expiry
         </div>
-        """, unsafe_allow_html=True)
+        """,
+            unsafe_allow_html=True,
+        )
 
     st.markdown("#### Mathematical Definition")
 
-    st.latex(r"\mathcal{V} = \frac{\partial V}{\partial \sigma} = S_0 e^{-qT} n(d_1) \sqrt{T}")
+    st.latex(
+        r"\mathcal{V} = \frac{\partial V}{\partial \sigma} = S_0 e^{-qT} n(d_1) \sqrt{T}"
+    )
 
     st.markdown("#### Vega Characteristics")
 
@@ -582,45 +644,58 @@ def render_theta_section():
         """)
 
     with col2:
-        st.markdown("""
+        st.markdown(
+            """
         <div style="background: #f8d7da; padding: 1rem; border-radius: 8px;">
             <strong>Usually negative</strong> for long options<br>
             <strong>Accelerates</strong> near expiry<br>
             <strong>ATM options</strong> decay fastest
         </div>
-        """, unsafe_allow_html=True)
+        """,
+            unsafe_allow_html=True,
+        )
 
     st.markdown("#### Mathematical Definition")
 
     st.markdown("**Call Theta:**")
-    st.latex(r"\Theta_{call} = -\frac{S_0 e^{-qT} n(d_1) \sigma}{2\sqrt{T}} + q S_0 e^{-qT} N(d_1) - r K e^{-rT} N(d_2)")
+    st.latex(
+        r"\Theta_{call} = -\frac{S_0 e^{-qT} n(d_1) \sigma}{2\sqrt{T}} + q S_0 e^{-qT} N(d_1) - r K e^{-rT} N(d_2)"
+    )
 
     st.markdown("**Put Theta:**")
-    st.latex(r"\Theta_{put} = -\frac{S_0 e^{-qT} n(d_1) \sigma}{2\sqrt{T}} - q S_0 e^{-qT} N(-d_1) + r K e^{-rT} N(-d_2)")
+    st.latex(
+        r"\Theta_{put} = -\frac{S_0 e^{-qT} n(d_1) \sigma}{2\sqrt{T}} - q S_0 e^{-qT} N(-d_1) + r K e^{-rT} N(-d_2)"
+    )
 
     st.markdown("#### Time Decay Characteristics")
 
     col1, col2 = st.columns(2)
 
     with col1:
-        st.markdown("""
+        st.markdown(
+            """
         <div style="background: #f8f9fa; padding: 1rem; border-radius: 8px;">
             <h6>Theta Acceleration</h6>
             <p>Time decay is not linear - it accelerates as expiration approaches.
             The "square root of time" relationship means an option loses more value
             in its final weeks than in earlier periods.</p>
         </div>
-        """, unsafe_allow_html=True)
+        """,
+            unsafe_allow_html=True,
+        )
 
     with col2:
-        st.markdown("""
+        st.markdown(
+            """
         <div style="background: #f8f9fa; padding: 1rem; border-radius: 8px;">
             <h6>Weekend Decay</h6>
             <p>Markets price in weekend decay over the week. Some models suggest
             Friday afternoons have higher theta, while others spread it evenly.
             Earnings and events create similar dynamics.</p>
         </div>
-        """, unsafe_allow_html=True)
+        """,
+            unsafe_allow_html=True,
+        )
 
     with st.expander("Theta Trading Insights"):
         st.markdown("""
@@ -663,13 +738,16 @@ def render_rho_section():
         """)
 
     with col2:
-        st.markdown("""
+        st.markdown(
+            """
         <div style="background: #ffe5d0; padding: 1rem; border-radius: 8px;">
             <strong>Calls:</strong> Positive rho<br>
             <strong>Puts:</strong> Negative rho<br>
             <strong>Larger</strong> for longer maturities
         </div>
-        """, unsafe_allow_html=True)
+        """,
+            unsafe_allow_html=True,
+        )
 
     st.markdown("#### Mathematical Definition")
 
@@ -710,12 +788,14 @@ def render_rho_section():
 # SECOND-ORDER GREEKS
 # ==============================================================================
 
+
 def render_second_order_greeks():
     """Render second-order Greeks section."""
 
     st.markdown("## Second-Order Greeks")
 
-    st.markdown("""
+    st.markdown(
+        """
     <div style="background: linear-gradient(135deg, #f0f4f8 0%, #d9e2ec 100%);
                 padding: 1.5rem; border-radius: 12px; margin: 1rem 0;">
         <p style="margin: 0;">
@@ -724,27 +804,42 @@ def render_second_order_greeks():
             of large market moves. These are essential for sophisticated risk management.
         </p>
     </div>
-    """, unsafe_allow_html=True)
+    """,
+        unsafe_allow_html=True,
+    )
 
     # Overview cards
     cols = st.columns(4)
 
     second_order = [
-        ("Vanna", r"\frac{\partial \Delta}{\partial \sigma}", "#9b59b6", "Delta-Vol cross"),
-        ("Volga", r"\frac{\partial^2 V}{\partial \sigma^2}", "#e74c3c", "Vega convexity"),
+        (
+            "Vanna",
+            r"\frac{\partial \Delta}{\partial \sigma}",
+            "#9b59b6",
+            "Delta-Vol cross",
+        ),
+        (
+            "Volga",
+            r"\frac{\partial^2 V}{\partial \sigma^2}",
+            "#e74c3c",
+            "Vega convexity",
+        ),
         ("Charm", r"\frac{\partial \Delta}{\partial t}", "#3498db", "Delta decay"),
         ("Veta", r"\frac{\partial \nu}{\partial t}", "#2ecc71", "Vega decay"),
     ]
 
     for col, (name, formula, color, desc) in zip(cols, second_order):
         with col:
-            st.markdown(f"""
+            st.markdown(
+                f"""
             <div style="background: white; padding: 0.8rem; border-radius: 10px;
                         border-top: 4px solid {color}; text-align: center;
                         box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
                 <h5 style="color: {color}; margin: 0;">{name}</h5>
             </div>
-            """, unsafe_allow_html=True)
+            """,
+                unsafe_allow_html=True,
+            )
             st.latex(formula)
             st.caption(desc)
 
@@ -772,21 +867,28 @@ def render_vanna_section():
         """)
 
     with col2:
-        st.markdown("""
+        st.markdown(
+            """
         <div style="background: #e8daef; padding: 1rem; border-radius: 8px;">
             <strong>Equivalent definitions:</strong><br>
             ∂Δ/∂σ = ∂ν/∂S<br>
             <strong>Zero at ATM</strong><br>
             <strong>Positive</strong> for OTM calls
         </div>
-        """, unsafe_allow_html=True)
+        """,
+            unsafe_allow_html=True,
+        )
 
     st.markdown("#### Mathematical Definition")
 
-    st.latex(r"\text{Vanna} = \frac{\partial \Delta}{\partial \sigma} = \frac{\partial \mathcal{V}}{\partial S} = -e^{-qT} n(d_1) \frac{d_2}{\sigma}")
+    st.latex(
+        r"\text{Vanna} = \frac{\partial \Delta}{\partial \sigma} = \frac{\partial \mathcal{V}}{\partial S} = -e^{-qT} n(d_1) \frac{d_2}{\sigma}"
+    )
 
     st.markdown("*Alternative form:*")
-    st.latex(r"\text{Vanna} = \frac{\mathcal{V}}{S} \left(1 - \frac{d_1}{\sigma\sqrt{T}}\right)")
+    st.latex(
+        r"\text{Vanna} = \frac{\mathcal{V}}{S} \left(1 - \frac{d_1}{\sigma\sqrt{T}}\right)"
+    )
 
     with st.expander("Vanna Trading Insights"):
         st.markdown("""
@@ -825,17 +927,22 @@ def render_volga_section():
         """)
 
     with col2:
-        st.markdown("""
+        st.markdown(
+            """
         <div style="background: #fadbd8; padding: 1rem; border-radius: 8px;">
             <strong>Maximum</strong> for OTM options<br>
             <strong>Positive</strong> for long options<br>
             <strong>Key for</strong> vol-of-vol
         </div>
-        """, unsafe_allow_html=True)
+        """,
+            unsafe_allow_html=True,
+        )
 
     st.markdown("#### Mathematical Definition")
 
-    st.latex(r"\text{Volga} = \frac{\partial^2 V}{\partial \sigma^2} = \frac{\partial \mathcal{V}}{\partial \sigma} = \mathcal{V} \frac{d_1 d_2}{\sigma}")
+    st.latex(
+        r"\text{Volga} = \frac{\partial^2 V}{\partial \sigma^2} = \frac{\partial \mathcal{V}}{\partial \sigma} = \mathcal{V} \frac{d_1 d_2}{\sigma}"
+    )
 
     st.markdown("*Alternative form:*")
     st.latex(r"\text{Volga} = S_0 e^{-qT} n(d_1) \sqrt{T} \frac{d_1 d_2}{\sigma}")
@@ -882,21 +989,28 @@ def render_charm_section():
         """)
 
     with col2:
-        st.markdown("""
+        st.markdown(
+            """
         <div style="background: #d6eaf8; padding: 1rem; border-radius: 8px;">
             <strong>Critical near expiry</strong><br>
             <strong>Hedging drift</strong><br>
             <strong>∂Δ/∂t = -∂Θ/∂S</strong>
         </div>
-        """, unsafe_allow_html=True)
+        """,
+            unsafe_allow_html=True,
+        )
 
     st.markdown("#### Mathematical Definition")
 
     st.markdown("**Call Charm:**")
-    st.latex(r"\text{Charm}_{call} = -e^{-qT} n(d_1) \left[ q + \frac{(r-q)d_2 - \frac{d_1}{2T}}{\sigma\sqrt{T}} \right]")
+    st.latex(
+        r"\text{Charm}_{call} = -e^{-qT} n(d_1) \left[ q + \frac{(r-q)d_2 - \frac{d_1}{2T}}{\sigma\sqrt{T}} \right]"
+    )
 
     st.markdown("**Put Charm:**")
-    st.latex(r"\text{Charm}_{put} = e^{-qT} n(d_1) \left[ q - \frac{(r-q)d_2 - \frac{d_1}{2T}}{\sigma\sqrt{T}} \right]")
+    st.latex(
+        r"\text{Charm}_{put} = e^{-qT} n(d_1) \left[ q - \frac{(r-q)d_2 - \frac{d_1}{2T}}{\sigma\sqrt{T}} \right]"
+    )
 
     with st.expander("Charm Trading Insights"):
         st.markdown("""
@@ -937,17 +1051,22 @@ def render_veta_section():
         """)
 
     with col2:
-        st.markdown("""
+        st.markdown(
+            """
         <div style="background: #d5f5e3; padding: 1rem; border-radius: 8px;">
             <strong>Usually negative</strong><br>
             <strong>Calendar spreads</strong><br>
             <strong>Term structure</strong>
         </div>
-        """, unsafe_allow_html=True)
+        """,
+            unsafe_allow_html=True,
+        )
 
     st.markdown("#### Mathematical Definition")
 
-    st.latex(r"\text{Veta} = \frac{\partial \mathcal{V}}{\partial T} = S_0 e^{-qT} n(d_1) \sqrt{T} \left[ q + \frac{(r-q)d_1}{\sigma\sqrt{T}} - \frac{1 + d_1 d_2}{2T} \right]")
+    st.latex(
+        r"\text{Veta} = \frac{\partial \mathcal{V}}{\partial T} = S_0 e^{-qT} n(d_1) \sqrt{T} \left[ q + \frac{(r-q)d_1}{\sigma\sqrt{T}} - \frac{1 + d_1 d_2}{2T} \right]"
+    )
 
     with st.expander("Veta Trading Insights"):
         st.markdown("""
@@ -972,12 +1091,14 @@ def render_veta_section():
 # THIRD-ORDER GREEKS
 # ==============================================================================
 
+
 def render_third_order_greeks():
     """Render third-order Greeks section."""
 
     st.markdown("## Third-Order Greeks")
 
-    st.markdown("""
+    st.markdown(
+        """
     <div style="background: linear-gradient(135deg, #f0f4f8 0%, #d9e2ec 100%);
                 padding: 1.5rem; border-radius: 12px; margin: 1rem 0;">
         <p style="margin: 0;">
@@ -987,27 +1108,47 @@ def render_third_order_greeks():
             understanding them helps anticipate risk during extreme market conditions.
         </p>
     </div>
-    """, unsafe_allow_html=True)
+    """,
+        unsafe_allow_html=True,
+    )
 
     # Overview
     cols = st.columns(4)
 
     third_order = [
-        ("Speed", r"\frac{\partial \Gamma}{\partial S}", "#1abc9c", "Gamma sensitivity"),
-        ("Zomma", r"\frac{\partial \Gamma}{\partial \sigma}", "#e67e22", "Gamma-vol cross"),
+        (
+            "Speed",
+            r"\frac{\partial \Gamma}{\partial S}",
+            "#1abc9c",
+            "Gamma sensitivity",
+        ),
+        (
+            "Zomma",
+            r"\frac{\partial \Gamma}{\partial \sigma}",
+            "#e67e22",
+            "Gamma-vol cross",
+        ),
         ("Color", r"\frac{\partial \Gamma}{\partial t}", "#9b59b6", "Gamma decay"),
-        ("Ultima", r"\frac{\partial^3 V}{\partial \sigma^3}", "#34495e", "Vol cubed sensitivity"),
+        (
+            "Ultima",
+            r"\frac{\partial^3 V}{\partial \sigma^3}",
+            "#34495e",
+            "Vol cubed sensitivity",
+        ),
     ]
 
     for col, (name, formula, color, desc) in zip(cols, third_order):
         with col:
-            st.markdown(f"""
+            st.markdown(
+                f"""
             <div style="background: white; padding: 0.8rem; border-radius: 10px;
                         border-top: 4px solid {color}; text-align: center;
                         box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
                 <h5 style="color: {color}; margin: 0;">{name}</h5>
             </div>
-            """, unsafe_allow_html=True)
+            """,
+                unsafe_allow_html=True,
+            )
             st.latex(formula)
             st.caption(desc)
 
@@ -1035,20 +1176,27 @@ def render_speed_section():
         """)
 
     with col2:
-        st.markdown("""
+        st.markdown(
+            """
         <div style="background: #d1f2eb; padding: 1rem; border-radius: 8px;">
             <strong>Third derivative</strong><br>
             <strong>Gamma acceleration</strong><br>
             <strong>Large move risk</strong>
         </div>
-        """, unsafe_allow_html=True)
+        """,
+            unsafe_allow_html=True,
+        )
 
     st.markdown("#### Mathematical Definition")
 
-    st.latex(r"\text{Speed} = \frac{\partial \Gamma}{\partial S} = \frac{\partial^3 V}{\partial S^3} = -\frac{\Gamma}{S} \left(1 + \frac{d_1}{\sigma\sqrt{T}}\right)")
+    st.latex(
+        r"\text{Speed} = \frac{\partial \Gamma}{\partial S} = \frac{\partial^3 V}{\partial S^3} = -\frac{\Gamma}{S} \left(1 + \frac{d_1}{\sigma\sqrt{T}}\right)"
+    )
 
     st.markdown("*Alternative form:*")
-    st.latex(r"\text{Speed} = -\frac{e^{-qT} n(d_1)}{S^2 \sigma \sqrt{T}} \left(\frac{d_1}{\sigma\sqrt{T}} + 1\right)")
+    st.latex(
+        r"\text{Speed} = -\frac{e^{-qT} n(d_1)}{S^2 \sigma \sqrt{T}} \left(\frac{d_1}{\sigma\sqrt{T}} + 1\right)"
+    )
 
     with st.expander("Speed Trading Insights"):
         st.markdown("""
@@ -1085,17 +1233,22 @@ def render_zomma_section():
         """)
 
     with col2:
-        st.markdown("""
+        st.markdown(
+            """
         <div style="background: #fdebd0; padding: 1rem; border-radius: 8px;">
             <strong>Vol shock risk</strong><br>
             <strong>∂Γ/∂σ = ∂Vanna/∂S</strong><br>
             <strong>Cross-gamma</strong>
         </div>
-        """, unsafe_allow_html=True)
+        """,
+            unsafe_allow_html=True,
+        )
 
     st.markdown("#### Mathematical Definition")
 
-    st.latex(r"\text{Zomma} = \frac{\partial \Gamma}{\partial \sigma} = \Gamma \frac{d_1 d_2 - 1}{\sigma}")
+    st.latex(
+        r"\text{Zomma} = \frac{\partial \Gamma}{\partial \sigma} = \Gamma \frac{d_1 d_2 - 1}{\sigma}"
+    )
 
     st.markdown("*Alternative form:*")
     st.latex(r"\text{Zomma} = \frac{e^{-qT} n(d_1)(d_1 d_2 - 1)}{S \sigma^2 \sqrt{T}}")
@@ -1135,17 +1288,22 @@ def render_color_section():
         """)
 
     with col2:
-        st.markdown("""
+        st.markdown(
+            """
         <div style="background: #e8daef; padding: 1rem; border-radius: 8px;">
             <strong>Gamma evolution</strong><br>
             <strong>Expiration dynamics</strong><br>
             <strong>Pin risk</strong>
         </div>
-        """, unsafe_allow_html=True)
+        """,
+            unsafe_allow_html=True,
+        )
 
     st.markdown("#### Mathematical Definition")
 
-    st.latex(r"\text{Color} = \frac{\partial \Gamma}{\partial T} = -\frac{e^{-qT} n(d_1)}{2 S \sigma T \sqrt{T}} \left[ 2qT + 1 + d_1 \frac{2(r-q)T - d_2 \sigma \sqrt{T}}{\sigma\sqrt{T}} \right]")
+    st.latex(
+        r"\text{Color} = \frac{\partial \Gamma}{\partial T} = -\frac{e^{-qT} n(d_1)}{2 S \sigma T \sqrt{T}} \left[ 2qT + 1 + d_1 \frac{2(r-q)T - d_2 \sigma \sqrt{T}}{\sigma\sqrt{T}} \right]"
+    )
 
     with st.expander("Color Trading Insights"):
         st.markdown("""
@@ -1184,17 +1342,22 @@ def render_ultima_section():
         """)
 
     with col2:
-        st.markdown("""
+        st.markdown(
+            """
         <div style="background: #d5d8dc; padding: 1rem; border-radius: 8px;">
             <strong>∂³V/∂σ³</strong><br>
             <strong>Tail vol risk</strong><br>
             <strong>Exotic pricing</strong>
         </div>
-        """, unsafe_allow_html=True)
+        """,
+            unsafe_allow_html=True,
+        )
 
     st.markdown("#### Mathematical Definition")
 
-    st.latex(r"\text{Ultima} = \frac{\partial \text{Volga}}{\partial \sigma} = \frac{\mathcal{V}}{\sigma^2} \left[ d_1 d_2 (1 - d_1 d_2) + d_1^2 + d_2^2 \right]")
+    st.latex(
+        r"\text{Ultima} = \frac{\partial \text{Volga}}{\partial \sigma} = \frac{\mathcal{V}}{\sigma^2} \left[ d_1 d_2 (1 - d_1 d_2) + d_1^2 + d_2^2 \right]"
+    )
 
     with st.expander("Ultima Trading Insights"):
         st.markdown("""
@@ -1219,12 +1382,14 @@ def render_ultima_section():
 # TRADING APPLICATIONS
 # ==============================================================================
 
+
 def render_trading_applications():
     """Render trading applications section."""
 
     st.markdown("## Trading Applications")
 
-    st.markdown("""
+    st.markdown(
+        """
     <div style="background: linear-gradient(135deg, #1e3a5f 0%, #2d5a87 100%);
                 padding: 1.5rem; border-radius: 12px; margin: 1rem 0; color: white;">
         <p style="margin: 0;">
@@ -1233,7 +1398,9 @@ def render_trading_applications():
             and risk management frameworks.
         </p>
     </div>
-    """, unsafe_allow_html=True)
+    """,
+        unsafe_allow_html=True,
+    )
 
     render_hedging_strategies()
     render_portfolio_management()
@@ -1253,12 +1420,15 @@ def render_hedging_strategies():
     is to neutralize directional exposure while maintaining other Greek exposures.
     """)
 
-    st.latex(r"\text{Shares to hedge} = -\Delta \times \text{Option Contracts} \times 100")
+    st.latex(
+        r"\text{Shares to hedge} = -\Delta \times \text{Option Contracts} \times 100"
+    )
 
     col1, col2 = st.columns(2)
 
     with col1:
-        st.markdown("""
+        st.markdown(
+            """
         <div style="background: #d4edda; padding: 1rem; border-radius: 8px;">
             <h6>Continuous Hedging</h6>
             <ul>
@@ -1267,10 +1437,13 @@ def render_hedging_strategies():
                 <li>Trade-off: more transaction costs</li>
             </ul>
         </div>
-        """, unsafe_allow_html=True)
+        """,
+            unsafe_allow_html=True,
+        )
 
     with col2:
-        st.markdown("""
+        st.markdown(
+            """
         <div style="background: #cce5ff; padding: 1rem; border-radius: 8px;">
             <h6>Discrete Hedging</h6>
             <ul>
@@ -1279,7 +1452,9 @@ def render_hedging_strategies():
                 <li>Common: daily or weekly</li>
             </ul>
         </div>
-        """, unsafe_allow_html=True)
+        """,
+            unsafe_allow_html=True,
+        )
 
     st.markdown("#### Gamma Hedging")
 
@@ -1292,7 +1467,9 @@ def render_hedging_strategies():
     3. Adjust delta hedge for the new options
     """)
 
-    st.latex(r"\text{Options needed} = -\frac{\Gamma_{\text{portfolio}}}{\Gamma_{\text{hedge option}}}")
+    st.latex(
+        r"\text{Options needed} = -\frac{\Gamma_{\text{portfolio}}}{\Gamma_{\text{hedge option}}}"
+    )
 
     st.markdown("#### Vega Hedging")
 
@@ -1300,7 +1477,9 @@ def render_hedging_strategies():
     Vega hedging protects against implied volatility changes:
     """)
 
-    st.latex(r"\text{Options needed} = -\frac{\mathcal{V}_{\text{portfolio}}}{\mathcal{V}_{\text{hedge option}}}")
+    st.latex(
+        r"\text{Options needed} = -\frac{\mathcal{V}_{\text{portfolio}}}{\mathcal{V}_{\text{hedge option}}}"
+    )
 
     st.markdown("""
     **Key considerations:**
@@ -1344,7 +1523,9 @@ def render_portfolio_management():
     Daily P&L can be decomposed into Greek contributions:
     """)
 
-    st.latex(r"\Delta P\&L \approx \Delta \cdot dS + \frac{1}{2}\Gamma \cdot dS^2 + \mathcal{V} \cdot d\sigma + \Theta \cdot dt + \rho \cdot dr + \epsilon")
+    st.latex(
+        r"\Delta P\&L \approx \Delta \cdot dS + \frac{1}{2}\Gamma \cdot dS^2 + \mathcal{V} \cdot d\sigma + \Theta \cdot dt + \rho \cdot dr + \epsilon"
+    )
 
     st.markdown("""
     Where epsilon represents unexplained P&L (model error, cross-Greeks, etc.).
@@ -1408,14 +1589,17 @@ def render_risk_scenarios():
     Use Greeks for first-order approximations, but run full revaluation for accuracy:
     """)
 
-    st.latex(r"V_{new} \approx V + \Delta \cdot \Delta S + \frac{1}{2}\Gamma \cdot (\Delta S)^2 + \mathcal{V} \cdot \Delta\sigma + ...")
+    st.latex(
+        r"V_{new} \approx V + \Delta \cdot \Delta S + \frac{1}{2}\Gamma \cdot (\Delta S)^2 + \mathcal{V} \cdot \Delta\sigma + ..."
+    )
 
     st.markdown("#### Common Stress Scenarios")
 
     col1, col2 = st.columns(2)
 
     with col1:
-        st.markdown("""
+        st.markdown(
+            """
         <div style="background: #f8d7da; padding: 1rem; border-radius: 8px;">
             <h6>Market Crash (-20%)</h6>
             <ul>
@@ -1424,10 +1608,13 @@ def render_risk_scenarios():
                 <li>Correlation goes to 1</li>
             </ul>
         </div>
-        """, unsafe_allow_html=True)
+        """,
+            unsafe_allow_html=True,
+        )
 
     with col2:
-        st.markdown("""
+        st.markdown(
+            """
         <div style="background: #fff3cd; padding: 1rem; border-radius: 8px;">
             <h6>Vol Spike (VIX +50%)</h6>
             <ul>
@@ -1436,7 +1623,9 @@ def render_risk_scenarios():
                 <li>Margin requirements increase</li>
             </ul>
         </div>
-        """, unsafe_allow_html=True)
+        """,
+            unsafe_allow_html=True,
+        )
 
     st.markdown("#### Greek Limits by Strategy")
 
@@ -1449,7 +1638,8 @@ def render_risk_scenarios():
     | Dispersion | Correlation | Index vs components |
     """)
 
-    st.markdown("""
+    st.markdown(
+        """
     <div style="background: #e8f4f8; padding: 1.5rem; border-radius: 12px; margin: 1.5rem 0;">
         <h5 style="color: #1e3a5f; margin-top: 0;">Final Thoughts</h5>
         <p style="margin-bottom: 0;">
@@ -1459,7 +1649,9 @@ def render_risk_scenarios():
             judgment about market conditions and regime changes.
         </p>
     </div>
-    """, unsafe_allow_html=True)
+    """,
+        unsafe_allow_html=True,
+    )
 
 
 # Entry point for the guide

@@ -9,10 +9,11 @@ Payoffs know the contractual rules but NOTHING about:
 - Stochastic dynamics
 - Pricing method
 
-Author: Thomas
-Created: 2025
+Author: Thomas Vaudescal
+Created: 2026
 """
 
+from __future__ import annotations
 
 import numpy as np
 from numba import njit
@@ -23,7 +24,8 @@ from backend.core.interfaces import Payoff
 # VALIDATION HELPERS
 # =============================================================================
 
-def _validate_spot_array(spot: np.ndarray, name: str = "Spot") -> np.ndarray:
+
+def _validate_spot_array(spot: np.ndarray | float, name: str = "Spot") -> np.ndarray:
     """
     Validate spot price array for payoff computation.
 
@@ -52,7 +54,7 @@ def _validate_spot_array(spot: np.ndarray, name: str = "Spot") -> np.ndarray:
     return spot_arr
 
 
-def _validate_path_array(path: np.ndarray) -> np.ndarray:
+def _validate_path_array(path: np.ndarray | list) -> np.ndarray:
     """
     Validate path array for path-dependent payoff computation.
 
@@ -75,7 +77,9 @@ def _validate_path_array(path: np.ndarray) -> np.ndarray:
     if path_arr.ndim != 2:
         raise ValueError(f"Path must be 2D array, got {path_arr.ndim}D")
     if path_arr.shape[1] < 2:
-        raise ValueError(f"Path must have at least 2 time steps, got {path_arr.shape[1]}")
+        raise ValueError(
+            f"Path must have at least 2 time steps, got {path_arr.shape[1]}"
+        )
     if np.any(~np.isfinite(path_arr)):
         raise ValueError("Path prices must be finite (no NaN or Inf)")
     if np.any(path_arr < 0):
@@ -86,6 +90,7 @@ def _validate_path_array(path: np.ndarray) -> np.ndarray:
 # =============================================================================
 # NUMBA KERNELS (Hot Path)
 # =============================================================================
+
 
 @njit(cache=True, fastmath=True)
 def _call_payoff(spots: np.ndarray, strike: float) -> np.ndarray:
@@ -130,6 +135,7 @@ def _digital_put_payoff(spots: np.ndarray, strike: float, payout: float) -> np.n
 # PAYOFF CLASSES
 # =============================================================================
 
+
 class VanillaCallPayoff(Payoff):
     """
     Vanilla call payoff: max(S - K, 0).
@@ -145,7 +151,9 @@ class VanillaCallPayoff(Payoff):
     call(np.array([90, 100, 110]))  # array([0, 0, 10])
     """
 
-    def __init__(self, strike: float):
+    _strike: float
+
+    def __init__(self, strike: float) -> None:
         if strike <= 0:
             raise ValueError(f"Strike must be positive, got {strike}")
         self._strike = strike
@@ -182,7 +190,9 @@ class VanillaPutPayoff(Payoff):
     put(np.array([90, 100, 110]))  # array([10, 0, 0])
     """
 
-    def __init__(self, strike: float):
+    _strike: float
+
+    def __init__(self, strike: float) -> None:
         if strike <= 0:
             raise ValueError(f"Strike must be positive, got {strike}")
         self._strike = strike
@@ -224,7 +234,10 @@ class DigitalCallPayoff(Payoff):
     digital(np.array([99, 100, 101]))  # array([0, 10, 10])
     """
 
-    def __init__(self, strike: float, payout: float = 1.0):
+    _strike: float
+    _payout: float
+
+    def __init__(self, strike: float, payout: float = 1.0) -> None:
         if strike <= 0:
             raise ValueError(f"Strike must be positive, got {strike}")
         if payout <= 0:
@@ -269,7 +282,10 @@ class DigitalPutPayoff(Payoff):
     digital(np.array([99, 100, 101]))  # array([10, 0, 0])
     """
 
-    def __init__(self, strike: float, payout: float = 1.0):
+    _strike: float
+    _payout: float
+
+    def __init__(self, strike: float, payout: float = 1.0) -> None:
         if strike <= 0:
             raise ValueError(f"Strike must be positive, got {strike}")
         if payout <= 0:
@@ -297,11 +313,74 @@ class DigitalPutPayoff(Payoff):
         return f"DigitalPutPayoff(strike={self._strike}, payout={self._payout})"
 
 
+class SpotPayoff(Payoff):
+    """
+    Identity payoff: returns the terminal spot price.
+
+    Equivalent to holding the underlying asset. Used as a building block
+    in portfolio algebra for constructing structured product payoffs.
+
+    Examples
+    --------
+    spot = SpotPayoff()
+    spot(np.array([90, 100, 110]))  # array([90, 100, 110])
+    """
+
+    @property
+    def is_path_dependent(self) -> bool:
+        return False
+
+    def __call__(self, spot: np.ndarray) -> np.ndarray:
+        return _validate_spot_array(spot).copy()
+
+    def __repr__(self) -> str:
+        return "SpotPayoff()"
+
+
+class BondPayoff(Payoff):
+    """
+    Constant payoff: returns a fixed amount regardless of spot.
+
+    Represents a zero-coupon bond paying `notional` at maturity.
+
+    Parameters
+    ----------
+    notional : float
+        Fixed payout amount (default 1.0)
+
+    Examples
+    --------
+    bond = BondPayoff(notional=100.0)
+    bond(np.array([90, 100, 110]))  # array([100, 100, 100])
+    """
+
+    _notional: float
+
+    def __init__(self, notional: float = 1.0) -> None:
+        self._notional = notional
+
+    @property
+    def notional(self) -> float:
+        return self._notional
+
+    @property
+    def is_path_dependent(self) -> bool:
+        return False
+
+    def __call__(self, spot: np.ndarray) -> np.ndarray:
+        spot_arr = _validate_spot_array(spot)
+        return np.full_like(spot_arr, self._notional)
+
+    def __repr__(self) -> str:
+        return f"BondPayoff(notional={self._notional})"
+
+
 class CompositePayoff(Payoff):
     """
     Weighted sum of payoffs for multi-leg strategies.
 
     Used internally by strategy classes (IronCondor, Butterfly, etc.)
+    and by the portfolio algebra operators (+, -, *).
     The engine sees this as a single payoff.
 
     Parameters
@@ -317,15 +396,21 @@ class CompositePayoff(Payoff):
     put = VanillaPutPayoff(strike=100)
     straddle = CompositePayoff([(1.0, call), (1.0, put)])
     straddle(np.array([90, 100, 110]))  # array([10, 0, 10])
+
+    # Portfolio algebra (equivalent)
+    straddle = call + put
+    straddle(np.array([90, 100, 110]))  # array([10, 0, 10])
     """
 
-    def __init__(self, legs: list[tuple]):
+    _legs: list[tuple[int | float, Payoff]]
+
+    def __init__(self, legs: list[tuple[int | float, Payoff]]) -> None:
         if not legs:
             raise ValueError("CompositePayoff requires at least one leg")
         self._legs = legs
 
     @property
-    def legs(self) -> list[tuple]:
+    def legs(self) -> list[tuple[int | float, Payoff]]:
         """List of (weight, payoff) tuples."""
         return self._legs
 
@@ -345,219 +430,20 @@ class CompositePayoff(Payoff):
         return f"CompositePayoff([{legs_str}])"
 
 
-# =============================================================================
-# EXOTIC PAYOFF CLASSES (Path-Dependent)
-# =============================================================================
-
-class AsianCallPayoff(Payoff):
+class LowPointForwardPayoff(Payoff):
     """
-    Asian call payoff: max(avg(S) - K, 0).
+    Low-point forward payoff (MALP family).
 
-    Uses arithmetic average of the entire price path.
+    Payoff: S_0 * (S_T / min(S) - 1)
 
-    Parameters
-    ----------
-    strike : float
-        Strike price (must be positive)
+    Forward contract at the floating strike (path minimum), multiplied by
+    the discount factor S_0/K_float.
 
     Examples
     --------
-    asian_call = AsianCallPayoff(strike=100.0)
-    path = np.array([[100, 105, 110]])  # avg = 105
-    asian_call(path)  # array([5.0])
-    """
-
-    def __init__(self, strike: float):
-        if strike <= 0:
-            raise ValueError(f"Strike must be positive, got {strike}")
-        self._strike = strike
-
-    @property
-    def strike(self) -> float:
-        """Strike price."""
-        return self._strike
-
-    @property
-    def is_path_dependent(self) -> bool:
-        return True
-
-    def __call__(self, path: np.ndarray) -> np.ndarray:
-        from backend.math_kernels.payoff_kernels import asian_arithmetic_payoff
-        path_arr = _validate_path_array(path)
-        result = np.empty(len(path_arr))
-        for i in range(len(path_arr)):
-            result[i] = asian_arithmetic_payoff(path_arr[i], self._strike, True)
-        return result
-
-    def __repr__(self) -> str:
-        return f"AsianCallPayoff(strike={self._strike})"
-
-
-class AsianPutPayoff(Payoff):
-    """
-    Asian put payoff: max(K - avg(S), 0).
-
-    Uses arithmetic average of the entire price path.
-
-    Parameters
-    ----------
-    strike : float
-        Strike price (must be positive)
-
-    Examples
-    --------
-    asian_put = AsianPutPayoff(strike=100.0)
-    path = np.array([[100, 95, 90]])  # avg = 95
-    asian_put(path)  # array([5.0])
-    """
-
-    def __init__(self, strike: float):
-        if strike <= 0:
-            raise ValueError(f"Strike must be positive, got {strike}")
-        self._strike = strike
-
-    @property
-    def strike(self) -> float:
-        """Strike price."""
-        return self._strike
-
-    @property
-    def is_path_dependent(self) -> bool:
-        return True
-
-    def __call__(self, path: np.ndarray) -> np.ndarray:
-        from backend.math_kernels.payoff_kernels import asian_arithmetic_payoff
-        path_arr = _validate_path_array(path)
-        result = np.empty(len(path_arr))
-        for i in range(len(path_arr)):
-            result[i] = asian_arithmetic_payoff(path_arr[i], self._strike, False)
-        return result
-
-    def __repr__(self) -> str:
-        return f"AsianPutPayoff(strike={self._strike})"
-
-
-class BarrierUpOutCallPayoff(Payoff):
-    """
-    Up-and-out call payoff: knocked out if S >= barrier.
-
-    Returns vanilla call payoff if barrier is never touched,
-    otherwise returns 0.
-
-    Parameters
-    ----------
-    strike : float
-        Strike price (must be positive)
-    barrier : float
-        Upper barrier level (must be above strike)
-
-    Examples
-    --------
-    barrier_call = BarrierUpOutCallPayoff(strike=100.0, barrier=120.0)
-    path = np.array([[100, 105, 110]])  # Never hits 120
-    barrier_call(path)  # array([10.0])  # max(110-100, 0)
-    """
-
-    def __init__(self, strike: float, barrier: float):
-        if strike <= 0:
-            raise ValueError(f"Strike must be positive, got {strike}")
-        if barrier <= strike:
-            raise ValueError(f"Barrier must be above strike for up-out call, got barrier={barrier}, strike={strike}")
-        self._strike = strike
-        self._barrier = barrier
-
-    @property
-    def strike(self) -> float:
-        """Strike price."""
-        return self._strike
-
-    @property
-    def barrier(self) -> float:
-        """Barrier level."""
-        return self._barrier
-
-    @property
-    def is_path_dependent(self) -> bool:
-        return True
-
-    def __call__(self, path: np.ndarray) -> np.ndarray:
-        from backend.math_kernels.payoff_kernels import barrier_up_out_call_payoff
-        path_arr = _validate_path_array(path)
-        result = np.empty(len(path_arr))
-        for i in range(len(path_arr)):
-            result[i] = barrier_up_out_call_payoff(path_arr[i], self._strike, self._barrier)
-        return result
-
-    def __repr__(self) -> str:
-        return f"BarrierUpOutCallPayoff(strike={self._strike}, barrier={self._barrier})"
-
-
-class BarrierDownOutPutPayoff(Payoff):
-    """
-    Down-and-out put payoff: knocked out if S <= barrier.
-
-    Returns vanilla put payoff if barrier is never touched,
-    otherwise returns 0.
-
-    Parameters
-    ----------
-    strike : float
-        Strike price (must be positive)
-    barrier : float
-        Lower barrier level (must be below strike)
-
-    Examples
-    --------
-    barrier_put = BarrierDownOutPutPayoff(strike=100.0, barrier=80.0)
-    path = np.array([[100, 95, 90]])  # Never hits 80
-    barrier_put(path)  # array([10.0])  # max(100-90, 0)
-    """
-
-    def __init__(self, strike: float, barrier: float):
-        if strike <= 0:
-            raise ValueError(f"Strike must be positive, got {strike}")
-        if barrier >= strike:
-            raise ValueError(f"Barrier must be below strike for down-out put, got barrier={barrier}, strike={strike}")
-        self._strike = strike
-        self._barrier = barrier
-
-    @property
-    def strike(self) -> float:
-        """Strike price."""
-        return self._strike
-
-    @property
-    def barrier(self) -> float:
-        """Barrier level."""
-        return self._barrier
-
-    @property
-    def is_path_dependent(self) -> bool:
-        return True
-
-    def __call__(self, path: np.ndarray) -> np.ndarray:
-        from backend.math_kernels.payoff_kernels import barrier_down_out_put_payoff
-        path_arr = _validate_path_array(path)
-        result = np.empty(len(path_arr))
-        for i in range(len(path_arr)):
-            result[i] = barrier_down_out_put_payoff(path_arr[i], self._strike, self._barrier)
-        return result
-
-    def __repr__(self) -> str:
-        return f"BarrierDownOutPutPayoff(strike={self._strike}, barrier={self._barrier})"
-
-
-class LookbackFloatingCallPayoff(Payoff):
-    """
-    Lookback call payoff (floating strike): S_T - min(S_t).
-
-    The effective strike is the minimum price over the path.
-
-    Examples
-    --------
-    lookback_call = LookbackFloatingCallPayoff()
-    path = np.array([[100, 90, 110]])  # min=90, terminal=110
-    lookback_call(path)  # array([20.0])  # 110 - 90
+    payoff = LowPointForwardPayoff()
+    path = np.array([[100, 80, 110]])  # min=80, S_T=110, S_0=100
+    payoff(path)  # 100 * (110/80 - 1) = 37.5
     """
 
     @property
@@ -565,44 +451,15 @@ class LookbackFloatingCallPayoff(Payoff):
         return True
 
     def __call__(self, path: np.ndarray) -> np.ndarray:
-        from backend.math_kernels.payoff_kernels import lookback_floating_payoff
         path_arr = _validate_path_array(path)
-        result = np.empty(len(path_arr))
-        for i in range(len(path_arr)):
-            result[i] = lookback_floating_payoff(path_arr[i], True)
-        return result
+        s0 = path_arr[:, 0]
+        s_t = path_arr[:, -1]
+        path_min = np.min(path_arr, axis=1)
+        path_min_safe = np.maximum(path_min, 1e-10)
+        return s0 * (s_t / path_min_safe - 1.0)
 
     def __repr__(self) -> str:
-        return "LookbackFloatingCallPayoff()"
-
-
-class LookbackFloatingPutPayoff(Payoff):
-    """
-    Lookback put payoff (floating strike): max(S_t) - S_T.
-
-    The effective strike is the maximum price over the path.
-
-    Examples
-    --------
-    lookback_put = LookbackFloatingPutPayoff()
-    path = np.array([[100, 110, 90]])  # max=110, terminal=90
-    lookback_put(path)  # array([20.0])  # 110 - 90
-    """
-
-    @property
-    def is_path_dependent(self) -> bool:
-        return True
-
-    def __call__(self, path: np.ndarray) -> np.ndarray:
-        from backend.math_kernels.payoff_kernels import lookback_floating_payoff
-        path_arr = _validate_path_array(path)
-        result = np.empty(len(path_arr))
-        for i in range(len(path_arr)):
-            result[i] = lookback_floating_payoff(path_arr[i], False)
-        return result
-
-    def __repr__(self) -> str:
-        return "LookbackFloatingPutPayoff()"
+        return "LowPointForwardPayoff()"
 
 
 if __name__ == "__main__":

@@ -6,6 +6,7 @@ used across the application.
 """
 
 # Import constants from config
+import re
 import sys
 from pathlib import Path
 
@@ -22,6 +23,7 @@ from config.constants import (
 # LAYOUT HELPERS
 # =============================================================================
 
+
 def apply_default_layout(
     fig: go.Figure,
     title: str,
@@ -29,7 +31,7 @@ def apply_default_layout(
     yaxis_title: str,
     height: int = CHART_HEIGHT_STANDARD,
     show_legend: bool = True,
-    hovermode: str = 'x unified'
+    hovermode: str = "x unified",
 ) -> go.Figure:
     """
     Apply consistent default layout to a Plotly figure.
@@ -57,10 +59,7 @@ def apply_default_layout(
         Updated figure
     """
     fig.update_layout(
-        title=dict(
-            text=title,
-            font=dict(size=16)
-        ),
+        title=dict(text=title, font=dict(size=16)),
         xaxis_title=xaxis_title,
         yaxis_title=yaxis_title,
         height=height,
@@ -71,9 +70,9 @@ def apply_default_layout(
             y=0.99,
             xanchor="left",
             x=0.01,
-            bgcolor='rgba(255,255,255,0.8)'
+            bgcolor="rgba(255,255,255,0.8)",
         ),
-        margin=dict(l=60, r=40, t=60, b=60)
+        margin=dict(l=60, r=40, t=60, b=60),
     )
     return fig
 
@@ -82,7 +81,7 @@ def create_base_figure(
     title: str = "",
     xaxis_title: str = "",
     yaxis_title: str = "",
-    height: int = CHART_HEIGHT_STANDARD
+    height: int = CHART_HEIGHT_STANDARD,
 ) -> go.Figure:
     """
     Create a new figure with default styling applied.
@@ -111,14 +110,15 @@ def create_base_figure(
 # TRACE HELPERS
 # =============================================================================
 
+
 def add_percentile_band(
     fig: go.Figure,
     time_grid: np.ndarray,
     p_lower: np.ndarray,
     p_upper: np.ndarray,
-    name: str = '5-95% Range',
-    color: str = 'rgba(13, 148, 136, 0.2)',
-    show_legend: bool = True
+    name: str = "5-95% Range",
+    color: str = "rgba(13, 148, 136, 0.2)",
+    show_legend: bool = True,
 ) -> go.Figure:
     """
     Add a filled percentile band to a figure.
@@ -145,16 +145,18 @@ def add_percentile_band(
     go.Figure
         Updated figure
     """
-    fig.add_trace(go.Scatter(
-        x=np.concatenate([time_grid, time_grid[::-1]]),
-        y=np.concatenate([p_upper, p_lower[::-1]]),
-        fill='toself',
-        fillcolor=color,
-        line=dict(color='rgba(0,0,0,0)'),
-        name=name,
-        hoverinfo='skip',
-        showlegend=show_legend
-    ))
+    fig.add_trace(
+        go.Scatter(
+            x=np.concatenate([time_grid, time_grid[::-1]]),
+            y=np.concatenate([p_upper, p_lower[::-1]]),
+            fill="toself",
+            fillcolor=color,
+            line=dict(color="rgba(0,0,0,0)"),
+            name=name,
+            hoverinfo="skip",
+            showlegend=show_legend,
+        )
+    )
     return fig
 
 
@@ -164,8 +166,8 @@ def add_confidence_band(
     y_mean: np.ndarray,
     y_std: np.ndarray,
     n_std: float = 1.96,
-    name: str = '95% CI',
-    color: str = 'rgba(59, 130, 246, 0.2)'
+    name: str = "95% CI",
+    color: str = "rgba(59, 130, 246, 0.2)",
 ) -> go.Figure:
     """
     Add a confidence band around a mean line.
@@ -203,7 +205,7 @@ def add_horizontal_line(
     line_dash: str = "dot",
     line_color: str = "#64748b",
     annotation_text: str | None = None,
-    annotation_position: str = "top right"
+    annotation_position: str = "top right",
 ) -> go.Figure:
     """
     Add a horizontal reference line to a figure.
@@ -233,7 +235,7 @@ def add_horizontal_line(
         line_dash=line_dash,
         line_color=line_color,
         annotation_text=annotation_text,
-        annotation_position=annotation_position
+        annotation_position=annotation_position,
     )
     return fig
 
@@ -244,7 +246,7 @@ def add_vertical_line(
     line_dash: str = "dash",
     line_color: str = "#64748b",
     annotation_text: str | None = None,
-    annotation_position: str = "top left"
+    annotation_position: str = "top left",
 ) -> go.Figure:
     """
     Add a vertical reference line to a figure.
@@ -274,7 +276,7 @@ def add_vertical_line(
         line_dash=line_dash,
         line_color=line_color,
         annotation_text=annotation_text,
-        annotation_position=annotation_position
+        annotation_position=annotation_position,
     )
     return fig
 
@@ -283,13 +285,14 @@ def add_vertical_line(
 # SAMPLE PATHS HELPER
 # =============================================================================
 
+
 def add_sample_paths(
     fig: go.Figure,
     time_grid: np.ndarray,
     paths: np.ndarray,
     max_paths: int = 50,
-    color: str = 'rgba(59, 130, 246, 0.3)',
-    line_width: float = 0.8
+    color: str = "rgba(59, 130, 246, 0.3)",
+    line_width: float = 0.8,
 ) -> go.Figure:
     """
     Add multiple sample paths to a figure.
@@ -317,14 +320,16 @@ def add_sample_paths(
     n_display = min(max_paths, paths.shape[0])
 
     for i in range(n_display):
-        fig.add_trace(go.Scatter(
-            x=time_grid,
-            y=paths[i],
-            mode='lines',
-            line=dict(color=color, width=line_width),
-            hoverinfo='skip',
-            showlegend=False
-        ))
+        fig.add_trace(
+            go.Scatter(
+                x=time_grid,
+                y=paths[i],
+                mode="lines",
+                line=dict(color=color, width=line_width),
+                hoverinfo="skip",
+                showlegend=False,
+            )
+        )
 
     return fig
 
@@ -333,9 +338,9 @@ def add_mean_path(
     fig: go.Figure,
     time_grid: np.ndarray,
     mean_path: np.ndarray,
-    name: str = 'Mean',
-    color: str = '#1e3a5f',
-    line_width: float = 2.5
+    name: str = "Mean",
+    color: str = "#1e3a5f",
+    line_width: float = 2.5,
 ) -> go.Figure:
     """
     Add a mean path line to a figure.
@@ -360,13 +365,15 @@ def add_mean_path(
     go.Figure
         Updated figure
     """
-    fig.add_trace(go.Scatter(
-        x=time_grid,
-        y=mean_path,
-        mode='lines',
-        name=name,
-        line=dict(color=color, width=line_width)
-    ))
+    fig.add_trace(
+        go.Scatter(
+            x=time_grid,
+            y=mean_path,
+            mode="lines",
+            name=name,
+            line=dict(color=color, width=line_width),
+        )
+    )
     return fig
 
 
@@ -374,11 +381,8 @@ def add_mean_path(
 # FORMATTING HELPERS
 # =============================================================================
 
-def format_currency(
-    value: float,
-    decimals: int = 2,
-    symbol: str = "$"
-) -> str:
+
+def format_currency(value: float, decimals: int = 2, symbol: str = "$") -> str:
     """
     Format a number as currency.
 
@@ -399,11 +403,7 @@ def format_currency(
     return f"{symbol}{value:,.{decimals}f}"
 
 
-def format_percentage(
-    value: float,
-    decimals: int = 1,
-    multiply: bool = True
-) -> str:
+def format_percentage(value: float, decimals: int = 1, multiply: bool = True) -> str:
     """
     Format a number as percentage.
 
@@ -446,11 +446,11 @@ def format_large_number(value: float, decimals: int = 1) -> str:
     sign = "-" if value < 0 else ""
 
     if abs_value >= 1e9:
-        return f"{sign}{abs_value/1e9:.{decimals}f}B"
+        return f"{sign}{abs_value / 1e9:.{decimals}f}B"
     if abs_value >= 1e6:
-        return f"{sign}{abs_value/1e6:.{decimals}f}M"
+        return f"{sign}{abs_value / 1e6:.{decimals}f}M"
     if abs_value >= 1e3:
-        return f"{sign}{abs_value/1e3:.{decimals}f}K"
+        return f"{sign}{abs_value / 1e3:.{decimals}f}K"
     return f"{sign}{abs_value:.{decimals}f}"
 
 
@@ -458,7 +458,10 @@ def format_large_number(value: float, decimals: int = 1) -> str:
 # COLOR UTILITIES
 # =============================================================================
 
-def get_profit_loss_color(value: float, profit_color: str = '#22c55e', loss_color: str = '#ef4444') -> str:
+
+def get_profit_loss_color(
+    value: float, profit_color: str = "#22c55e", loss_color: str = "#ef4444"
+) -> str:
     """
     Return color based on profit/loss.
 
@@ -479,10 +482,7 @@ def get_profit_loss_color(value: float, profit_color: str = '#22c55e', loss_colo
     return profit_color if value > 0 else loss_color
 
 
-def create_color_scale(
-    values: np.ndarray,
-    colorscale: str = 'RdYlGn'
-) -> list[str]:
+def create_color_scale(values: np.ndarray, colorscale: str = "RdYlGn") -> list[str]:
     """
     Create a list of colors based on values using a colorscale.
 
@@ -520,6 +520,227 @@ def create_color_scale(
             r = int(250 - (250 - 34) * ((v - 0.5) * 2))
             g = int(250 - (250 - 197) * ((v - 0.5) * 2))
             b = int(34 + (94 - 34) * ((v - 0.5) * 2))
-        colors.append(f'rgb({r},{g},{b})')
+        colors.append(f"rgb({r},{g},{b})")
 
     return colors
+
+
+# =============================================================================
+# ANNOTATION ANTI-OVERLAP
+# =============================================================================
+
+_AVG_CHAR_WIDTH_FACTOR = 0.6
+_DEFAULT_FONT_SIZE = 12
+
+
+def _estimate_ann_size(ann):
+    """Estimate (width_px, height_px) of an annotation label."""
+    text = getattr(ann, "text", "") or ""
+    stripped = re.sub(r"<[^>]+>", "", text)
+
+    font = getattr(ann, "font", None)
+    font_size = (getattr(font, "size", None) if font else None) or _DEFAULT_FONT_SIZE
+
+    borderpad = getattr(ann, "borderpad", None) or 0
+    borderwidth = getattr(ann, "borderwidth", None) or 0
+    pad = borderpad + borderwidth
+
+    width = len(stripped) * _AVG_CHAR_WIDTH_FACTOR * font_size + 2 * pad
+    height = font_size * 1.3 + 2 * pad
+    return width, height
+
+
+def _get_axis_range(fig, axis_ref):
+    """Get (min, max) data range for an axis like 'y', 'y2', 'x', 'x2'."""
+    base = axis_ref[0] + "axis"
+    suffix = axis_ref[1:] if len(axis_ref) > 1 else ""
+    prop = base + suffix
+
+    axis_obj = getattr(fig.layout, prop, None)
+    if axis_obj is not None:
+        r = axis_obj.range
+        if r is not None and len(r) == 2:
+            try:
+                return float(r[0]), float(r[1])
+            except (TypeError, ValueError):
+                pass
+
+    # Fallback: scan trace data
+    is_y = axis_ref.startswith("y")
+    vals = []
+    for trace in fig.data:
+        trace_ax = getattr(trace, "yaxis" if is_y else "xaxis", None)
+        if trace_ax is None:
+            trace_ax = axis_ref[0]
+        if trace_ax != axis_ref:
+            continue
+        data = getattr(trace, "y" if is_y else "x", None)
+        if data is not None:
+            arr = np.asarray(data, dtype=float)
+            finite = arr[np.isfinite(arr)]
+            if len(finite) > 0:
+                vals.extend([float(np.min(finite)), float(np.max(finite))])
+
+    if vals:
+        return min(vals), max(vals)
+    return None
+
+
+def _get_axis_domain(fig, axis_ref):
+    """Get domain (d0, d1) fraction for an axis."""
+    base = axis_ref[0] + "axis"
+    suffix = axis_ref[1:] if len(axis_ref) > 1 else ""
+    prop = base + suffix
+
+    axis_obj = getattr(fig.layout, prop, None)
+    if axis_obj is not None:
+        d = axis_obj.domain
+        if d is not None and len(d) == 2:
+            return float(d[0]), float(d[1])
+    return 0.0, 1.0
+
+
+def _label_bbox_offset(anchor, size):
+    """Return (low_offset, high_offset) from the data-mapped pixel position.
+
+    'bottom'/'left' → label extends positively (upward/rightward).
+    'top'/'right'   → label extends negatively (downward/leftward).
+    """
+    if anchor in ("top", "right"):
+        return -size, 0.0
+    elif anchor in ("middle", "center"):
+        return -size / 2.0, size / 2.0
+    else:  # 'bottom', 'left', 'auto', None
+        return 0.0, size
+
+
+def _spread_group(
+    anns,
+    indices,
+    data_range,
+    panel_px,
+    pos_attr,
+    shift_attr,
+    anchor_attr,
+    size_idx,
+    min_gap_px,
+):
+    """Resolve overlaps within one group of annotations (greedy + cascade)."""
+    data_span = data_range[1] - data_range[0]
+    if data_span <= 0 or panel_px <= 0:
+        return
+
+    px_per_unit = panel_px / data_span
+
+    sorted_idx = sorted(
+        indices,
+        key=lambda i: float(getattr(anns[i], pos_attr, 0) or 0),
+    )
+
+    # Two passes: second handles cascading shifts
+    for _ in range(2):
+        for j in range(1, len(sorted_idx)):
+            prev = anns[sorted_idx[j - 1]]
+            curr = anns[sorted_idx[j]]
+
+            prev_val = float(getattr(prev, pos_attr, 0) or 0)
+            curr_val = float(getattr(curr, pos_attr, 0) or 0)
+
+            prev_shift = float(getattr(prev, shift_attr, 0) or 0)
+            curr_shift = float(getattr(curr, shift_attr, 0) or 0)
+
+            eff_prev = (prev_val - data_range[0]) * px_per_unit + prev_shift
+            eff_curr = (curr_val - data_range[0]) * px_per_unit + curr_shift
+
+            prev_size = _estimate_ann_size(prev)[size_idx]
+            curr_size = _estimate_ann_size(curr)[size_idx]
+
+            prev_anchor = getattr(prev, anchor_attr, "auto") or "auto"
+            curr_anchor = getattr(curr, anchor_attr, "auto") or "auto"
+
+            _, prev_top = _label_bbox_offset(prev_anchor, prev_size)
+            curr_bot, _ = _label_bbox_offset(curr_anchor, curr_size)
+
+            overlap = (eff_prev + prev_top) + min_gap_px - (eff_curr + curr_bot)
+            if overlap > 0:
+                setattr(curr, shift_attr, curr_shift + overlap)
+
+
+def spread_annotations(fig, min_gap_px=4):
+    """Post-process fig.layout.annotations to resolve overlapping labels.
+
+    Identifies annotations created by add_hline / add_vline (those with
+    'domain' in one axis ref), groups them by edge and subplot panel,
+    then applies pixel shifts to eliminate overlaps.
+    """
+    anns = fig.layout.annotations
+    if len(anns) < 2:
+        return fig
+
+    chart_height = fig.layout.height or 600
+    chart_width = fig.layout.width or 900
+    margins = fig.layout.margin
+    margin_t = margins.t if margins and margins.t is not None else 60
+    margin_b = margins.b if margins and margins.b is not None else 60
+    margin_l = margins.l if margins and margins.l is not None else 60
+    margin_r = margins.r if margins and margins.r is not None else 40
+
+    plot_height = chart_height - margin_t - margin_b
+    plot_width = chart_width - margin_l - margin_r
+
+    # Classify annotations into groups: (line_type, axis_ref, side) → [indices]
+    groups = {}
+
+    for i, ann in enumerate(anns):
+        xref = str(getattr(ann, "xref", "") or "")
+        yref = str(getattr(ann, "yref", "") or "")
+
+        if "domain" in xref and "domain" not in yref and yref:
+            # hline annotation: x is domain-based, y is data-based
+            side = "right" if (getattr(ann, "x", 0) or 0) > 0.5 else "left"
+            key = ("hline", yref, side)
+            groups.setdefault(key, []).append(i)
+        elif "domain" in yref and "domain" not in xref and xref:
+            # vline annotation: y is domain-based, x is data-based
+            side = "top" if (getattr(ann, "y", 0) or 0) > 0.5 else "bottom"
+            key = ("vline", xref, side)
+            groups.setdefault(key, []).append(i)
+
+    for key, indices in groups.items():
+        if len(indices) < 2:
+            continue
+
+        line_type, axis_ref, _ = key
+        data_range = _get_axis_range(fig, axis_ref)
+        domain = _get_axis_domain(fig, axis_ref)
+        if data_range is None:
+            continue
+
+        if line_type == "hline":
+            panel_px = plot_height * (domain[1] - domain[0])
+            _spread_group(
+                anns,
+                indices,
+                data_range,
+                panel_px,
+                "y",
+                "yshift",
+                "yanchor",
+                1,
+                min_gap_px,
+            )
+        else:
+            panel_px = plot_width * (domain[1] - domain[0])
+            _spread_group(
+                anns,
+                indices,
+                data_range,
+                panel_px,
+                "x",
+                "xshift",
+                "xanchor",
+                0,
+                min_gap_px,
+            )
+
+    return fig

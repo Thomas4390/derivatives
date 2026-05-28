@@ -11,9 +11,11 @@ Strategies provide:
 
 All strategies are EUROPEAN exercise only.
 
-Author: Thomas
-Created: 2025
+Author: Thomas Vaudescal
+Created: 2026
 """
+
+from __future__ import annotations
 
 from dataclasses import dataclass
 
@@ -31,6 +33,7 @@ from backend.instruments.payoffs import (
 # STRATEGY LEG
 # =============================================================================
 
+
 @dataclass(frozen=True)
 class StrategyLeg:
     """
@@ -45,11 +48,12 @@ class StrategyLeg:
     quantity : int
         Position quantity (positive = long, negative = short)
     """
+
     strike: float
     is_call: bool
     quantity: int
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         """Validate leg parameters."""
         if self.quantity == 0:
             raise ValueError("quantity cannot be zero")
@@ -74,12 +78,15 @@ class StrategyLeg:
     def __repr__(self) -> str:
         direction = "long" if self.is_long else "short"
         opt_type = "call" if self.is_call else "put"
-        return f"StrategyLeg({direction} {abs(self.quantity)} {opt_type} K={self.strike})"
+        return (
+            f"StrategyLeg({direction} {abs(self.quantity)} {opt_type} K={self.strike})"
+        )
 
 
 # =============================================================================
 # BASE STRATEGY CLASS
 # =============================================================================
+
 
 class OptionStrategy(Instrument):
     """
@@ -91,7 +98,10 @@ class OptionStrategy(Instrument):
     All strategies are European exercise only.
     """
 
-    def __init__(self, legs: list[StrategyLeg], maturity: float):
+    _legs: list[StrategyLeg]
+    _maturity: float
+
+    def __init__(self, legs: list[StrategyLeg], maturity: float) -> None:
         """
         Initialize strategy.
 
@@ -111,7 +121,7 @@ class OptionStrategy(Instrument):
         self._maturity = maturity
         self._validate()
 
-    def _validate(self):
+    def _validate(self) -> None:
         """Override in subclasses for strategy-specific validation."""
         pass
 
@@ -149,6 +159,7 @@ class OptionStrategy(Instrument):
 # COMMON STRATEGIES
 # =============================================================================
 
+
 class Straddle(OptionStrategy):
     """
     Straddle: Long call + long put at same strike.
@@ -170,7 +181,9 @@ class Straddle(OptionStrategy):
     straddle = Straddle(strike=100, maturity=0.5)
     """
 
-    def __init__(self, strike: float, maturity: float, is_long: bool = True):
+    _strike: float
+
+    def __init__(self, strike: float, maturity: float, is_long: bool = True) -> None:
         self._strike = strike
         qty = 1 if is_long else -1
         legs = [
@@ -210,13 +223,16 @@ class Strangle(OptionStrategy):
     strangle = Strangle(put_strike=95, call_strike=105, maturity=0.5)
     """
 
+    _put_strike: float
+    _call_strike: float
+
     def __init__(
         self,
         put_strike: float,
         call_strike: float,
         maturity: float,
         is_long: bool = True,
-    ):
+    ) -> None:
         self._put_strike = put_strike
         self._call_strike = call_strike
         qty = 1 if is_long else -1
@@ -226,7 +242,7 @@ class Strangle(OptionStrategy):
         ]
         super().__init__(legs, maturity)
 
-    def _validate(self):
+    def _validate(self) -> None:
         if self._put_strike >= self._call_strike:
             raise ValueError(
                 f"Put strike must be less than call strike, "
@@ -271,6 +287,10 @@ class Butterfly(OptionStrategy):
     butterfly = Butterfly(k1=90, k2=100, k3=110, maturity=0.5)
     """
 
+    _k1: float
+    _k2: float
+    _k3: float
+
     def __init__(
         self,
         k1: float,
@@ -278,7 +298,7 @@ class Butterfly(OptionStrategy):
         k3: float,
         maturity: float,
         is_call: bool = True,
-    ):
+    ) -> None:
         self._k1, self._k2, self._k3 = k1, k2, k3
         legs = [
             StrategyLeg(strike=k1, is_call=is_call, quantity=1),
@@ -287,7 +307,7 @@ class Butterfly(OptionStrategy):
         ]
         super().__init__(legs, maturity)
 
-    def _validate(self):
+    def _validate(self) -> None:
         if not (self._k1 < self._k2 < self._k3):
             raise ValueError(
                 f"Butterfly strikes must satisfy K1 < K2 < K3, "
@@ -354,6 +374,11 @@ class IronCondor(OptionStrategy):
     ic = IronCondor(k1=85, k2=95, k3=105, k4=115, maturity=0.5)
     """
 
+    _k1: float
+    _k2: float
+    _k3: float
+    _k4: float
+
     def __init__(
         self,
         k1: float,
@@ -361,17 +386,17 @@ class IronCondor(OptionStrategy):
         k3: float,
         k4: float,
         maturity: float,
-    ):
+    ) -> None:
         self._k1, self._k2, self._k3, self._k4 = k1, k2, k3, k4
         legs = [
-            StrategyLeg(strike=k1, is_call=False, quantity=1),   # Long put (wing)
+            StrategyLeg(strike=k1, is_call=False, quantity=1),  # Long put (wing)
             StrategyLeg(strike=k2, is_call=False, quantity=-1),  # Short put
-            StrategyLeg(strike=k3, is_call=True, quantity=-1),   # Short call
-            StrategyLeg(strike=k4, is_call=True, quantity=1),    # Long call (wing)
+            StrategyLeg(strike=k3, is_call=True, quantity=-1),  # Short call
+            StrategyLeg(strike=k4, is_call=True, quantity=1),  # Long call (wing)
         ]
         super().__init__(legs, maturity)
 
-    def _validate(self):
+    def _validate(self) -> None:
         if not (self._k1 < self._k2 < self._k3 < self._k4):
             raise ValueError(
                 f"Iron Condor strikes must satisfy K1 < K2 < K3 < K4, "
@@ -379,12 +404,12 @@ class IronCondor(OptionStrategy):
             )
 
     @property
-    def put_spread_strikes(self) -> tuple:
+    def put_spread_strikes(self) -> tuple[float, float]:
         """(long put strike, short put strike)"""
         return (self._k1, self._k2)
 
     @property
-    def call_spread_strikes(self) -> tuple:
+    def call_spread_strikes(self) -> tuple[float, float]:
         """(short call strike, long call strike)"""
         return (self._k3, self._k4)
 
@@ -424,17 +449,21 @@ class IronButterfly(OptionStrategy):
     ib = IronButterfly(k1=90, k2=100, k3=110, maturity=0.5)
     """
 
-    def __init__(self, k1: float, k2: float, k3: float, maturity: float):
+    _k1: float
+    _k2: float
+    _k3: float
+
+    def __init__(self, k1: float, k2: float, k3: float, maturity: float) -> None:
         self._k1, self._k2, self._k3 = k1, k2, k3
         legs = [
-            StrategyLeg(strike=k1, is_call=False, quantity=1),   # Long put (wing)
+            StrategyLeg(strike=k1, is_call=False, quantity=1),  # Long put (wing)
             StrategyLeg(strike=k2, is_call=False, quantity=-1),  # Short put (body)
-            StrategyLeg(strike=k2, is_call=True, quantity=-1),   # Short call (body)
-            StrategyLeg(strike=k3, is_call=True, quantity=1),    # Long call (wing)
+            StrategyLeg(strike=k2, is_call=True, quantity=-1),  # Short call (body)
+            StrategyLeg(strike=k3, is_call=True, quantity=1),  # Long call (wing)
         ]
         super().__init__(legs, maturity)
 
-    def _validate(self):
+    def _validate(self) -> None:
         if not (self._k1 < self._k2 < self._k3):
             raise ValueError(
                 f"Iron Butterfly strikes must satisfy K1 < K2 < K3, "
@@ -468,7 +497,10 @@ class CallSpread(OptionStrategy):
     spread = CallSpread(k_long=95, k_short=105, maturity=0.5)
     """
 
-    def __init__(self, k_long: float, k_short: float, maturity: float):
+    _k_long: float
+    _k_short: float
+
+    def __init__(self, k_long: float, k_short: float, maturity: float) -> None:
         self._k_long, self._k_short = k_long, k_short
         legs = [
             StrategyLeg(strike=k_long, is_call=True, quantity=1),
@@ -476,7 +508,7 @@ class CallSpread(OptionStrategy):
         ]
         super().__init__(legs, maturity)
 
-    def _validate(self):
+    def _validate(self) -> None:
         if self._k_long >= self._k_short:
             raise ValueError(
                 f"Long strike must be less than short strike, "
@@ -512,7 +544,10 @@ class PutSpread(OptionStrategy):
     spread = PutSpread(k_long=105, k_short=95, maturity=0.5)
     """
 
-    def __init__(self, k_long: float, k_short: float, maturity: float):
+    _k_long: float
+    _k_short: float
+
+    def __init__(self, k_long: float, k_short: float, maturity: float) -> None:
         self._k_long, self._k_short = k_long, k_short
         legs = [
             StrategyLeg(strike=k_long, is_call=False, quantity=1),
@@ -520,7 +555,7 @@ class PutSpread(OptionStrategy):
         ]
         super().__init__(legs, maturity)
 
-    def _validate(self):
+    def _validate(self) -> None:
         if self._k_long <= self._k_short:
             raise ValueError(
                 f"Long strike must be greater than short strike, "

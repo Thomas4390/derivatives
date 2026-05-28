@@ -7,21 +7,102 @@ Abstract base classes defining the three pillars of the pricing architecture:
 - Model (the "Physics"): Stochastic dynamics
 - Engine (the "How"): Numerical methods
 
-Author: Thomas
-Created: 2025
+Author: Thomas Vaudescal
+Created: 2026
 """
 
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
-from typing import Any
+from enum import Enum
+from typing import Any, Protocol, runtime_checkable
 
 import numpy as np
 
+
+# =============================================================================
+# MEASURE ENUM (canonical definition)
+# =============================================================================
+
+
+class Measure(Enum):
+    """Probability measure for simulation/pricing.
+
+    Canonical members: PHYSICAL, RISK_NEUTRAL
+    Backward-compat aliases: P, Q, P_MEASURE, Q_MEASURE
+    """
+
+    PHYSICAL = "physical"
+    RISK_NEUTRAL = "risk_neutral"
+    P = "physical"
+    Q = "risk_neutral"
+    P_MEASURE = "physical"
+    Q_MEASURE = "risk_neutral"
+
+
+# =============================================================================
+# PROTOCOL: Priceable (shared structural type)
+# =============================================================================
+
+
+@runtime_checkable
+class Priceable(Protocol):
+    """Structural type for anything that can be priced.
+
+    Both ``Instrument`` and ``StructuredProduct`` satisfy this protocol.
+    Used by ``EngineRegistry``, ``GreeksCalculator``, and ``Portfolio``
+    to accept any priceable contract without coupling to a specific ABC.
+    """
+
+    @property
+    def maturity(self) -> float: ...
+
+
+# =============================================================================
+# CAPABILITY PROTOCOLS (for Model optional features)
+# =============================================================================
+
+
+@runtime_checkable
+class CharacteristicFunctionCapable(Protocol):
+    """Model that supports FFT pricing via characteristic function."""
+
+    def characteristic_function(
+        self, u: complex, s0: float, t: float, r: float, q: float = 0.0
+    ) -> complex: ...
+
+    def characteristic_function_vectorized(
+        self, u: np.ndarray, s0: float, t: float, r: float, q: float = 0.0
+    ) -> np.ndarray: ...
+
+
+@runtime_checkable
+class SDECapable(Protocol):
+    """Model that supports Monte Carlo via SDE discretization."""
+
+    def drift(self, s: float, v: float, t: float, r: float, q: float) -> float: ...
+
+    def diffusion(self, s: float, v: float, t: float) -> float: ...
+
+
+@runtime_checkable
+class SimulatorCapable(Protocol):
+    """Model that can create its own optimized simulator."""
+
+    def create_simulator(self, **kwargs: Any) -> Any: ...
+
+
 from backend.core.market import MarketEnvironment
-from backend.core.result_types import ExerciseStyle, PricingCapability, PricingResult
+from backend.core.result_types import (
+    ExerciseStyle,
+    PricingCapability,
+    PricingResult,
+)
 
 # =============================================================================
 # PILLAR 1: PAYOFF (The Contract Terms)
 # =============================================================================
+
 
 class Payoff(ABC):
     """
@@ -61,10 +142,79 @@ class Payoff(ABC):
         """Whether payoff depends on full path (vs terminal only)."""
         pass
 
+    # ----- Portfolio algebra operators -----
+
+    def __add__(self, other: object) -> Any:
+        """Payoff + Payoff → CompositePayoff."""
+        if isinstance(other, Payoff):
+            CompositePayoff = _composite_payoff_cls()
+            left = self._legs if isinstance(self, CompositePayoff) else [(1.0, self)]
+            right = (
+                other._legs if isinstance(other, CompositePayoff) else [(1.0, other)]
+            )
+            return CompositePayoff(list(left) + list(right))
+        return NotImplemented
+
+    def __radd__(self, other: object) -> Any:
+        if other == 0:
+            return self
+        return NotImplemented
+
+    def __sub__(self, other: object) -> Any:
+        """Payoff - Payoff → CompositePayoff."""
+        if isinstance(other, Payoff):
+            CompositePayoff = _composite_payoff_cls()
+            left = self._legs if isinstance(self, CompositePayoff) else [(1.0, self)]
+            right = [
+                (-weight, payoff)
+                for weight, payoff in (
+                    other._legs
+                    if isinstance(other, CompositePayoff)
+                    else [(1.0, other)]
+                )
+            ]
+            return CompositePayoff(list(left) + right)
+        return NotImplemented
+
+    def __mul__(self, scalar: object) -> Any:
+        """scalar * Payoff → CompositePayoff."""
+        if isinstance(scalar, (int, float)):
+            CompositePayoff = _composite_payoff_cls()
+            if isinstance(self, CompositePayoff):
+                return CompositePayoff(
+                    [(weight * scalar, payoff) for weight, payoff in self._legs]
+                )
+            return CompositePayoff([(float(scalar), self)])
+        return NotImplemented
+
+    def __rmul__(self, scalar: object) -> Any:
+        """Payoff * scalar → CompositePayoff."""
+        return self.__mul__(scalar)
+
+    def __neg__(self) -> Payoff:
+        """-Payoff → CompositePayoff with weight -1."""
+        return self.__mul__(-1.0)
+
+
+# Module-level cache for the CompositePayoff class. We cannot import it at
+# module load time because backend.instruments.payoffs depends on Payoff defined
+# above (circular import). The first algebra operation memoizes the class.
+_COMPOSITE_PAYOFF_CLS: type | None = None
+
+
+def _composite_payoff_cls() -> type:
+    global _COMPOSITE_PAYOFF_CLS
+    if _COMPOSITE_PAYOFF_CLS is None:
+        from backend.instruments.payoffs import CompositePayoff
+
+        _COMPOSITE_PAYOFF_CLS = CompositePayoff
+    return _COMPOSITE_PAYOFF_CLS
+
 
 # =============================================================================
 # PILLAR 1: INSTRUMENT (The "What")
 # =============================================================================
+
 
 class Instrument(ABC):
     """
@@ -115,6 +265,7 @@ class Instrument(ABC):
 # =============================================================================
 # PILLAR 2: MODEL (The "Physics")
 # =============================================================================
+
 
 class Model(ABC):
     """
@@ -259,7 +410,7 @@ class Model(ABC):
         """
         raise NotImplementedError(f"{self.name} has no SDE diffusion")
 
-    def create_simulator(self, **kwargs):
+    def create_simulator(self, **kwargs: Any) -> Any:
         """
         Create a simulator for Monte Carlo pricing.
 
@@ -291,6 +442,7 @@ class Model(ABC):
 # =============================================================================
 # PILLAR 3: ENGINE (The "How")
 # =============================================================================
+
 
 class PricingEngine(ABC):
     """
@@ -364,14 +516,6 @@ class PricingEngine(ABC):
             True if this engine can handle the combination
         """
         return (
-            self.capability in model.supported_engines and
-            instrument.exercise_style in self.supported_exercises
+            self.capability in model.supported_engines
+            and instrument.exercise_style in self.supported_exercises
         )
-
-
-if __name__ == "__main__":
-    # Smoke test - just verify imports work
-    print("Interfaces module loaded successfully")
-    print(f"ExerciseStyle values: {list(ExerciseStyle)}")
-    print(f"PricingCapability values: {list(PricingCapability)}")
-    print("✓ Interfaces smoke test passed")

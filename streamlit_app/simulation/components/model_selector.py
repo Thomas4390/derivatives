@@ -23,8 +23,7 @@ from utils.model_helpers import (
 
 
 def render_model_selector(
-    key: str = "model_selector",
-    on_change: Callable | None = None
+    key: str = "model_selector", on_change: Callable | None = None
 ) -> str:
     """
     Render model selection interface.
@@ -67,7 +66,7 @@ def render_model_selector(
         index=current_index,
         key=key,
         on_change=on_change,
-        help="Choose simulation model"
+        help="Choose simulation model",
     )
 
     # Store in session state
@@ -89,17 +88,21 @@ def _render_model_info_card(model_key: str):
 
     # Feature badges
     badges = get_feature_badges(model_key)
-    badge_html = " ".join([
-        f'<span style="background-color: {_get_badge_color(color)}; '
-        f'color: white; padding: 2px 8px; border-radius: 12px; '
-        f'font-size: 0.75rem; margin-right: 4px;">{label}</span>'
-        for label, color in badges
-    ])
+    badge_html = " ".join(
+        [
+            f'<span style="background-color: {_get_badge_color(color)}; '
+            f"color: white; padding: 2px 8px; border-radius: 12px; "
+            f'font-size: 0.75rem; margin-right: 4px;">{label}</span>'
+            for label, color in badges
+        ]
+    )
     st.markdown(badge_html, unsafe_allow_html=True)
 
     # Volatility type indicator
     vol_type = get_volatility_type(model_key)
-    vol_color = "🟢" if vol_type == "Constant" else "🟡" if "GARCH" in vol_type else "🔵"
+    vol_color = (
+        "🟢" if vol_type == "Constant" else "🟡" if "GARCH" in vol_type else "🔵"
+    )
     st.markdown(f"**Volatility:** {vol_color} {vol_type}")
 
 
@@ -147,7 +150,7 @@ def render_model_selector_radio(
                 f"{icon} {model.short_name}",
                 key=f"{key}_{model_key}",
                 width="stretch",
-                type="primary" if model_key == current_model else "secondary"
+                type="primary" if model_key == current_model else "secondary",
             ):
                 st.session_state.selected_model = model_key
                 st.rerun()
@@ -161,7 +164,7 @@ def render_model_selector_radio(
                 f"{icon} {model.short_name}",
                 key=f"{key}_{model_key}",
                 width="stretch",
-                type="primary" if model_key == current_model else "secondary"
+                type="primary" if model_key == current_model else "secondary",
             ):
                 st.session_state.selected_model = model_key
                 st.rerun()
@@ -176,14 +179,20 @@ def render_model_comparison_table():
     data = []
     for model_key in MODEL_DISPLAY_ORDER:
         model = get_model(model_key)
-        data.append({
-            "Model": model.short_name,
-            "Volatility": get_volatility_type(model_key),
-            "Jumps": "✓" if model.has_jumps else "—",
-            "BS": "✓" if "analytical" in [m.value for m in model.pricing_methods] else "—",
-            "FFT": "✓" if "fft" in [m.value for m in model.pricing_methods] else "—",
-            "MC": "✓",
-        })
+        data.append(
+            {
+                "Model": model.short_name,
+                "Volatility": get_volatility_type(model_key),
+                "Jumps": "✓" if model.has_jumps else "—",
+                "BS": "✓"
+                if "analytical" in [m.value for m in model.pricing_methods]
+                else "—",
+                "FFT": "✓"
+                if "fft" in [m.value for m in model.pricing_methods]
+                else "—",
+                "MC": "✓",
+            }
+        )
 
     df = pd.DataFrame(data)
     st.dataframe(
@@ -197,5 +206,5 @@ def render_model_comparison_table():
             "BS": st.column_config.TextColumn("BS", width="small"),
             "FFT": st.column_config.TextColumn("FFT", width="small"),
             "MC": st.column_config.TextColumn("MC", width="small"),
-        }
+        },
     )

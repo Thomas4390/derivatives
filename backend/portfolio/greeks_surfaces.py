@@ -12,9 +12,11 @@ Provides high-performance computation of Greeks across:
 
 All functions are JIT-compiled with parallel execution for optimal performance.
 
-Author: Thomas
-Created: 2025
+Author: Thomas Vaudescal
+Created: 2026
 """
+
+from __future__ import annotations
 
 import numpy as np
 from numba import njit, prange
@@ -24,23 +26,23 @@ from numba import njit, prange
 from backend.engines.vectorized_bs import (
     calculate_all_greeks as _calculate_all_greeks,
 )
-from backend.utils.math import DAYS_PER_YEAR
-
-# Greek indices - defined locally to avoid circular imports
-GREEK_PRICE = 0
-GREEK_DELTA = 1
-GREEK_GAMMA = 2
-GREEK_VEGA = 3
-GREEK_THETA = 4
-GREEK_RHO = 5
-GREEK_VANNA = 6
-GREEK_VOLGA = 7
-GREEK_CHARM = 8
-GREEK_VETA = 9
-GREEK_SPEED = 10
-GREEK_ZOMMA = 11
-GREEK_COLOR = 12
-GREEK_ULTIMA = 13
+from backend.utils.constants.greeks import (
+    GREEK_CHARM,
+    GREEK_COLOR,
+    GREEK_DELTA,
+    GREEK_GAMMA,
+    GREEK_PRICE,
+    GREEK_RHO,
+    GREEK_SPEED,
+    GREEK_THETA,
+    GREEK_ULTIMA,
+    GREEK_VANNA,
+    GREEK_VEGA,
+    GREEK_VETA,
+    GREEK_VOLGA,
+    GREEK_ZOMMA,
+)
+from backend.utils.constants.time import DAYS_PER_YEAR
 
 
 # NOTE: Greeks calculations are imported from backend.engines.vectorized_bs
@@ -50,6 +52,7 @@ GREEK_ULTIMA = 13
 # =============================================================================
 # PORTFOLIO GREEKS 3D SURFACES
 # =============================================================================
+
 
 @njit(fastmath=True, cache=True, parallel=True)
 def portfolio_greeks_surface_dte(
@@ -61,7 +64,7 @@ def portfolio_greeks_surface_dte(
     dte_range: np.ndarray,
     risk_free_rate: float,
     volatility: float,
-    greek_index: int = 1
+    greek_index: int = 1,
 ) -> np.ndarray:
     """
     Calculate 2D matrix of a specific Greek varying spot and DTE.
@@ -106,8 +109,12 @@ def portfolio_greeks_surface_dte(
 
             for k in range(n_positions):
                 greeks = _calculate_all_greeks(
-                    spot_range[i], strikes[k], time_to_expiry,
-                    risk_free_rate, volatility, option_types[k]
+                    spot_range[i],
+                    strikes[k],
+                    time_to_expiry,
+                    risk_free_rate,
+                    volatility,
+                    option_types[k],
                 )
                 multiplier = quantities[k] * position_types[k]
                 total_greek += greeks[greek_index] * multiplier
@@ -127,7 +134,7 @@ def portfolio_greeks_surface_iv(
     iv_range: np.ndarray,
     risk_free_rate: float,
     base_dte: float,
-    greek_index: int = 1
+    greek_index: int = 1,
 ) -> np.ndarray:
     """
     Calculate 2D matrix of a specific Greek varying spot and IV.
@@ -170,8 +177,12 @@ def portfolio_greeks_surface_iv(
 
             for k in range(n_positions):
                 greeks = _calculate_all_greeks(
-                    spot_range[i], strikes[k], time_to_expiry,
-                    risk_free_rate, iv_range[j], option_types[k]
+                    spot_range[i],
+                    strikes[k],
+                    time_to_expiry,
+                    risk_free_rate,
+                    iv_range[j],
+                    option_types[k],
                 )
                 multiplier = quantities[k] * position_types[k]
                 total_greek += greeks[greek_index] * multiplier
@@ -191,7 +202,7 @@ def single_option_greeks_surface_strike(
     option_type: int,
     position_type: int,
     quantity: int,
-    greek_index: int = 1
+    greek_index: int = 1,
 ) -> np.ndarray:
     """
     Calculate 2D matrix of a Greek varying spot and strike for single option.
@@ -231,8 +242,12 @@ def single_option_greeks_surface_strike(
     for i in prange(n_spots):
         for j in range(n_strikes):
             greeks = _calculate_all_greeks(
-                spot_range[i], strike_range[j], time_to_expiry,
-                risk_free_rate, volatility, option_type
+                spot_range[i],
+                strike_range[j],
+                time_to_expiry,
+                risk_free_rate,
+                volatility,
+                option_type,
             )
             result[i, j] = greeks[greek_index] * multiplier
 
@@ -242,6 +257,7 @@ def single_option_greeks_surface_strike(
 # =============================================================================
 # CONVENIENCE FUNCTIONS
 # =============================================================================
+
 
 def get_greek_name(greek_index: int) -> str:
     """Get human-readable Greek name from index."""
@@ -274,6 +290,7 @@ def get_greek_name(greek_index: int) -> str:
 # Do NOT remove these in favor of pnl.py without updating the frontend.
 # =============================================================================
 
+
 @njit(fastmath=True, cache=True)
 def calculate_portfolio_pnl_at_expiry_arrays(
     spot: float,
@@ -283,7 +300,7 @@ def calculate_portfolio_pnl_at_expiry_arrays(
     quantities: np.ndarray,
     premiums: np.ndarray,
     stock_quantity: float,
-    stock_entry_price: float
+    stock_entry_price: float,
 ) -> float:
     """
     Calculate portfolio P&L at expiration for a given spot price.
@@ -350,7 +367,7 @@ def calculate_pnl_curve(
     quantities: np.ndarray,
     premiums: np.ndarray,
     stock_quantity: float,
-    stock_entry_price: float
+    stock_entry_price: float,
 ) -> np.ndarray:
     """
     Calculate P&L curve across a range of spot prices.
@@ -384,8 +401,14 @@ def calculate_pnl_curve(
 
     for i in prange(n_spots):
         pnls[i] = calculate_portfolio_pnl_at_expiry_arrays(
-            spot_range[i], strikes, option_types, position_types,
-            quantities, premiums, stock_quantity, stock_entry_price
+            spot_range[i],
+            strikes,
+            option_types,
+            position_types,
+            quantities,
+            premiums,
+            stock_quantity,
+            stock_entry_price,
         )
 
     return pnls
@@ -436,7 +459,9 @@ if __name__ == "__main__":
     strikes = np.array([100.0, 110.0], dtype=np.float64)
     option_types = np.array([1, 1], dtype=np.int64)  # Both calls (1=call, 0=put)
     position_types = np.array([1, -1], dtype=np.int64)  # Long, Short
-    quantities = np.array([100.0, 100.0], dtype=np.float64)  # 1 contract each (100 multiplier)
+    quantities = np.array(
+        [100.0, 100.0], dtype=np.float64
+    )  # 1 contract each (100 multiplier)
     premiums = np.array([8.0, 3.0], dtype=np.float64)  # Premium per share
 
     # Market parameters
@@ -461,18 +486,30 @@ if __name__ == "__main__":
     # --- Test 2: Portfolio Greeks Surface (Spot vs DTE) ---
     print("\n--- Test 2: Greeks Surface (Spot vs DTE) ---")
     delta_surface = portfolio_greeks_surface_dte(
-        strikes, option_types.astype(np.int64), position_types.astype(np.int64),
-        quantities, spot_range, dte_range,
-        risk_free_rate, volatility, GREEK_DELTA
+        strikes,
+        option_types.astype(np.int64),
+        position_types.astype(np.int64),
+        quantities,
+        spot_range,
+        dte_range,
+        risk_free_rate,
+        volatility,
+        GREEK_DELTA,
     )
     print(f"  Delta surface shape: {delta_surface.shape}")
     print(f"  Delta at S=100, DTE=30: {delta_surface[24, 2]:.4f}")  # Midpoint
     print(f"  Delta range: [{delta_surface.min():.4f}, {delta_surface.max():.4f}]")
 
     gamma_surface = portfolio_greeks_surface_dte(
-        strikes, option_types.astype(np.int64), position_types.astype(np.int64),
-        quantities, spot_range, dte_range,
-        risk_free_rate, volatility, GREEK_GAMMA
+        strikes,
+        option_types.astype(np.int64),
+        position_types.astype(np.int64),
+        quantities,
+        spot_range,
+        dte_range,
+        risk_free_rate,
+        volatility,
+        GREEK_GAMMA,
     )
     print(f"  Gamma surface shape: {gamma_surface.shape}")
     print(f"  Gamma at S=100, DTE=30: {gamma_surface[24, 2]:.6f}")
@@ -480,9 +517,15 @@ if __name__ == "__main__":
     # --- Test 3: Portfolio Greeks Surface (Spot vs IV) ---
     print("\n--- Test 3: Greeks Surface (Spot vs IV) ---")
     vega_surface = portfolio_greeks_surface_iv(
-        strikes, option_types.astype(np.int64), position_types.astype(np.int64),
-        quantities, spot_range, iv_range,
-        risk_free_rate, base_dte, GREEK_VEGA
+        strikes,
+        option_types.astype(np.int64),
+        position_types.astype(np.int64),
+        quantities,
+        spot_range,
+        iv_range,
+        risk_free_rate,
+        base_dte,
+        GREEK_VEGA,
     )
     print(f"  Vega surface shape: {vega_surface.shape}")
     print(f"  Vega at S=100, IV=20%: {vega_surface[24, 1]:.4f}")
@@ -491,12 +534,15 @@ if __name__ == "__main__":
     # --- Test 4: Single Option Greeks Surface (Spot vs Strike) ---
     print("\n--- Test 4: Single Option Surface (Spot vs Strike) ---")
     single_delta = single_option_greeks_surface_strike(
-        spot_range, strike_range, base_dte,
-        risk_free_rate, volatility,
+        spot_range,
+        strike_range,
+        base_dte,
+        risk_free_rate,
+        volatility,
         option_type=1,  # Call
         position_type=1,  # Long
         quantity=100,
-        greek_index=GREEK_DELTA
+        greek_index=GREEK_DELTA,
     )
     print(f"  Single call delta surface shape: {single_delta.shape}")
     print(f"  Delta at S=100, K=100 (ATM): {single_delta[24, 10]:.4f}")
@@ -504,25 +550,39 @@ if __name__ == "__main__":
     # --- Test 5: P&L Curve ---
     print("\n--- Test 5: P&L Curve ---")
     pnl_curve = calculate_pnl_curve(
-        spot_range, strikes, option_types.astype(np.float64),
-        position_types.astype(np.float64), quantities, premiums,
-        stock_quantity=0.0, stock_entry_price=0.0
+        spot_range,
+        strikes,
+        option_types.astype(np.float64),
+        position_types.astype(np.float64),
+        quantities,
+        premiums,
+        stock_quantity=0.0,
+        stock_entry_price=0.0,
     )
     print(f"  P&L curve length: {len(pnl_curve)}")
     print(f"  P&L at S=80: ${pnl_curve[0]:.2f}")
     print(f"  P&L at S=100: ${pnl_curve[24]:.2f}")
     print(f"  P&L at S=130: ${pnl_curve[-1]:.2f}")
-    print(f"  Max P&L: ${pnl_curve.max():.2f} at S=${spot_range[np.argmax(pnl_curve)]:.2f}")
-    print(f"  Min P&L: ${pnl_curve.min():.2f} at S=${spot_range[np.argmin(pnl_curve)]:.2f}")
+    print(
+        f"  Max P&L: ${pnl_curve.max():.2f} at S=${spot_range[np.argmax(pnl_curve)]:.2f}"
+    )
+    print(
+        f"  Min P&L: ${pnl_curve.min():.2f} at S=${spot_range[np.argmin(pnl_curve)]:.2f}"
+    )
 
     # --- Test 6: P&L at Single Spot ---
     print("\n--- Test 6: P&L at Single Spot ---")
     test_spots = [80.0, 95.0, 100.0, 105.0, 110.0, 120.0]
     for spot in test_spots:
         pnl = calculate_portfolio_pnl_at_expiry_arrays(
-            spot, strikes, option_types.astype(np.float64),
-            position_types.astype(np.float64), quantities, premiums,
-            stock_quantity=0.0, stock_entry_price=0.0
+            spot,
+            strikes,
+            option_types.astype(np.float64),
+            position_types.astype(np.float64),
+            quantities,
+            premiums,
+            stock_quantity=0.0,
+            stock_entry_price=0.0,
         )
         print(f"  S={spot:6.1f}: P&L = ${pnl:8.2f}")
 
@@ -537,9 +597,14 @@ if __name__ == "__main__":
 
     for spot in [90.0, 100.0, 105.0, 115.0]:
         pnl = calculate_portfolio_pnl_at_expiry_arrays(
-            spot, cc_strikes, cc_option_types, cc_position_types,
-            cc_quantities, cc_premiums,
-            stock_quantity=100.0, stock_entry_price=100.0
+            spot,
+            cc_strikes,
+            cc_option_types,
+            cc_position_types,
+            cc_quantities,
+            cc_premiums,
+            stock_quantity=100.0,
+            stock_entry_price=100.0,
         )
         print(f"  S={spot:6.1f}: P&L = ${pnl:8.2f}")
 
@@ -549,14 +614,24 @@ if __name__ == "__main__":
     # Max profit at S >= 110: (110-100) * 100 - 500 = $500
     # Max loss at S <= 100: -$500 (premium paid)
     pnl_below = calculate_portfolio_pnl_at_expiry_arrays(
-        90.0, strikes, option_types.astype(np.float64),
-        position_types.astype(np.float64), quantities, premiums,
-        0.0, 0.0
+        90.0,
+        strikes,
+        option_types.astype(np.float64),
+        position_types.astype(np.float64),
+        quantities,
+        premiums,
+        0.0,
+        0.0,
     )
     pnl_above = calculate_portfolio_pnl_at_expiry_arrays(
-        120.0, strikes, option_types.astype(np.float64),
-        position_types.astype(np.float64), quantities, premiums,
-        0.0, 0.0
+        120.0,
+        strikes,
+        option_types.astype(np.float64),
+        position_types.astype(np.float64),
+        quantities,
+        premiums,
+        0.0,
+        0.0,
     )
     print(f"  P&L at S=90 (below both strikes): ${pnl_below:.2f} (expected: -$500)")
     print(f"  P&L at S=120 (above both strikes): ${pnl_above:.2f} (expected: $500)")
