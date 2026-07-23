@@ -238,19 +238,20 @@ CUSTOM_CSS = """
 
     /* ========== Tabs Styling ========== */
     .stTabs [data-baseweb="tab-list"] {
-        gap: 0;
+        gap: 0.25rem;
         background: #f1f5f9;
-        padding: 0.25rem;
-        border-radius: 10px;
+        padding: 0.35rem;
+        border-radius: 999px;
     }
 
     .stTabs [data-baseweb="tab"] {
-        padding: 0.75rem 1.25rem;
-        border-radius: 8px;
+        padding: 0.65rem 1.35rem;
+        border-radius: 999px;
         font-weight: 500;
         font-size: 0.875rem;
         color: #64748b;
         background: transparent;
+        transition: background 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
     }
 
     .stTabs [aria-selected="true"] {

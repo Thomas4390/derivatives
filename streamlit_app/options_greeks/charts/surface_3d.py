@@ -260,6 +260,16 @@ def render_3d_tab(
         _calculate_greeks_3d_iv_func: Function for IV calculations
         _calculate_greeks_3d_strike_func: Function for Strike calculations (single-leg only)
     """
+    # Empty portfolio: draw nothing (no surface, no controls, no info boxes).
+    # Show a short hint so the tab reads as "waiting for input" rather than
+    # broken. Mirrors the payoff tab's empty state.
+    if len(positions) == 0 and stock_position is None:
+        st.info(
+            "No positions — add a leg in the sidebar to see the 3D surface.",
+            icon="ℹ️",
+        )
+        return
+
     # Detect single-leg vanilla position (Strike variation only for vanilla)
     is_single_vanilla_leg = (
         len(positions) == 1
