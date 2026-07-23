@@ -254,9 +254,9 @@ CUSTOM_CSS = """
     }
 
     .stTabs [aria-selected="true"] {
-        background: #ffffff !important;
-        color: #0d9488 !important;
-        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        background: linear-gradient(135deg, #0d9488 0%, #0f766e 100%) !important;
+        color: #ffffff !important;
+        box-shadow: 0 2px 8px rgba(13, 148, 136, 0.25);
     }
 
     /* ========== Sidebar Styling ========== */
@@ -356,9 +356,10 @@ CUSTOM_CSS = """
     }
 
     /* ========== Slider Styling ========== */
-    .stSlider > div > div > div > div {
-        background-color: #0d9488;
-    }
+    /* Slider colour is driven by the theme primaryColor (.streamlit/config.toml).
+       Do NOT target .stSlider inner divs: that descendant selector drifts
+       across Streamlit versions and ends up painting the value bubble
+       (the "green box" regression). */
 
     /* ========== Info Boxes ========== */
     .info-box {
@@ -751,32 +752,12 @@ CUSTOM_CSS = """
         letter-spacing: 0.05em;
     }
 
-    /* ========== Main Tab Navigation (Full Width) ========== */
-    .main-tabs-container .stTabs [data-baseweb="tab-list"] {
-        gap: 0.25rem;
-        background: #ffffff;
-        padding: 0.5rem;
-        border-radius: 12px;
-        border: 1px solid #e2e8f0;
-        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
-    }
-
-    .main-tabs-container .stTabs [data-baseweb="tab"] {
-        padding: 0.875rem 1.5rem;
-        border-radius: 8px;
-        font-weight: 600;
-        font-size: 0.9rem;
-        color: #64748b;
-        background: transparent;
-        flex: 1;
-        justify-content: center;
-    }
-
-    .main-tabs-container .stTabs [aria-selected="true"] {
-        background: linear-gradient(135deg, #0d9488 0%, #0f766e 100%) !important;
-        color: #ffffff !important;
-        box-shadow: 0 2px 8px rgba(13, 148, 136, 0.25);
-    }
+    /* ========== Main Tab Navigation ==========
+       The teal-filled active-tab style now lives on the generic
+       `.stTabs [aria-selected="true"]` rule above, shared by every app
+       (options_greeks / simulation / calibration). The old
+       `.main-tabs-container` wrapper was never applied in any app.py, so
+       its rules were dead code and have been removed. */
 
     /* ========== Visualization Options Compact ========== */
     .viz-options-row {

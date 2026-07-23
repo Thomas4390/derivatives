@@ -337,9 +337,9 @@ CUSTOM_CSS = """
     }
 
     .stTabs [aria-selected="true"] {
-        background: #ffffff !important;
-        color: #1a365d !important;
-        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        background: linear-gradient(135deg, #0d9488 0%, #0f766e 100%) !important;
+        color: #ffffff !important;
+        box-shadow: 0 2px 8px rgba(13, 148, 136, 0.25);
     }
 
     /* ========== Sidebar Styling ========== */

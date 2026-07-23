@@ -1,2 +1,7 @@
 [theme]
 base = "light"
+# Brand accent (teal). Drives the colour of native widgets — slider
+# track/thumb/value and the active-tab indicator — so we no longer need
+# fragile per-widget CSS overrides. Keep in sync with the deploy mirrors
+# (derivatives, derivatives_private).
+primaryColor = "#0d9488"
