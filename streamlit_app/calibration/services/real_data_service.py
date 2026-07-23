@@ -41,7 +41,7 @@ class RealMarketSnapshot:
     rate: float
     dividend_yield: float
     snapshot_label: str
-    iv_grid: np.ndarray         # (n_T, n_K) IVs (call mid)
+    iv_grid: np.ndarray  # (n_T, n_K) IVs (call mid)
     strikes: np.ndarray
     maturities: np.ndarray
     n_quotes_total: int
@@ -80,11 +80,31 @@ def load_snapshot(
         )
 
     df = load_raw_dataframe(entry.file)
-    spot = float(df["stockPrice"].iloc[0])
+    n_raw = len(df)
+    # The constant underlying quote for the snapshot is ``spotPrice`` (one value
+    # per file); ``stockPrice`` varies row to row (it carries a per-row quote
+    # print, including the discarded dte=1 row), so ``stockPrice.iloc[0]`` gave
+    # a spot up to ~0.3 % off — shifting the moneyness filter and the OTM
+    # call/put side selection.
+    spot = float(df["spotPrice"].iloc[0])
 
     df = df[(df["dte"] >= dte_min) & (df["dte"] <= dte_max)]
     df["moneyness"] = df["strike"] / spot
     df = df[(df["moneyness"] >= moneyness_min) & (df["moneyness"] <= moneyness_max)]
+
+    # Each expiry carries an AM and a PM (SPX / SPXW) series with the SAME
+    # (expiry, strike) but contradictory IVs; the grid keeps only the last, so
+    # the residual vector double-weighted them against inconsistent targets.
+    # Keep the tighter-spread series per (expiry, strike) so quotes and iv_grid
+    # describe one unique surface.
+    df["_spread"] = (
+        df["callAskPrice"].fillna(0) - df["callBidPrice"].fillna(0)
+    ).abs() + (df["putAskPrice"].fillna(0) - df["putBidPrice"].fillna(0)).abs()
+    df = (
+        df.sort_values("_spread")
+        .drop_duplicates(subset=["expirDate", "strike"], keep="first")
+        .sort_index()
+    )
     n_total = len(df)
 
     df["call_mid"] = 0.5 * (df["callBidPrice"].fillna(0) + df["callAskPrice"].fillna(0))
@@ -92,7 +112,12 @@ def load_snapshot(
 
     quotes: list[OptionQuote] = []
     for _, r in df.iterrows():
-        T = float(r["dte"]) / 365.0
+        # Vendor ``dte`` is calendar-days + 1 (a same-day expiry reports dte=1),
+        # so the time to expiry is (dte-1)/365; the dte FILTER above stays in
+        # vendor units. The +1-day bias overstated every maturity (up to
+        # ~14-17 % at the short end), tilting the fitted short-dated term
+        # structure and biasing mean-reversion / vol-of-vol.
+        T = (float(r["dte"]) - 1.0) / 365.0
         K = float(r["strike"])
         is_call = K >= spot  # OTM convention — picks the more liquid side
         if is_call:
@@ -110,21 +135,30 @@ def load_snapshot(
             or iv > IV_FILTER_MAX
         ):
             continue
-        quotes.append(OptionQuote(
-            strike=K,
-            maturity=T,
-            is_call=bool(is_call),
-            market_price=mid,
-            implied_vol=iv,
-        ))
-    n_dropped = n_total - len(quotes)
+        quotes.append(
+            OptionQuote(
+                strike=K,
+                maturity=T,
+                is_call=bool(is_call),
+                market_price=mid,
+                implied_vol=iv,
+            )
+        )
+    # Report against the RAW row count so the caption is honest: n_total used
+    # to be the post-range-filter count and n_dropped excluded every dte /
+    # moneyness / dedup drop (e.g. '2221 raw quotes · 0 dropped' for a file
+    # that started at 2950 rows).
+    n_kept = len(quotes)
+    n_dropped = n_raw - n_kept
     if not quotes:
         raise ValueError(
             "After filtering, no usable quotes remain. Loosen the dte/moneyness range."
         )
 
     md = OptionMarketData(
-        spot=spot, rate=rate, dividend_yield=dividend_yield,
+        spot=spot,
+        rate=rate,
+        dividend_yield=dividend_yield,
         quotes=tuple(quotes),
     )
 
@@ -146,6 +180,6 @@ def load_snapshot(
         iv_grid=iv_grid,
         strikes=strikes,
         maturities=maturities,
-        n_quotes_total=n_total,
+        n_quotes_total=n_raw,
         n_quotes_dropped=n_dropped,
     )

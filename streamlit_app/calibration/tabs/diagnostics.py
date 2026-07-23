@@ -16,6 +16,7 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
+from backend.utils.logging import get_logger
 from charts.diagnostics import (
     render_qq_overlay,
     render_residual_heatmap,
@@ -31,12 +32,27 @@ from charts.returns_diagnostics import (
     render_conditional_volatility_overlay,
     render_squared_residuals_acf,
 )
-from config.constants import GARCH_FAMILY, RETURNS_CACHE_MAX_ENTRIES
+from config.constants import (
+    GARCH_FAMILY,
+    RETURNS_CACHE_MAX_ENTRIES,
+    RETURNS_IMPLIED_HALFWIDTH_MAX,
+    RETURNS_IMPLIED_HALFWIDTH_MIN,
+    RETURNS_IMPLIED_STRIKE_SPAN_SIGMAS,
+    RETURNS_IMPLIED_SURFACE_RATE,
+)
 from services import state_manager
+from services.axis_display import resolve_display_axis
 from streamlit_app.simulation.config.styles import section_header_html  # type: ignore
-from tabs._helpers import Series, facet_grid, series_view_filter
+from tabs._helpers import (
+    Series,
+    facet_grid,
+    reference_surface_label,
+    series_view_filter,
+)
 from utils.numba_kernels import reshape_residuals_to_grid
 from utils.plotly_theme import series_style
+
+logger = get_logger(__name__)
 
 
 def render(ctx: dict) -> None:
@@ -67,7 +83,9 @@ def render(ctx: dict) -> None:
         _render_surface_diagnostics(selected, market_data, meta, multi_model)
     else:
         _render_returns_diagnostics(
-            selected, meta, multi_model,
+            selected,
+            meta,
+            multi_model,
             data_source=data_source,
             generator_model=generator_model,
             true_params=true_params,
@@ -91,6 +109,7 @@ def _surface_residuals_1d(res, market_data) -> np.ndarray | None:
         model_prices = surface_model_prices(res.model, market_data)
         return (model_prices - market_data.market_prices).astype(np.float64)
     except (ValueError, RuntimeError, FloatingPointError, AttributeError):
+        logger.debug("surface residual computation failed", exc_info=True)
         return None
 
 
@@ -124,6 +143,12 @@ def _render_surface_diagnostics(
         unsafe_allow_html=True,
     )
 
+    # 1D-safe display axis: honours the x-axis choice for real data (shared
+    # strikes) and falls back to σ√T-moneyness when the choice is a 2D
+    # per-maturity axis (a heatmap needs a single shared x per column).
+    axis = resolve_display_axis(meta)
+    heatmap_axis = axis.heatmap_kwargs(meta)
+
     def _heatmap_for(s: Series):
         resids = resids_by_key.get(s.key)
         if resids is None:
@@ -132,7 +157,11 @@ def _render_surface_diagnostics(
             resids, quote_strikes, quote_maturities, grid_strikes, grid_maturities
         )
         return render_residual_heatmap(
-            grid, meta["strikes"], meta["maturities"], spot=meta.get("spot")
+            grid,
+            meta["strikes"],
+            meta["maturities"],
+            **heatmap_axis,
+            spot=meta.get("spot"),
         )
 
     facet_grid(
@@ -192,7 +221,11 @@ def _garch_filter(res, model_key: str, meta: dict):
         )
     except (ValueError, RuntimeError, FloatingPointError):
         return None, None
-    sigma_t = np.sqrt(np.maximum(var_series[1:], 1e-18))
+    # The conditional variance for r_t is var_series[t] (the recursion
+    # standardises with returns[t]/sqrt(var_series[t]) and stores the prior at
+    # index 0). Using var_series[1:] would divide r_t by h_{t+1} — an
+    # off-by-one that biases the QQ slope sub-unit and damps the ACF-of-z².
+    sigma_t = np.sqrt(np.maximum(var_series[:-1], 1e-18))
     return var_series, log_returns / sigma_t
 
 
@@ -333,7 +366,9 @@ def _cached_implied_grid(
     )
 
 
-def _garch_persistence(garch_type: str, alpha: float, beta: float, gamma: float) -> float:
+def _garch_persistence(
+    garch_type: str, alpha: float, beta: float, gamma: float
+) -> float:
     if garch_type == "ngarch":
         return beta + alpha * (1.0 + gamma**2)
     if garch_type == "gjr_garch":
@@ -341,17 +376,72 @@ def _garch_persistence(garch_type: str, alpha: float, beta: float, gamma: float)
     return beta + alpha
 
 
-def _fitted_implied_grid(model_key, model, spot, rate, strikes, maturities):
-    """Implied IV grid of one fitted physical GARCH model (annualised → daily)."""
+def _long_run_vol_ann(
+    garch_type: str,
+    omega: float,
+    alpha: float,
+    beta: float,
+    gamma: float = 0.0,
+    *,
+    per_period: bool = False,
+    annualization_factor: float = 252.0,
+) -> float | None:
+    """Annualised long-run vol √(ω/(1−persistence)), or ``None`` if non-stationary.
+
+    Fitted physical GARCH models store ω **annualised**; the synthetic
+    generator's true ω is **per-period** — pass ``per_period=True`` to scale
+    the long-run variance by ``annualization_factor``.
+    """
+    persistence = _garch_persistence(garch_type, alpha, beta, gamma)
+    if persistence >= 1.0:
+        return None
+    long_run_var = omega / (1.0 - persistence)
+    if per_period:
+        long_run_var *= annualization_factor
+    return float(np.sqrt(long_run_var))
+
+
+def _implied_strike_halfwidth(vols_ann: list[float], t_min: float) -> float:
+    """Half-width (fraction of spot) of the shared implied-surface strike grid.
+
+    ±``RETURNS_IMPLIED_STRIKE_SPAN_SIGMAS``·σ·√T at the *shortest* displayed
+    maturity, driven by the smallest long-run vol on display so every model's
+    wing cells keep an invertible MC price (a fixed ±20 % span is ~7σ√T at one
+    month for a low-vol GARCH → zero prices → NaN holes). Clamped to
+    [``RETURNS_IMPLIED_HALFWIDTH_MIN``, ``RETURNS_IMPLIED_HALFWIDTH_MAX``].
+    """
+    if not vols_ann:
+        return RETURNS_IMPLIED_HALFWIDTH_MAX
+    raw = RETURNS_IMPLIED_STRIKE_SPAN_SIGMAS * min(vols_ann) * float(np.sqrt(t_min))
+    return float(
+        np.clip(raw, RETURNS_IMPLIED_HALFWIDTH_MIN, RETURNS_IMPLIED_HALFWIDTH_MAX)
+    )
+
+
+def _fitted_implied_grid(
+    model_key, model, spot, rate, strikes, maturities, annualization_factor
+):
+    """Implied IV grid of one fitted physical GARCH model (annualised → per-period).
+
+    ``ω`` is stored annualised on the model and ``σ₀`` is an annualised vol, so
+    both are scaled back by ``annualization_factor`` (the periods-per-year the
+    synthetic series was generated at — 252 daily, 12 monthly, …) before the
+    per-period risk-neutral GARCH is priced. The previous hard-coded 252 silently
+    mis-scaled every non-daily series.
+    """
+    af = float(annualization_factor)
     try:
         return _cached_implied_grid(
             model_key,
-            float(model.omega) / 252.0,            # annualised → per-period
+            float(model.omega) / af,  # annualised → per-period
             float(model.alpha),
             float(model.beta),
             float(getattr(model, "gamma", 0.0)),
-            float(model.sigma0) ** 2 / 252.0,      # annualised vol → per-period var
-            spot, rate, strikes, maturities,
+            float(model.sigma0) ** 2 / af,  # annualised var → per-period var
+            spot,
+            rate,
+            strikes,
+            maturities,
         )
     except (ValueError, RuntimeError, FloatingPointError, AttributeError, KeyError):
         return None
@@ -369,8 +459,16 @@ def _true_implied_grid(garch_type, true_params, spot, rate, strikes, maturities)
             return None  # non-stationary generator — no long-run vol to anchor on
         h0_per = omega_per / (1.0 - persistence)  # generator starts at long-run var
         return _cached_implied_grid(
-            garch_type, omega_per, alpha, beta, gamma, h0_per,
-            spot, rate, strikes, maturities,
+            garch_type,
+            omega_per,
+            alpha,
+            beta,
+            gamma,
+            h0_per,
+            spot,
+            rate,
+            strikes,
+            maturities,
         )
     except (ValueError, RuntimeError, FloatingPointError, KeyError):
         return None
@@ -391,9 +489,38 @@ def _render_returns_implied_surface(
     overlaid as the reference (the analogue of 'market' for the surface family).
     """
     spot = float(meta.get("spot", 100.0))
-    rate = float(meta.get("rate", 0.05))
-    strikes = tuple(np.linspace(0.8 * spot, 1.2 * spot, 9))
+    rate = float(meta.get("rate", RETURNS_IMPLIED_SURFACE_RATE))
+    annualization_factor = float(meta.get("annualization_factor", 252))
     maturities = tuple(np.array([1.0, 3.0, 6.0, 12.0, 24.0]) / 12.0)
+
+    # σ√T-aware strike span: the smallest long-run vol on display sets the
+    # half-width at the shortest maturity so no model's wing prices to zero.
+    vols_ann: list[float] = []
+    for s in selected:
+        m = s.summary.result.model
+        vol = _long_run_vol_ann(
+            s.model,
+            float(m.omega),  # fitted physical GARCH ω is annualised
+            float(m.alpha),
+            float(m.beta),
+            float(getattr(m, "gamma", 0.0)),
+        )
+        if vol is not None:
+            vols_ann.append(vol)
+    if data_source == "synthetic" and generator_model in GARCH_FAMILY and true_params:
+        vol = _long_run_vol_ann(
+            generator_model,
+            float(true_params["omega"]),  # generator ω is per-period
+            float(true_params["alpha"]),
+            float(true_params["beta"]),
+            float(true_params.get("gamma", 0.0)),
+            per_period=True,
+            annualization_factor=annualization_factor,
+        )
+        if vol is not None:
+            vols_ann.append(vol)
+    half = _implied_strike_halfwidth(vols_ann, min(maturities))
+    strikes = tuple(np.linspace((1.0 - half) * spot, (1.0 + half) * spot, 9))
 
     st.markdown(
         section_header_html(
@@ -412,14 +539,26 @@ def _render_returns_implied_surface(
     with st.spinner("Pricing model-implied surfaces by Monte-Carlo…"):
         fit_grids: dict[str, np.ndarray] = {}
         for s in selected:
-            grid = _fitted_implied_grid(s.model, s.summary.result.model, spot, rate,
-                                        strikes, maturities)
+            grid = _fitted_implied_grid(
+                s.model,
+                s.summary.result.model,
+                spot,
+                rate,
+                strikes,
+                maturities,
+                annualization_factor,
+            )
             if grid is not None and np.isfinite(grid).any():
                 fit_grids[s.label] = grid
         ref_grid = None
-        if data_source == "synthetic" and generator_model in GARCH_FAMILY and true_params:
-            ref_grid = _true_implied_grid(generator_model, true_params, spot, rate,
-                                          strikes, maturities)
+        if (
+            data_source == "synthetic"
+            and generator_model in GARCH_FAMILY
+            and true_params
+        ):
+            ref_grid = _true_implied_grid(
+                generator_model, true_params, spot, rate, strikes, maturities
+            )
 
     if not fit_grids:
         st.info("Model-implied surface unavailable for the selected runs.")
@@ -427,20 +566,54 @@ def _render_returns_implied_surface(
 
     strikes_arr = np.asarray(strikes)
     maturities_arr = np.asarray(maturities)
+    # This returns-family view uses a fixed dollar-strike grid (no σ√T frame).
+    # Tile the 1D strikes to the uniform 2D-strikes hover convention and resolve
+    # the display axis from the same session choice as the surface family, so the
+    # x-axis is consistent across the app (defaults to ln(K/F); σ√T falls back to
+    # the native K/S₀ here since there is no σ√T axis for a fixed grid).
+    ret_strikes_2d = np.tile(strikes_arr, (len(maturities_arr), 1))
+    ret_moneyness = strikes_arr / spot if spot else strikes_arr
+    ret_meta = {
+        "strikes": ret_strikes_2d,
+        "maturities": maturities_arr,
+        "spot": float(spot) if spot else 100.0,
+        "rate": float(rate),
+        "dividend_yield": 0.0,
+        "moneyness": ret_moneyness,
+        "x_label": "Moneyness  K / S₀",
+        "atm_x": 1.0,
+    }
+    ret_axis = resolve_display_axis(ret_meta).kwargs()
 
+    # The reference (target) surface is the synthetic generator's model-implied
+    # surface — name it after that model rather than the generic "Market".
+    ref_label = reference_surface_label(data_source, generator_model)
     if ref_grid is not None and np.isfinite(ref_grid).any():
         st.plotly_chart(
             render_iv_surface_overlay_3d(
-                ref_grid, fit_grids, strikes_arr, maturities_arr,
-                title="", spot=spot, solver_name="true generator",
+                ref_grid,
+                fit_grids,
+                ret_strikes_2d,
+                maturities_arr,
+                **ret_axis,
+                title="",
+                spot=spot,
+                solver_name="true generator",
+                reference_label=ref_label,
             ),
             width="stretch",
             key="diag_returns_surface3d",
         )
         st.plotly_chart(
             render_smile_slices_overlay(
-                ref_grid, fit_grids, strikes_arr, maturities_arr, spot=spot,
+                ref_grid,
+                fit_grids,
+                ret_strikes_2d,
+                maturities_arr,
+                **ret_axis,
+                spot=spot,
                 solver_name="true generator",
+                reference_label=ref_label,
             ),
             width="stretch",
             key="diag_returns_smiles",
@@ -449,12 +622,22 @@ def _render_returns_implied_surface(
         label, grid = next(iter(fit_grids.items()))
         st.caption(f"Showing **{label}** (no synthetic ground truth to overlay).")
         st.plotly_chart(
-            render_iv_surface_3d(grid, strikes_arr, maturities_arr, title="", spot=spot),
+            render_iv_surface_3d(
+                grid,
+                ret_strikes_2d,
+                maturities_arr,
+                **ret_axis,
+                title="",
+                spot=spot,
+                reference_label=label,
+            ),
             width="stretch",
             key="diag_returns_surface3d",
         )
         st.plotly_chart(
-            render_smile_slices(grid, strikes_arr, maturities_arr, spot=spot),
+            render_smile_slices(
+                grid, ret_strikes_2d, maturities_arr, **ret_axis, spot=spot
+            ),
             width="stretch",
             key="diag_returns_smiles",
         )

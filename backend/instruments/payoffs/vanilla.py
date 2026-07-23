@@ -1,139 +1,20 @@
 """
-Payoff Functions
-================
-
-Atomic payoff functions for option contracts.
-
-Payoffs know the contractual rules but NOTHING about:
-- Market data (spot, rates)
-- Stochastic dynamics
-- Pricing method
-
-Author: Thomas Vaudescal
-Created: 2026
+Terminal / spot-dependent payoff value-objects (vanilla, digital, spot, bond,
+composite).
 """
 
 from __future__ import annotations
 
 import numpy as np
-from numba import njit
 
 from backend.core.interfaces import Payoff
-
-# =============================================================================
-# VALIDATION HELPERS
-# =============================================================================
-
-
-def _validate_spot_array(spot: np.ndarray | float, name: str = "Spot") -> np.ndarray:
-    """
-    Validate spot price array for payoff computation.
-
-    Parameters
-    ----------
-    spot : np.ndarray
-        Spot price(s) to validate
-    name : str
-        Variable name for error messages
-
-    Returns
-    -------
-    np.ndarray
-        Validated 1D float64 array
-
-    Raises
-    ------
-    ValueError
-        If array contains NaN, Inf, or negative values
-    """
-    spot_arr = np.atleast_1d(np.asarray(spot, dtype=np.float64))
-    if np.any(~np.isfinite(spot_arr)):
-        raise ValueError(f"{name} prices must be finite (no NaN or Inf)")
-    if np.any(spot_arr < 0):
-        raise ValueError(f"{name} prices must be non-negative")
-    return spot_arr
-
-
-def _validate_path_array(path: np.ndarray | list) -> np.ndarray:
-    """
-    Validate path array for path-dependent payoff computation.
-
-    Parameters
-    ----------
-    path : np.ndarray
-        Price path(s) to validate
-
-    Returns
-    -------
-    np.ndarray
-        Validated 2D float64 array with shape (n_paths, n_steps)
-
-    Raises
-    ------
-    ValueError
-        If array contains NaN, Inf, negative values, or has wrong dimensions
-    """
-    path_arr = np.atleast_2d(np.asarray(path, dtype=np.float64))
-    if path_arr.ndim != 2:
-        raise ValueError(f"Path must be 2D array, got {path_arr.ndim}D")
-    if path_arr.shape[1] < 2:
-        raise ValueError(
-            f"Path must have at least 2 time steps, got {path_arr.shape[1]}"
-        )
-    if np.any(~np.isfinite(path_arr)):
-        raise ValueError("Path prices must be finite (no NaN or Inf)")
-    if np.any(path_arr < 0):
-        raise ValueError("Path prices must be non-negative")
-    return path_arr
-
-
-# =============================================================================
-# NUMBA KERNELS (Hot Path)
-# =============================================================================
-
-
-@njit(cache=True, fastmath=True)
-def _call_payoff(spots: np.ndarray, strike: float) -> np.ndarray:
-    """Vectorized call payoff: max(S - K, 0)."""
-    result = np.empty_like(spots)
-    for i in range(len(spots)):
-        result[i] = max(spots[i] - strike, 0.0)
-    return result
-
-
-@njit(cache=True, fastmath=True)
-def _put_payoff(spots: np.ndarray, strike: float) -> np.ndarray:
-    """Vectorized put payoff: max(K - S, 0)."""
-    result = np.empty_like(spots)
-    for i in range(len(spots)):
-        result[i] = max(strike - spots[i], 0.0)
-    return result
-
-
-@njit(cache=True, fastmath=True)
-def _digital_call_payoff(spots: np.ndarray, strike: float, payout: float) -> np.ndarray:
-    """Vectorized digital call payoff: payout if S >= K, else 0.
-
-    Note: Standard convention is digital call pays at spot >= strike.
-    """
-    result = np.empty_like(spots)
-    for i in range(len(spots)):
-        result[i] = payout if spots[i] >= strike else 0.0
-    return result
-
-
-@njit(cache=True, fastmath=True)
-def _digital_put_payoff(spots: np.ndarray, strike: float, payout: float) -> np.ndarray:
-    """Vectorized digital put payoff: payout if S < K, else 0."""
-    result = np.empty_like(spots)
-    for i in range(len(spots)):
-        result[i] = payout if spots[i] < strike else 0.0
-    return result
-
-
-# =============================================================================
-# PAYOFF CLASSES
-# =============================================================================
+from backend.instruments.payoffs._internals import (
+    _call_payoff,
+    _digital_call_payoff,
+    _digital_put_payoff,
+    _put_payoff,
+    _validate_spot_array,
+)
 
 
 class VanillaCallPayoff(Payoff):
@@ -407,6 +288,14 @@ class CompositePayoff(Payoff):
     def __init__(self, legs: list[tuple[int | float, Payoff]]) -> None:
         if not legs:
             raise ValueError("CompositePayoff requires at least one leg")
+        # __call__ evaluates every leg on one shared terminal-spot array; it has
+        # no per-leg path dispatch, so a path-dependent leg cannot be honoured.
+        # Reject it explicitly instead of silently mis-evaluating it on 1D spot.
+        if any(payoff.is_path_dependent for _, payoff in legs):
+            raise ValueError(
+                "CompositePayoff supports only terminal (spot-dependent) legs; "
+                "a path-dependent leg has no terminal-spot payoff here."
+            )
         self._legs = legs
 
     @property
@@ -416,7 +305,8 @@ class CompositePayoff(Payoff):
 
     @property
     def is_path_dependent(self) -> bool:
-        return any(payoff.is_path_dependent for _, payoff in self._legs)
+        # Always terminal: path-dependent legs are rejected in __init__.
+        return False
 
     def __call__(self, spot: np.ndarray) -> np.ndarray:
         spot_arr = _validate_spot_array(spot)
@@ -428,80 +318,3 @@ class CompositePayoff(Payoff):
     def __repr__(self) -> str:
         legs_str = ", ".join(f"{w}*{p}" for w, p in self._legs)
         return f"CompositePayoff([{legs_str}])"
-
-
-class LowPointForwardPayoff(Payoff):
-    """
-    Low-point forward payoff (MALP family).
-
-    Payoff: S_0 * (S_T / min(S) - 1)
-
-    Forward contract at the floating strike (path minimum), multiplied by
-    the discount factor S_0/K_float.
-
-    Examples
-    --------
-    payoff = LowPointForwardPayoff()
-    path = np.array([[100, 80, 110]])  # min=80, S_T=110, S_0=100
-    payoff(path)  # 100 * (110/80 - 1) = 37.5
-    """
-
-    @property
-    def is_path_dependent(self) -> bool:
-        return True
-
-    def __call__(self, path: np.ndarray) -> np.ndarray:
-        path_arr = _validate_path_array(path)
-        s0 = path_arr[:, 0]
-        s_t = path_arr[:, -1]
-        path_min = np.min(path_arr, axis=1)
-        path_min_safe = np.maximum(path_min, 1e-10)
-        return s0 * (s_t / path_min_safe - 1.0)
-
-    def __repr__(self) -> str:
-        return "LowPointForwardPayoff()"
-
-
-if __name__ == "__main__":
-    # Smoke test
-    print("=" * 50)
-    print("Payoffs Module Smoke Test")
-    print("=" * 50)
-
-    spots = np.array([90.0, 100.0, 110.0])
-
-    # Vanilla payoffs
-    call = VanillaCallPayoff(strike=100.0)
-    put = VanillaPutPayoff(strike=100.0)
-
-    print("\nVanilla Call (K=100):")
-    print(f"  Spots: {spots}")
-    print(f"  Payoffs: {call(spots)}")
-
-    print("\nVanilla Put (K=100):")
-    print(f"  Spots: {spots}")
-    print(f"  Payoffs: {put(spots)}")
-
-    # Digital payoffs
-    digital_call = DigitalCallPayoff(strike=100.0, payout=10.0)
-    digital_put = DigitalPutPayoff(strike=100.0, payout=10.0)
-
-    print("\nDigital Call (K=100, payout=10):")
-    print(f"  Payoffs: {digital_call(spots)}")
-
-    print("\nDigital Put (K=100, payout=10):")
-    print(f"  Payoffs: {digital_put(spots)}")
-
-    # Composite payoff (straddle)
-    straddle = CompositePayoff([(1.0, call), (1.0, put)])
-    print("\nStraddle (Call + Put at K=100):")
-    print(f"  Payoffs: {straddle(spots)}")
-
-    # Test path dependency
-    print("\nPath dependency:")
-    print(f"  Call: {call.is_path_dependent}")
-    print(f"  Straddle: {straddle.is_path_dependent}")
-
-    print("\n" + "=" * 50)
-    print("Payoffs smoke test passed")
-    print("=" * 50)

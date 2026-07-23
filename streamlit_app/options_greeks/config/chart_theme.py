@@ -28,6 +28,13 @@ CHART_COLORS = {
     "paper": "#ffffff",
 }
 
+# Shared colors of the two overlaid discrete-event outcome curves (scenario 0 =
+# base case, scenario 1 = event occurred) — used by BOTH the Portfolio P&L
+# overlay and the per-leg Exotic payoff diagram so the outcomes read the same
+# across tabs. Purple/orange: distinct from the reserved accent (#d97706) and
+# danger/barrier (#dc2626) colors.
+SCENARIO_COLORS: tuple[str, str] = ("#7c3aed", "#ea580c")
+
 # Greek-specific colors (professional palette)
 GREEK_COLORS = {
     "price": "#1a365d",

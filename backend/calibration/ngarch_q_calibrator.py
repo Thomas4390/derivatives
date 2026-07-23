@@ -104,13 +104,30 @@ class GARCHRiskNeutralCalibrator(BaseCalibrator):
         iteration_callback: Any = None,
         stationarity_mode: StationarityMode | str = StationarityMode.SOFT,
         stationarity_weight: float = DEFAULT_STATIONARITY_WEIGHT,
+        polish_nfev: int = 0,
+        polish_optimizer: OptimizerStrategy | None = None,
+        param_bounds: dict[str, tuple[float, float]] | None = None,
     ) -> None:
         if garch_type not in VALID_GARCH_TYPES:
             raise ValueError(
                 f"garch_type must be one of {VALID_GARCH_TYPES}, got {garch_type!r}"
             )
         self.garch_type = garch_type
-        self._bounds = RISK_NEUTRAL_GARCH_BOUNDS[garch_type]
+        # Per-run search box: merge any ``{param: (lo, hi)}`` override over the
+        # canonical variant box. Only keys already in the box are honoured, so a
+        # symmetric ``garch`` keeps its pinned ``gamma == (0, 0)`` unless the
+        # caller explicitly overrides it. ``None`` -> the canonical box, so
+        # default-bounds runs are unchanged.
+        base = dict(RISK_NEUTRAL_GARCH_BOUNDS[garch_type])
+        if param_bounds:
+            base.update(
+                {
+                    k: (float(v[0]), float(v[1]))
+                    for k, v in param_bounds.items()
+                    if k in base
+                }
+            )
+        self._bounds = base
         self._lo = np.array([self._bounds[p][0] for p in NGARCH_Q_PARAM_NAMES])
         self._hi = np.array([self._bounds[p][1] for p in NGARCH_Q_PARAM_NAMES])
         self.n_restarts = max(1, int(n_restarts))
@@ -132,6 +149,24 @@ class GARCHRiskNeutralCalibrator(BaseCalibrator):
         self.objective_type = self._obj_strategy.name
         self.log_iterations = bool(log_iterations)
         self.iteration_callback = iteration_callback
+        self.polish_nfev = max(0, int(polish_nfev))
+        # Final local-polish solver. Defaults to Nelder-Mead (a fresh simplex frees
+        # a stalled main NM and tightens a DE incumbent). Injectable so the polish
+        # strategy can be varied independently of the main solver — the lever used
+        # to establish that an L-BFGS-B *polish* does not rescue a stalled GJR fit
+        # (the main solver must be L-BFGS-B; see
+        # docs/calibration/garch_surface_calibration.md). Must be a scalar
+        # (derivative-free / finite-difference) solver, like the main one.
+        self.polish_optimizer = polish_optimizer or NelderMeadStrategy()
+        if self.polish_optimizer.requires_residuals:
+            raise ValueError(
+                f"GARCH-Q polish is a scalar MC problem; optimizer "
+                f"'{self.polish_optimizer.name}' requires residuals (LM-JAX) and "
+                f"cannot be used. Choose NM or L-BFGS-B."
+            )
+        # Per-maturity CRN innovations, reused across objective evaluations —
+        # the seeded draw dominates each MC surface pricing otherwise.
+        self._noise_cache: dict[tuple[int, int, float], np.ndarray] = {}
 
     # ------------------------------------------------------------------ #
     # BaseCalibrator contract
@@ -179,7 +214,11 @@ class GARCHRiskNeutralCalibrator(BaseCalibrator):
             )
         if self.garch_type == "gjr_garch":
             return GJRGARCHRiskNeutralModel(
-                omega=omega, alpha=alpha, beta=beta, gamma=gamma, h0=h0,
+                omega=omega,
+                alpha=alpha,
+                beta=beta,
+                gamma=gamma,
+                h0=h0,
                 steps_per_year=_SPY,
             )
         return NGARCHRiskNeutralModel(
@@ -204,7 +243,11 @@ class GARCHRiskNeutralCalibrator(BaseCalibrator):
             self.garch_type, omega, alpha, beta, gamma=gamma, h0=h0, steps_per_year=_SPY
         )
         return price_surface_mc(
-            sim, market_data, n_paths=self.n_paths, mc_seed=self.mc_seed
+            sim,
+            market_data,
+            n_paths=self.n_paths,
+            mc_seed=self.mc_seed,
+            noise_cache=self._noise_cache,
         )
 
     # ------------------------------------------------------------------ #
@@ -214,6 +257,7 @@ class GARCHRiskNeutralCalibrator(BaseCalibrator):
     def calibrate(self, market_data: OptionMarketData) -> CalibrationResult:
         t_start = time.perf_counter()
         rng = np.random.default_rng(self.seed)
+        self._noise_cache.clear()  # fresh CRN tape per calibration
 
         # --- ATM-IV seed (per-period scale) ---
         atm_iv = get_atm_iv(market_data)
@@ -258,8 +302,11 @@ class GARCHRiskNeutralCalibrator(BaseCalibrator):
                 max_nfev=self.max_nfev,
             )
             run_infos.append(
-                {"start": k, "loss": float(opt_res.objective_value),
-                 "nfev": opt_res.n_function_evals}
+                {
+                    "start": k,
+                    "loss": float(opt_res.objective_value),
+                    "nfev": opt_res.n_function_evals,
+                }
             )
             if best is None or opt_res.objective_value < best["loss"]:
                 best = {
@@ -271,15 +318,59 @@ class GARCHRiskNeutralCalibrator(BaseCalibrator):
                 }
 
         assert best is not None
+
+        # --- Final local polish (global→local style) --------------------------
+        # The global / multi-start phase locates the basin; a fresh local solve from
+        # the incumbent fine-tunes inside it. This matters most when the chosen main
+        # solver is Differential Evolution (a global explorer but a loose local
+        # minimiser) and also frees a stalled Nelder-Mead simplex — the nonaffine MC
+        # objective under-converges in 5-D otherwise. The polish solver is
+        # configurable (``polish_optimizer``): an L-BFGS-B polish rescues a rough
+        # objective (GJR indicator) where an NM polish stalls. Disabled
+        # (``polish_nfev == 0``) by default so it is an explicit, budgeted opt-in.
+        if self.polish_nfev > 0:
+            polish_logger = (
+                IterationLogger(problem, on_snapshot=self.iteration_callback)
+                if (self.log_iterations or self.iteration_callback)
+                else None
+            )
+            polish_res = self.polish_optimizer.solve(
+                replace(problem, x0=best["x"].copy()),
+                logger=polish_logger,
+                max_nfev=self.polish_nfev,
+            )
+            run_infos.append(
+                {
+                    "start": "polish",
+                    "loss": float(polish_res.objective_value),
+                    "nfev": polish_res.n_function_evals,
+                }
+            )
+            if polish_res.objective_value < best["loss"]:
+                polish_hist = polish_logger.history if polish_logger is not None else ()
+                best = {
+                    "loss": float(polish_res.objective_value),
+                    "x": np.asarray(polish_res.x_optimal, dtype=float),
+                    "nfev": best["nfev"] + int(polish_res.n_function_evals),
+                    "start_index": best["start_index"],
+                    "history": tuple(best["history"]) + tuple(polish_hist),
+                }
+
         eff = self._effective_params(best["x"])
         model = self._build_model(eff)
 
         # --- Reporting metrics: re-price with more paths for a stable RMSE ---
-        report_paths, self.n_paths = self.n_paths, max(self.n_paths, 80_000)
+        # One-shot 80k repricing: its noise is never reused, so drop it from the
+        # cache (and drop the optimization-loop tape, no longer needed) rather
+        # than pinning ~hundreds of MB on the instance.
+        reporting_paths = max(self.n_paths, 80_000)
+        report_paths, self.n_paths = self.n_paths, reporting_paths
         try:
+            self._noise_cache.clear()
             model_prices = self._price_natural(eff, market_data)
         finally:
             self.n_paths = report_paths
+            self._noise_cache.clear()
         rmse_price = compute_rmse_price(model_prices, market_data.market_prices)
         rmse_iv = self._rmse_iv(model_prices, market_data)
 
@@ -294,7 +385,9 @@ class GARCHRiskNeutralCalibrator(BaseCalibrator):
             "atm_iv": atm_iv,
             "objective_name": self._obj_strategy.name,
             "stationarity_mode": self.stationarity_mode.value,
-            "mc_paths": self.n_paths,
+            # The reported RMSE is computed with the 80k reporting paths, not the
+            # (restored) optimization-budget n_paths.
+            "mc_paths": reporting_paths,
         }
         if self.log_iterations:
             diagnostics["iteration_history"] = best["history"]
@@ -303,7 +396,12 @@ class GARCHRiskNeutralCalibrator(BaseCalibrator):
         logger.info(
             "%s-Q calibration done in %.2fs | RMSE_price=%.6f | RMSE_iv=%.2f bp | "
             "persistence=%.4f | nfev_best=%d",
-            self.garch_type, elapsed, rmse_price, rmse_iv, model.persistence, best["nfev"],
+            self.garch_type,
+            elapsed,
+            rmse_price,
+            rmse_iv,
+            model.persistence,
+            best["nfev"],
         )
 
         return CalibrationResult(
@@ -331,17 +429,25 @@ class GARCHRiskNeutralCalibrator(BaseCalibrator):
         box is degenerate ``[0, 0]`` so gamma stays pinned at 0.
         """
         gamma = (
-            rng.uniform(self._lo[3], self._hi[3]) if self._hi[3] > self._lo[3] else self._lo[3]
+            rng.uniform(self._lo[3], self._hi[3])
+            if self._hi[3] > self._lo[3]
+            else self._lo[3]
         )
-        return np.array([
-            10 ** rng.uniform(np.log10(self._lo[0]), np.log10(self._hi[0])),
-            10 ** rng.uniform(np.log10(self._lo[1]), np.log10(self._hi[1])),
-            rng.uniform(0.5, self._hi[2]),
-            gamma,
-            10 ** rng.uniform(np.log10(self._lo[4]), np.log10(self._hi[4])),
-        ])
+        return np.array(
+            [
+                10 ** rng.uniform(np.log10(self._lo[0]), np.log10(self._hi[0])),
+                10 ** rng.uniform(np.log10(self._lo[1]), np.log10(self._hi[1])),
+                # beta: respect the actual box lower bound (was hard-coded 0.5,
+                # which drew infeasible starts under tightened custom bounds).
+                rng.uniform(self._lo[2], self._hi[2]),
+                gamma,
+                10 ** rng.uniform(np.log10(self._lo[4]), np.log10(self._hi[4])),
+            ]
+        )
 
-    def _rmse_iv(self, model_prices: np.ndarray, market_data: OptionMarketData) -> float:
+    def _rmse_iv(
+        self, model_prices: np.ndarray, market_data: OptionMarketData
+    ) -> float:
         is_calls = np.array([q.is_call for q in market_data.quotes])
         model_ivs = model_prices_to_ivs(
             model_prices=model_prices,
@@ -353,8 +459,10 @@ class GARCHRiskNeutralCalibrator(BaseCalibrator):
             dividend_yield=market_data.dividend_yield,
         )
         market_ivs = np.array(
-            [q.implied_vol if q.implied_vol is not None else np.nan
-             for q in market_data.quotes]
+            [
+                q.implied_vol if q.implied_vol is not None else np.nan
+                for q in market_data.quotes
+            ]
         )
         valid = ~np.isnan(model_ivs) & ~np.isnan(market_ivs)
         return (
@@ -393,19 +501,35 @@ if __name__ == "__main__":
 
     quotes: list[OptionQuote] = []
     for T in maturities:
-        prices = sim.price_strikes(spot, strikes, rate, float(T), n_paths=200_000,
-                                   rng=np.random.default_rng(7))
+        prices = sim.price_strikes(
+            spot, strikes, rate, float(T), n_paths=200_000, rng=np.random.default_rng(7)
+        )
         for k, p in zip(strikes, prices):
             try:
-                iv = implied_volatility(price=float(p), spot=spot, strike=float(k),
-                                        time_to_expiry=float(T), rate=rate,
-                                        is_call=True, dividend_yield=0.0)
+                iv = implied_volatility(
+                    price=float(p),
+                    spot=spot,
+                    strike=float(k),
+                    time_to_expiry=float(T),
+                    rate=rate,
+                    is_call=True,
+                    dividend_yield=0.0,
+                )
             except (ValueError, RuntimeError):
                 iv = None
-            quotes.append(OptionQuote(strike=float(k), maturity=float(T), is_call=True,
-                                      market_price=float(max(p, 1e-6)), implied_vol=iv))
+            quotes.append(
+                OptionQuote(
+                    strike=float(k),
+                    maturity=float(T),
+                    is_call=True,
+                    market_price=float(max(p, 1e-6)),
+                    implied_vol=iv,
+                )
+            )
 
-    md = OptionMarketData(spot=spot, rate=rate, dividend_yield=0.0, quotes=tuple(quotes))
+    md = OptionMarketData(
+        spot=spot, rate=rate, dividend_yield=0.0, quotes=tuple(quotes)
+    )
     print(f"Duan NGARCH-Q synthetic surface: {md.n_quotes} quotes")
 
     cal = NGARCHRiskNeutralCalibrator(n_restarts=3, max_nfev=200, n_paths=40_000)

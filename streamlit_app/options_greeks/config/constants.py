@@ -70,6 +70,7 @@ GREEK_TITLES = {
 
 DEFAULT_SPOT_PRICE = 100.0
 DEFAULT_RISK_FREE_RATE = 0.05
+DEFAULT_DIVIDEND_YIELD = 0.0  # continuous dividend yield
 DEFAULT_IV = 25  # percentage
 DEFAULT_DTE = 31  # days
 

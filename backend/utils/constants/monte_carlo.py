@@ -19,6 +19,11 @@ from typing import Final
 DEFAULT_MC_PATHS: Final[int] = 100_000
 DEFAULT_MC_STEPS_PER_YEAR: Final[int] = 252
 
+# Default seed for the model-dependent exotic Monte-Carlo engine. A fixed seed
+# keeps a given (instrument, model, market) price reproducible across calls and
+# is the prerequisite for stable bump-and-reprice Greeks (CRN).
+DEFAULT_MC_SEED: Final[int] = 12345
+
 # ---------------------------------------------------------------------------
 # Default bump sizes for Greeks finite differences
 # ---------------------------------------------------------------------------

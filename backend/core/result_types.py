@@ -403,7 +403,9 @@ class StructuredProductResult(PricingResult):
     @property
     def fair_value(self) -> float:
         """PV as % of notional (legacy alias for fair_value_pct)."""
-        return self.fair_value_pct  # type: ignore[return-value]
+        # Coerce None -> 0.0 to honour the float annotation (and avoid a None
+        # crash in __repr__), matching the bond_floor/option_value aliases.
+        return self.fair_value_pct or 0.0
 
     @property
     def bond_floor(self) -> float:

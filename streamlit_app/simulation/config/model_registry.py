@@ -12,6 +12,10 @@ Provides comprehensive information about each model including:
 from dataclasses import dataclass
 from enum import Enum
 
+from backend.utils.logging import get_logger
+
+logger = get_logger(__name__)
+
 
 class ModelCategory(str, Enum):
     """Model categorization."""
@@ -42,6 +46,9 @@ class ParameterSpec:
     step: float
     description: str
     format: str = "%.4f"
+    # UI session-state keys that alias this parameter (tried before ``name`` when
+    # extracting), e.g. NGARCH's widget key ``gamma_ngarch`` -> canonical ``gamma``.
+    aliases: tuple[str, ...] = ()
 
 
 @dataclass
@@ -350,6 +357,9 @@ NGARCH_PARAMETERS = GARCH_PARAMETERS + [
         step=0.1,
         description="Leverage effect parameter",
         format="%.2f",
+        # The NGARCH gamma widget stores under "gamma_ngarch" to avoid colliding
+        # with the GJR gamma slider; map it back to canonical "gamma".
+        aliases=("gamma_ngarch",),
     ),
 ]
 
@@ -506,7 +516,7 @@ def get_model(key: str) -> ModelSpec:
             if custom and "spec" in custom:
                 return custom["spec"]
         except Exception:
-            pass
+            logger.debug("custom model lookup failed for key=%s", key, exc_info=True)
     raise ValueError(f"Unknown model: {key}. Available: {list(MODEL_REGISTRY.keys())}")
 
 

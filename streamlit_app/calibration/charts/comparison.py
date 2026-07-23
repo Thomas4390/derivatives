@@ -14,10 +14,9 @@ from utils.plotly_theme import (
     _SOLVER_DASH,
     _SOLVER_SYMBOL,
     COLORS,
-    FONT_FAMILY,
-    SOLVER_COLOR_MAP,
+    PALETTE,
+    adaptive_loss_axis,
     apply_lab_theme,
-    model_color,
 )
 
 # ``_SOLVER_SYMBOL`` / ``_SOLVER_DASH`` now live in ``utils.plotly_theme`` so
@@ -45,7 +44,27 @@ def _iter_flat(results: dict):
                 for obj_name, summary in slot.items():
                     yield model_key, solver_name, obj_name, summary
             else:
-                yield model_key, solver_name, getattr(slot, "objective_name", "price_mse"), slot
+                yield (
+                    model_key,
+                    solver_name,
+                    getattr(slot, "objective_name", "price_mse"),
+                    slot,
+                )
+
+
+def _series_colors(results: dict) -> dict[tuple[str, str, str], str]:
+    """A distinct palette colour per ``(model, solver, objective)`` run.
+
+    Keyed by run identity — colouring by *model* alone (or *solver* alone) made
+    several objectives of one solver, or several solvers of one model, collapse
+    to a single hue. Built from the shared ``_iter_flat`` order so a run reads the
+    same colour across the Pareto and loss overlays. ``PALETTE`` deliberately
+    excludes the amber eval / red truth hues, so the runs never clash with them.
+    """
+    return {
+        (m, s, o): PALETTE[i % len(PALETTE)]
+        for i, (m, s, o, _summary) in enumerate(_iter_flat(results))
+    }
 
 
 def _pareto_y_axis(results_iter) -> tuple[bool, str, str]:
@@ -59,8 +78,7 @@ def _pareto_y_axis(results_iter) -> tuple[bool, str, str]:
     y_title, hover_label)``.
     """
     has_price = any(
-        s.result is not None
-        and getattr(s.result, "rmse_price", None) is not None
+        s.result is not None and getattr(s.result, "rmse_price", None) is not None
         for s in results_iter
     )
     if has_price:
@@ -86,106 +104,14 @@ def _adaptive_loss_axis_kwargs(
     log_title: str,
     linear_title: str,
 ) -> dict:
-    """Pick log vs linear Plotly y-axis kwargs based on the data sign.
+    """Compare-tab wrapper over the shared :func:`adaptive_loss_axis`.
 
-    Mirrors ``charts.live_convergence._adaptive_loss_y_axis`` but takes
-    caller-supplied axis titles since the Compare-tab charts label
-    their axis "Pricing RMSE" / "Objective loss" rather than the
-    generic "Loss". Any non-positive sample (NaN-tolerant via the
-    finite filter) forces a linear axis — Plotly silently drops
-    negative samples from a log axis, which is exactly what made
-    GARCH NLL points disappear from the Pareto frontier and overlay.
-
-    Both branches set an explicit ``range`` over the actual data so
-    that animated or partially-populated figures don't lock the
-    layout onto a single sample and clip the rest.
+    The Compare charts label their axis "Pricing RMSE" / "Objective loss"
+    rather than the Live chart's generic "Loss", so they pass explicit titles;
+    the log/linear decision and range numerics come from the one shared helper
+    (previously a hand-synced copy that had already drifted a log floor).
     """
-    arr = np.asarray(
-        [v for v in values if v is not None and np.isfinite(v)],
-        dtype=np.float64,
-    )
-    if arr.size == 0:
-        return dict(type="linear", title=linear_title, tickformat=".3g")
-    if (arr <= 0.0).any():
-        ymin = float(arr.min())
-        ymax = float(arr.max())
-        span = ymax - ymin
-        pad = max(span * 0.05, abs(ymax) * 0.01, abs(ymin) * 0.01, 0.1)
-        return dict(
-            type="linear",
-            title=linear_title,
-            tickformat=".3g",
-            range=[ymin - pad, ymax + pad],
-        )
-    return dict(
-        type="log",
-        title=log_title,
-        tickformat=".0e",
-        range=[
-            # 0.1 decade of head- and foot-room: without the lower pad the
-            # marker at ``arr.min()`` is centred on the bottom plot edge
-            # and its bottom half is clipped (most visible on the Pareto
-            # frontier where the lowest-loss point reads as half a dot).
-            float(np.log10(max(arr.min(), 1e-15)) - 0.1),
-            float(np.log10(max(arr.max(), 1e-15)) + 0.1),
-        ],
-    )
-
-
-def render_pareto_chart(summaries) -> go.Figure:
-    fig = go.Figure()
-    # Iterate via _iter_per_solver to handle both legacy dict[solver, Summary]
-    # and the new dict[solver, dict[objective, Summary]] schemas.
-    summaries_list = list(_iter_per_solver(summaries))
-    use_price, y_title, hover_label = _pareto_y_axis(s for _, _, s in summaries_list)
-    collected_y: list[float] = []
-    for label, solver, s in summaries_list:
-        if s.result is None:
-            continue
-        y = _pareto_y_value(s, use_price)
-        elapsed = float(s.elapsed)
-        if np.isnan(y) or elapsed < 0:
-            continue
-        collected_y.append(y)
-        fig.add_trace(
-            go.Scatter(
-                x=[elapsed], y=[y],
-                mode="markers+text",
-                text=[label], textposition="top center",
-                textfont=dict(family=FONT_FAMILY, color=COLORS["text"], size=11),
-                marker=dict(
-                    size=22,
-                    color=SOLVER_COLOR_MAP.get(solver, COLORS["primary"]),
-                    line=dict(color=COLORS["plot"], width=2),
-                ),
-                name=label,
-                hovertemplate=(
-                    f"<b>{label}</b><br>"
-                    "elapsed %{x:.2f}s<br>"
-                    f"{hover_label} %{{y:.4e}}<extra></extra>"
-                ),
-            )
-        )
-    apply_lab_theme(fig, height=420,
-                     title="Pareto frontier  ·  ↙ ideal (fast & accurate)",
-                     legend_horizontal=False)
-    # Surface the legend so dense runs (many solvers / objectives) stay
-    # readable when the inline text annotations would otherwise overlap.
-    # The markers+text mode keeps the at-a-glance labels for the
-    # canonical, sparse case.
-    fig.update_xaxes(title="Wall-clock Time (seconds)")
-    # Drop the "(log scale)" suffix from y_title — the adaptive helper
-    # owns the scale-suffix labelling and we don't want a stale label
-    # to claim log when we actually emitted a linear axis.
-    base_title = y_title.replace(" (log scale, $)", " ($)").replace(" (log scale, NLL)", " (NLL)")
-    fig.update_yaxes(
-        **_adaptive_loss_axis_kwargs(
-            collected_y,
-            log_title=f"{base_title} (log scale)",
-            linear_title=base_title,
-        )
-    )
-    return fig
+    return adaptive_loss_axis(values, log_title=log_title, linear_title=linear_title)
 
 
 def _iter_per_solver(summaries):
@@ -217,8 +143,15 @@ def render_parameter_recovery_bars(
     true_params: dict[str, float],
 ) -> go.Figure:
     names = [k for k in true_params if k != "_model"]
+    # Distinct colour per run (solver/objective) — colouring by solver alone made
+    # several objectives of one solver collapse to one hue. Same enumeration as the
+    # overlays, so a run reads the same colour as in the single-model Pareto / loss.
+    runs = list(_iter_per_solver(summaries))
+    colors = {
+        label: PALETTE[i % len(PALETTE)] for i, (label, _sv, _s) in enumerate(runs)
+    }
     fig = go.Figure()
-    for label, solver, s in _iter_per_solver(summaries):
+    for label, _solver, s in runs:
         if s.result is None:
             continue
         errs = [s.relative_recovery_error.get(n, np.nan) * 100.0 for n in names]
@@ -227,81 +160,83 @@ def render_parameter_recovery_bars(
                 name=label,
                 x=names,
                 y=errs,
-                marker=dict(color=SOLVER_COLOR_MAP.get(solver, COLORS["primary"])),
+                marker=dict(color=colors[label]),
                 hovertemplate=f"<b>{label}</b><br>%{{x}}: %{{y:.2f}}%<extra></extra>",
             )
         )
-    apply_lab_theme(fig, height=420,
-                     title="Parameter recovery  ·  |estimated − true| / |true|")
+    # No in-figure title — the section header above the chart already labels it,
+    # and the duplicate title collided with the horizontal run legend (same fix
+    # the Pareto / loss overlays use). A log y-axis keeps the small-error bars
+    # readable when one parameter (e.g. weakly-identified kappa) recovers an order
+    # of magnitude worse than the others.
+    apply_lab_theme(fig, height=440)
     fig.update_layout(barmode="group")
     fig.update_xaxes(title="Model Parameter")
-    fig.update_yaxes(title="Relative Recovery Error (%)", ticksuffix="%")
+    fig.update_yaxes(
+        title="Relative Recovery Error (%, log)",
+        type="log",
+        ticksuffix="%",
+    )
     return fig
 
 
-def render_overlaid_loss(summaries) -> go.Figure:
-    fig = go.Figure()
-    all_y: list[float] = []
-    for label, solver, s in _iter_per_solver(summaries):
-        if s.result is None or not s.result.iteration_history:
-            continue
-        hist = s.result.iteration_history
-        x = np.array([snap.iteration for snap in hist])
-        y = np.array([snap.objective for snap in hist])
-        all_y.extend(y.tolist())
-        fig.add_trace(
-            go.Scatter(
-                x=x, y=y,
-                mode="lines",
-                line=dict(color=SOLVER_COLOR_MAP.get(solver, COLORS["primary"]), width=2.4),
-                name=label,
-            )
-        )
-    # Adapt the y-axis to the data: surface RSS/2 spans many decades and
-    # benefits from log scale, GARCH NLL crosses zero and needs linear
-    # (Plotly drops non-positive samples from a log axis).
-    y_kwargs = _adaptive_loss_axis_kwargs(
-        all_y,
-        log_title="Objective  ½‖r‖²  (log scale)",
-        linear_title="Objective",
-    )
-    title_scale = "log scale" if y_kwargs["type"] == "log" else "linear"
-    apply_lab_theme(
-        fig, height=420,
-        title=f"Convergence comparison  ·  every solver superimposed ({title_scale})",
-    )
-    fig.update_xaxes(title="Objective Evaluation Count")
-    fig.update_yaxes(**y_kwargs)
-    return fig
+def garch_q_aggregate_recovery(
+    summaries, model_key: str, true_params: dict[str, float]
+) -> list[dict]:
+    """Identified-aggregate recovery rows for the nonaffine GARCH-Q trio.
 
+    An option surface only weakly identifies ω, γ and h₀ individually
+    (Christoffersen-Jacobs 2004): many (ω, γ, h₀) triples price almost the same
+    smile. What it *does* pin down are two aggregates — the variance
+    **persistence** and the annualised **long-run volatility** σ_LT. This builds
+    one ``Run`` row per fit comparing those aggregates against the generator's
+    truth, reading both sides off the model's own diagnostics (same formula on
+    each side). The first row is the generator truth. Returns ``[]`` when the
+    generator is not one of the MC-priced GARCH-Q models.
+    """
+    from backend.models.ngarch_q import (
+        GARCHRiskNeutralModel,
+        GJRGARCHRiskNeutralModel,
+        NGARCHRiskNeutralModel,
+    )
 
-def comparison_table(summaries) -> list[dict]:
-    rows = []
+    classes = {
+        "ngarch_q": NGARCHRiskNeutralModel,
+        "garch_q": GARCHRiskNeutralModel,
+        "gjr_q": GJRGARCHRiskNeutralModel,
+    }
+    cls = classes.get(model_key)
+    if cls is None:
+        return []
+    true_model = cls(**{k: float(v) for k, v in true_params.items() if k != "_model"})
+    tp = float(true_model.persistence)
+    tsig = float(true_model.long_run_volatility) * 100.0
+    rows: list[dict] = [
+        {
+            "Run": "🎯 True (generator)",
+            "Persistence": tp,
+            "|Δ persist|": 0.0,
+            "σ_LT ann (%)": tsig,
+            "|Δ σ_LT| (%)": 0.0,
+        }
+    ]
     for label, _solver, s in _iter_per_solver(summaries):
-        if s.result is None:
-            rows.append({
-                "Solver": label, "Status": "✗ failed",
-                "RMSE price": np.nan, "RMSE IV (bps)": np.nan,
-                "Iterations": 0,
-                "Elapsed (s)": s.elapsed if s.elapsed >= 0 else np.nan,
-                # Surface the exception text so the user can diagnose
-                # without digging through the console. Empty for runs
-                # that finished cleanly. Full traceback is logged via
-                # logger.exception in calibrate_many / live_runner.
-                "Error": s.error or "",
-            })
+        if s.result is None or getattr(s.result, "model", None) is None:
             continue
-        rows.append({
-            "Solver": label,
-            "Status": "✓" if s.result.success else "⚠",
-            "RMSE price": float(s.result.rmse_price) if s.result.rmse_price is not None else np.nan,
-            # rmse_iv is stored as a decimal (e.g. 0.002) — multiply by 1e4 to
-            # match the column header that promises basis points.
-            "RMSE IV (bps)": float(s.result.rmse_iv) * 1e4 if s.result.rmse_iv is not None else np.nan,
-            "Iterations": int(s.result.n_iterations),
-            "Elapsed (s)": float(s.elapsed),
-            "Error": "",
-        })
+        m = s.result.model
+        if not hasattr(m, "persistence"):
+            continue
+        p = float(m.persistence)
+        sig = float(m.long_run_volatility) * 100.0
+        rows.append(
+            {
+                "Run": label,
+                "Persistence": p,
+                "|Δ persist|": abs(p - tp),
+                "σ_LT ann (%)": sig,
+                "|Δ σ_LT| (%)": abs(sig - tsig),
+            }
+        )
     return rows
 
 
@@ -309,10 +244,9 @@ def comparison_table(summaries) -> list[dict]:
 # Multi-model variants
 # ──────────────────────────────────────────────────────────────────────
 # Each accepts ``results: dict[model_key, dict[solver_name, summary]]``
-# and overlays every ``(model, solver)`` pair on the same chart. Colour
-# is keyed by model (so the eye associates "Heston is teal" across the
-# whole app), shape/dash by solver, so the user can read both axes at a
-# glance.
+# and overlays every ``(model, solver, objective)`` run on the same chart.
+# Colour is keyed per run (so several objectives of one solver, or several
+# solvers of one model, never collapse to a single hue); shape/dash = solver.
 
 
 def multi_comparison_table(results: dict) -> list[dict]:
@@ -323,73 +257,80 @@ def multi_comparison_table(results: dict) -> list[dict]:
         if s.result is None:
             status = (
                 "⊘ skipped"
-                if (s.error or "").startswith("solver '") and "not supported" in (s.error or "")
+                if (s.error or "").startswith("solver '")
+                and "not supported" in (s.error or "")
                 else "✗ failed"
             )
-            rows.append({
+            rows.append(
+                {
+                    "Model": model_label,
+                    "Solver": solver_name,
+                    "Objective": obj_name,
+                    "Status": status,
+                    "RMSE price": np.nan,
+                    "RMSE IV (bps)": np.nan,
+                    "Final loss": np.nan,
+                    "Grad norm": np.nan,
+                    "Iterations": 0,
+                    "Elapsed (s)": s.elapsed if s.elapsed >= 0 else np.nan,
+                    # Surface the exception text so the user can diagnose
+                    # without digging through the console. Empty for runs
+                    # that finished cleanly. Full traceback is logged via
+                    # logger.exception in live_runner.
+                    "Error": s.error or "",
+                }
+            )
+            continue
+        rows.append(
+            {
                 "Model": model_label,
                 "Solver": solver_name,
                 "Objective": obj_name,
-                "Status": status,
-                "RMSE price": np.nan,
-                "RMSE IV (bps)": np.nan,
-                "Final loss": np.nan,
-                "Grad norm": np.nan,
-                "Iterations": 0,
-                "Elapsed (s)": s.elapsed if s.elapsed >= 0 else np.nan,
-                # Surface the exception text so the user can diagnose
-                # without digging through the console. Empty for runs
-                # that finished cleanly. Full traceback is logged via
-                # logger.exception in calibrate_many / live_runner.
-                "Error": s.error or "",
-            })
-            continue
-        rows.append({
-            "Model": model_label,
-            "Solver": solver_name,
-            "Objective": obj_name,
-            "Status": (
-                "⏸ stopped"
-                if getattr(s, "partial", False)
-                else "✓"
-                if s.result.success
-                else "⚠"
-            ),
-            "RMSE price": (
-                float(s.result.rmse_price)
-                if s.result.rmse_price is not None else np.nan
-            ),
-            "RMSE IV (bps)": (
-                float(s.result.rmse_iv) * 1e4
-                if s.result.rmse_iv is not None else np.nan
-            ),
-            # ``final_loss`` reads ``result.objective_value``, which is set
-            # for every calibrator (surface uses RSS/2, GARCH uses NLL).
-            # The previous "Objective loss" column was sourced from
-            # ``diag["objective_loss"]`` — populated for Heston/Bates/
-            # Merton only and NaN for GARCH-family, making the column
-            # half-empty.
-            "Final loss": (
-                float(s.final_loss) if s.final_loss is not None else np.nan
-            ),
-            # Only solvers that touch the gradient surface (L-BFGS-B,
-            # LM-JAX, GARCH MLE) populate this; DE / NM leave it None
-            # and the dataframe renders it as "—".
-            "Grad norm": (
-                float(s.grad_norm) if s.grad_norm is not None else np.nan
-            ),
-            "Iterations": int(s.result.n_iterations),
-            "Elapsed (s)": float(s.elapsed),
-            "Error": "",
-        })
+                "Status": (
+                    "⏸ stopped"
+                    if getattr(s, "partial", False)
+                    else "✓"
+                    if s.result.success
+                    else "⚠"
+                ),
+                "RMSE price": (
+                    float(s.result.rmse_price)
+                    if s.result.rmse_price is not None
+                    else np.nan
+                ),
+                "RMSE IV (bps)": (
+                    float(s.result.rmse_iv) if s.result.rmse_iv is not None else np.nan
+                ),
+                # ``final_loss`` reads ``result.objective_value``, which is set
+                # for every calibrator (surface uses RSS/2, GARCH uses NLL).
+                # The previous "Objective loss" column was sourced from
+                # ``diag["objective_loss"]`` — populated for Heston/Bates/
+                # Merton only and NaN for GARCH-family, making the column
+                # half-empty.
+                "Final loss": (
+                    float(s.final_loss) if s.final_loss is not None else np.nan
+                ),
+                # Only solvers that touch the gradient surface (L-BFGS-B,
+                # LM-JAX, GARCH MLE) populate this; DE / NM leave it None
+                # and the dataframe renders it as "—".
+                "Grad norm": (
+                    float(s.grad_norm) if s.grad_norm is not None else np.nan
+                ),
+                "Iterations": int(s.result.n_iterations),
+                "Elapsed (s)": float(s.elapsed),
+                "Error": "",
+            }
+        )
     return rows
 
 
-def render_multi_pareto(results: dict, *, visible_models: set[str] | None = None) -> go.Figure:
+def render_multi_pareto(
+    results: dict, *, visible_models: set[str] | None = None
+) -> go.Figure:
     """Pareto frontier overlaying all ``(model, solver, objective)`` triples.
 
-    Colour = model · marker shape = solver. ``visible_models`` lets a
-    chart-level view-filter hide a subset without re-running.
+    A distinct colour per run (model, solver, objective) · marker shape = solver.
+    ``visible_models`` lets a chart-level view-filter hide a subset without re-running.
 
     The y-axis is the **pricing RMSE** when at least one displayed
     result exposes it (surface models) and falls back to the
@@ -400,12 +341,15 @@ def render_multi_pareto(results: dict, *, visible_models: set[str] | None = None
     """
     fig = go.Figure()
     visible_summaries = [
-        s for model_key, _, _, s in _iter_flat(results)
+        s
+        for model_key, _, _, s in _iter_flat(results)
         if (visible_models is None or model_key in visible_models)
         and s.result is not None
     ]
     use_price, y_title, hover_label = _pareto_y_axis(visible_summaries)
+    colors = _series_colors(results)
     collected_y: list[float] = []
+    dropped_labels: list[str] = []
     for model_key, solver_name, obj_name, s in _iter_flat(results):
         if visible_models is not None and model_key not in visible_models:
             continue
@@ -414,12 +358,18 @@ def render_multi_pareto(results: dict, *, visible_models: set[str] | None = None
         y = _pareto_y_value(s, use_price)
         elapsed = float(s.elapsed)
         if np.isnan(y) or elapsed < 0:
+            # On a price axis, returns-family runs (no rmse_price) map to NaN
+            # and would vanish with no trace. Record them so a caption can name
+            # the hidden runs instead of dropping them silently.
+            if use_price and _pareto_y_value(s, False) == _pareto_y_value(s, False):
+                dropped_labels.append(_label(model_key, solver_name, obj_name))
             continue
         collected_y.append(y)
-        col = model_color(model_key)
+        col = colors[(model_key, solver_name, obj_name)]
         fig.add_trace(
             go.Scatter(
-                x=[elapsed], y=[y],
+                x=[elapsed],
+                y=[y],
                 mode="markers",
                 marker=dict(
                     size=18,
@@ -446,7 +396,9 @@ def render_multi_pareto(results: dict, *, visible_models: set[str] | None = None
     fig.update_xaxes(title="Wall-clock Time (seconds)")
     # Drop the "(log scale, $)"/"(log scale, NLL)" suffix already baked
     # into ``y_title`` — the adaptive helper appends the actual scale.
-    base_title = y_title.replace(" (log scale, $)", " ($)").replace(" (log scale, NLL)", " (NLL)")
+    base_title = y_title.replace(" (log scale, $)", " ($)").replace(
+        " (log scale, NLL)", " (NLL)"
+    )
     fig.update_yaxes(
         **_adaptive_loss_axis_kwargs(
             collected_y,
@@ -454,11 +406,33 @@ def render_multi_pareto(results: dict, *, visible_models: set[str] | None = None
             linear_title=base_title,
         )
     )
+    if dropped_labels:
+        # The price axis can't place returns-family runs (they don't price
+        # quotes). Name them so they aren't silently missing from the frontier.
+        shown = ", ".join(dropped_labels[:4])
+        if len(dropped_labels) > 4:
+            shown += f" +{len(dropped_labels) - 4} more"
+        fig.add_annotation(
+            text=(
+                f"⚠ {len(dropped_labels)} returns-family run(s) not shown on the "
+                f"price axis: {shown}"
+            ),
+            xref="paper",
+            yref="paper",
+            x=0.0,
+            y=1.02,
+            xanchor="left",
+            yanchor="bottom",
+            showarrow=False,
+            font=dict(size=11, color=COLORS["text_muted"]),
+        )
     return fig
 
 
-def render_multi_overlaid_loss(results: dict, *, visible_models: set[str] | None = None) -> go.Figure:
-    """Loss curve per ``(model, solver, objective)``. Colour = model · dash = solver.
+def render_multi_overlaid_loss(
+    results: dict, *, visible_models: set[str] | None = None
+) -> go.Figure:
+    """Loss curve per ``(model, solver, objective)``. Distinct colour per run · dash = solver.
 
     The y-axis switches to linear when any displayed objective dips
     non-positive (GARCH MLE minimises ``-log_likelihood`` which is
@@ -466,20 +440,22 @@ def render_multi_overlaid_loss(results: dict, *, visible_models: set[str] | None
     drop those points and leave the overlay looking empty.
     """
     fig = go.Figure()
+    colors = _series_colors(results)
     all_y: list[float] = []
     for model_key, solver_name, obj_name, s in _iter_flat(results):
         if visible_models is not None and model_key not in visible_models:
             continue
         if s.result is None or not s.result.iteration_history:
             continue
-        col = model_color(model_key)
+        col = colors[(model_key, solver_name, obj_name)]
         hist = s.result.iteration_history
         x = np.array([snap.iteration for snap in hist])
         y = np.array([snap.objective for snap in hist])
         all_y.extend(y.tolist())
         fig.add_trace(
             go.Scatter(
-                x=x, y=y,
+                x=x,
+                y=y,
                 mode="lines",
                 line=dict(
                     color=col,

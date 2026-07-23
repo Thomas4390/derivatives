@@ -13,8 +13,10 @@ Semantics
 vector of model prices aligned with `market_data.quotes`.
 
 Edge cases handled:
-- Mixed call/put quotes at the same maturity: the engine is called once
-  for the majority type via FFT, and put-call parity converts the rest.
+- Mixed call/put quotes at the same maturity: calls and puts are priced by
+  two separate FFT passes (calls with positive damping, puts with the direct
+  negative-damping Carr-Madan transform), so deep-OTM puts stay accurate
+  instead of being recovered by a catastrophic call+parity subtraction.
 - Non-positive prices: clamped to 0 (arbitrage violation near deep OTM).
 
 Author: Thomas Vaudescal
@@ -62,6 +64,36 @@ class MCTerminalSimulator(Protocol):
     ) -> np.ndarray: ...
 
 
+class NoiseReplayTerminalSimulator(MCTerminalSimulator, Protocol):
+    """Terminal simulator whose innovations can be pre-drawn and replayed.
+
+    Lets a calibration objective draw the (parameter-independent) common
+    random numbers once and reuse them across optimizer evaluations instead
+    of re-drawing the identical innovations at every call.
+    """
+
+    def draw_terminal_noise(
+        self,
+        t: float,
+        *,
+        n_paths: int,
+        rng: np.random.Generator,
+        antithetic: bool = ...,
+    ) -> np.ndarray: ...
+
+    def terminals(  # noqa: D102 -- widens the base protocol with ``noise``
+        self,
+        s0: float,
+        r: float,
+        t: float,
+        *,
+        n_paths: int,
+        rng: np.random.Generator,
+        antithetic: bool = ...,
+        noise: np.ndarray | None = ...,
+    ) -> np.ndarray: ...
+
+
 def price_surface(
     model,  # noqa: ANN001
     market_data: OptionMarketData,
@@ -102,24 +134,27 @@ def price_surface(
     for T in market_data.unique_maturities:
         quotes = market_data.quotes_for_maturity(float(T))
         strikes = np.array([q.strike for q in quotes])
-        is_call_template = quotes[0].is_call
+        is_call = np.array([q.is_call for q in quotes], dtype=bool)
 
-        template = VanillaOption(
-            strike=float(strikes[0]),
-            maturity=float(T),
-            is_call=is_call_template,
-        )
-        prices = engine.price_strikes(template, model, market, strikes)
+        # Two FFT passes per maturity (calls and puts). The put pass uses the
+        # engine's direct negative-damping transform, so deep-OTM puts are exact
+        # rather than reconstructed by a catastrophic call+parity subtraction.
+        prices_T = np.empty(len(quotes))
+        for want_call in (True, False):
+            mask = is_call == want_call
+            if not mask.any():
+                continue
+            template = VanillaOption(
+                strike=float(strikes[mask][0]),
+                maturity=float(T),
+                is_call=bool(want_call),
+            )
+            prices_T[mask] = engine.price_strikes(
+                template, model, market, strikes[mask]
+            )
 
-        disc_spot = market_data.spot * np.exp(-market_data.dividend_yield * float(T))
-        for i, q in enumerate(quotes):
-            price = prices[i]
-            if q.is_call != is_call_template:
-                # Put-call parity: C - P = S*exp(-qT) - K*exp(-rT)
-                fwd_diff = disc_spot - q.strike * np.exp(-market_data.rate * float(T))
-                price = price + fwd_diff if q.is_call else price - fwd_diff
-            prices_out[idx] = max(float(price), 0.0)
-            idx += 1
+        prices_out[idx : idx + len(quotes)] = np.maximum(prices_T, 0.0)
+        idx += len(quotes)
 
     return prices_out
 
@@ -162,16 +197,27 @@ def price_surface_mc(
     *,
     n_paths: int = 30_000,
     mc_seed: int = 12_345,
+    noise_cache: dict[tuple[int, int, float], np.ndarray] | None = None,
 ) -> np.ndarray:
     """Monte-Carlo counterpart of :func:`price_surface` for nonaffine models.
 
     Prices every quote of an option surface under a risk-neutral GARCH simulator
     (Duan NGARCH-Q, physical-GARCH model-implied surface) by simulating terminal
-    prices once per maturity and reusing them across that maturity's strikes. A
-    single ``Generator(mc_seed)`` drives the whole surface so the result is
-    reproducible across optimizer evaluations (common random numbers) — the key
-    to a smooth objective for the derivative-free / finite-difference solvers the
-    NGARCH-Q calibrator uses.
+    prices once per maturity (with **antithetic variates**) and reusing them across
+    that maturity's strikes. A single ``Generator(mc_seed)`` drives the whole
+    surface so the result is reproducible across optimizer evaluations (common
+    random numbers) — the key to a smooth objective for the derivative-free /
+    finite-difference solvers the NGARCH-Q calibrator uses.
+
+    ``noise_cache`` (opt-in; requires a :class:`NoiseReplayTerminalSimulator`)
+    stores the per-maturity innovations across calls: the CRN design re-draws
+    bit-identical normals at every objective evaluation, and for the GARCH-Q
+    kernels that draw dominates the evaluation cost. Within one optimization the
+    cache keys are stable, so every call is either all-misses (first evaluation,
+    draws sequential from ``Generator(mc_seed)`` exactly as without the cache)
+    or all-hits — the returned prices are bit-identical either way. The caller
+    owns the dict and its lifetime (clear it to release ~8 bytes × n_paths/2 ×
+    total steps).
 
     Returns model prices aligned 1-to-1 with ``market_data.quotes``.
     """
@@ -182,10 +228,32 @@ def price_surface_mc(
         quotes = market_data.quotes_for_maturity(float(T))
         strikes = np.array([q.strike for q in quotes], dtype=float)
         is_call = np.array([q.is_call for q in quotes], dtype=bool)
-        terminals = simulator.terminals(
-            market_data.spot, market_data.rate, float(T),
-            n_paths=n_paths, rng=rng, antithetic=True,
-        )
+        if noise_cache is not None:
+            key = (mc_seed, n_paths, float(T))
+            noise = noise_cache.get(key)
+            if noise is None:
+                noise = simulator.draw_terminal_noise(  # type: ignore[attr-defined]
+                    float(T), n_paths=n_paths, rng=rng, antithetic=True
+                )
+                noise_cache[key] = noise
+            terminals = simulator.terminals(
+                market_data.spot,
+                market_data.rate,
+                float(T),
+                n_paths=n_paths,
+                rng=rng,
+                antithetic=True,
+                noise=noise,  # type: ignore[call-arg]
+            )
+        else:
+            terminals = simulator.terminals(
+                market_data.spot,
+                market_data.rate,
+                float(T),
+                n_paths=n_paths,
+                rng=rng,
+                antithetic=True,
+            )
         disc = float(np.exp(-market_data.rate * float(T)))
         calls = disc * np.maximum(terminals[:, None] - strikes[None, :], 0.0).mean(0)
         puts = disc * np.maximum(strikes[None, :] - terminals[:, None], 0.0).mean(0)

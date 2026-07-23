@@ -34,12 +34,14 @@ from utils.chart_helpers import spread_annotations
 from backend.simulation.base import SimulationResult
 
 # ── Color palette ─────────────────────────────────────────────────────────
-_GREEN = "rgba(34, 197, 94, 0.40)"
-_RED = "rgba(239, 68, 68, 0.32)"
-_BLUE = "rgba(99, 160, 255, 0.35)"
+# Path-line colors are stored as base RGB; the alpha (opacity) is applied at
+# render time via _rgba() so it can scale with the displayed path count.
+_RGB_GREEN = (34, 197, 94)  # profitable paths (P&L >= 0)
+_RGB_RED = (239, 68, 68)  # loss paths (P&L < 0)
+_RGB_BLUE = (99, 160, 255)  # neutral paths (no strategy)
+_RGB_VOL = (255, 160, 50)  # neutral volatility paths
 _BAND_FILL = "rgba(250, 204, 21, 0.12)"
 _BAND_EDGE = "#e5b820"
-_VOL_ORANGE = "rgba(255, 160, 50, 0.35)"
 _VOL_BAND_FILL = "rgba(255, 160, 50, 0.18)"
 _VOL_BAND_EDGE = "#ffa032"
 _BE_LINE = "#a78bfa"
@@ -68,6 +70,14 @@ from config.chart_theme import (
     PLOT_BG as _PLOT_BG,
     badge as _badge,
 )
+from config.constants import (
+    MAX_PATH_DISPLAY_CAP,
+    N_DENSITY_BINS,
+    PATH_ALPHA_BASE,
+    PATH_ALPHA_MAX,
+    PATH_ALPHA_MIN,
+    PATH_ALPHA_REF_N,
+)
 
 MODEL_DISPLAY_NAMES = {
     "gbm": "GBM",
@@ -91,6 +101,10 @@ def render_simulation_chart(
     exotic_metadata: list[dict] | None = None,
     exotic_viz: dict[str, Any] | None = None,
     overlay_fn: Any | None = None,
+    path_view: str = "Lines",
+    path_alpha: float | None = None,
+    balanced_sampling: bool = False,
+    sort_vol_pnl: bool = True,
 ) -> None:
     """Render price paths + volatility paths chart with exotic overlays.
 
@@ -99,6 +113,24 @@ def render_simulation_chart(
     overlay_fn : callable, optional
         Called as ``overlay_fn(fig, price_paths, time_grid, idx_sample)``
         just before the chart is displayed. Use to add custom overlays.
+    path_view : {"Lines", "Density"}, default "Lines"
+        ``"Lines"`` draws individual sampled trajectories; ``"Density"`` draws a
+        2D histogram of *all* paths (diverging green/red by P&L sign when P&L is
+        available). Per-path exotic/structured overlays are skipped in density
+        mode.
+    path_alpha : float, optional
+        Per-line opacity for ``"Lines"`` view. ``None`` auto-scales the opacity
+        down with the displayed path count (see :func:`_auto_alpha`).
+    balanced_sampling : bool, default False
+        When True and P&L is available, sample profit and loss paths in equal
+        numbers so a rare outcome stays visible.
+    sort_vol_pnl : bool, default True
+        When True, the (stochastic-vol) volatility panel shows the P&L extremes —
+        the bottom ``n_display // 2`` (lowest P&L) and top ``n_display - n_display
+        // 2`` (highest P&L) paths — coloured by sign, losses behind and profits
+        on top, for a best/worst overview. When False it reuses the price panel's
+        sampled, majority-first groups. No effect on the density view or
+        constant-vol models.
     """
     chars = get_model_characteristics(model_key)
     has_vol = chars["has_stochastic_vol"] and result.volatility_paths is not None
@@ -127,42 +159,67 @@ def render_simulation_chart(
     time_grid = result.time_grid
     n_paths = result.price_paths.shape[0]
 
-    # Sample indices
+    # Path colors — opacity scales down with the number of paths actually drawn
+    # (min of the display cap and what was simulated) unless explicitly overridden.
+    alpha = path_alpha if path_alpha is not None else _auto_alpha(min(n_display, n_paths))
+    c_green = _rgba(_RGB_GREEN, alpha)
+    c_red = _rgba(_RGB_RED, alpha)
+    c_blue = _rgba(_RGB_BLUE, alpha)
+    c_vol = _rgba(_RGB_VOL, alpha)
+
+    # Sample indices (seeded → stable subset across reruns, no flicker).
+    rng = np.random.default_rng(_sample_seed(result.price_paths, n_display))
     if n_paths > n_display:
-        idx_sample = np.random.choice(n_paths, n_display, replace=False)
+        if has_pnl and balanced_sampling:
+            idx_sample = _balanced_sample(pnl_values, n_paths, n_display, rng)
+        else:
+            idx_sample = rng.choice(n_paths, n_display, replace=False)
     else:
         idx_sample = np.arange(n_paths)
 
-    # ── Price paths ──────────────────────────────────────────────────────
+    # P&L groups, ordered so the majority outcome draws first (bottom) and the
+    # minority draws last (on top) — keeps a rare outcome from being buried.
+    # Also drives the volatility panel below (line-based in Lines view), so the
+    # split indices are built regardless of path_view.
+    pnl_order: list[tuple[np.ndarray, str, str, str]] = []
+    prof_idx = loss_idx = np.empty(0, dtype=int)
     if has_pnl:
         profit_mask = pnl_values[idx_sample] >= 0
-        _add_paths(
+        prof_idx, loss_idx = idx_sample[profit_mask], idx_sample[~profit_mask]
+        if prof_idx.size >= loss_idx.size:
+            pnl_order = [
+                (prof_idx, c_green, "Profit", "profit"),
+                (loss_idx, c_red, "Loss", "loss"),
+            ]
+        else:
+            pnl_order = [
+                (loss_idx, c_red, "Loss", "loss"),
+                (prof_idx, c_green, "Profit", "profit"),
+            ]
+
+    # ── Price paths ──────────────────────────────────────────────────────
+    if path_view == "Density":
+        _add_density(
             fig,
             time_grid,
             result.price_paths,
-            idx_sample[profit_mask],
-            _GREEN,
-            "Profit",
-            "profit",
+            pnl_values if has_pnl else None,
             row=1,
+            hover_label="Price",
+            value_fmt="$%{y:.2f}",
         )
-        _add_paths(
-            fig,
-            time_grid,
-            result.price_paths,
-            idx_sample[~profit_mask],
-            _RED,
-            "Loss",
-            "loss",
-            row=1,
-        )
+        if has_pnl:
+            _add_density_legend(fig)
+    elif has_pnl:
+        for ind, color, name, grp in pnl_order:
+            _add_paths(fig, time_grid, result.price_paths, ind, color, name, grp, row=1)
     else:
         _add_paths(
             fig,
             time_grid,
             result.price_paths,
             idx_sample,
-            _BLUE,
+            c_blue,
             "Path",
             "paths",
             row=1,
@@ -216,8 +273,10 @@ def render_simulation_chart(
             )
 
     # ── Exotic overlays ──────────────────────────────────────────────────
+    # Per-path overlays highlight individual sampled lines — meaningless on a
+    # density heatmap, so skip them there.
     _eviz = exotic_viz or {}
-    if exotic_metadata and _eviz.get("show_overlays", True):
+    if path_view != "Density" and exotic_metadata and _eviz.get("show_overlays", True):
         _add_exotic_overlays(
             fig,
             result.price_paths,
@@ -232,38 +291,48 @@ def render_simulation_chart(
     if has_vol:
         vol_paths = result.volatility_paths
 
-        if has_pnl:
-            _add_paths(
+        if path_view == "Density":
+            # Mirror the price panel: a density heatmap of all vol paths.
+            _add_density(
                 fig,
                 time_grid,
                 vol_paths * 100,
-                idx_sample[profit_mask],
-                _GREEN,
-                None,
-                "profit",
+                pnl_values if has_pnl else None,
                 row=2,
-                show_legend=False,
-                hover_fmt="<b>Volatility:</b> %{y:.2f}%",
+                hover_label="Volatility",
+                value_fmt="%{y:.2f}%",
             )
-            _add_paths(
-                fig,
-                time_grid,
-                vol_paths * 100,
-                idx_sample[~profit_mask],
-                _RED,
-                None,
-                "loss",
-                row=2,
-                show_legend=False,
-                hover_fmt="<b>Volatility:</b> %{y:.2f}%",
-            )
+        elif has_pnl:
+            # P&L extremes overview: the worst and best n_display//2 paths,
+            # coloured by sign, losses behind and profits on top. Otherwise reuse
+            # the price panel's sampled, majority-first groups.
+            if sort_vol_pnl:
+                sel = _pnl_extremes(pnl_values, n_paths, n_display)
+                sel_loss = sel[pnl_values[sel] < 0]
+                sel_prof = sel[pnl_values[sel] >= 0]
+                vol_groups = [(sel_loss, c_red, "loss"), (sel_prof, c_green, "profit")]
+            else:
+                vol_groups = [(ind, color, grp) for ind, color, _n, grp in pnl_order]
+            for ind, color, grp in vol_groups:
+                _add_paths(
+                    fig,
+                    time_grid,
+                    vol_paths * 100,
+                    ind,
+                    color,
+                    None,
+                    grp,
+                    row=2,
+                    show_legend=False,
+                    hover_fmt="<b>Volatility:</b> %{y:.2f}%",
+                )
         else:
             _add_paths(
                 fig,
                 time_grid,
                 vol_paths * 100,
                 idx_sample,
-                _VOL_ORANGE,
+                c_vol,
                 "Vol Path",
                 "vol",
                 row=2,
@@ -358,8 +427,9 @@ def render_simulation_chart(
     if has_vol:
         fig.update_xaxes(showticklabels=False, row=1, col=1)
 
-    # Custom overlays (e.g. structured product barriers/triggers)
-    if overlay_fn is not None:
+    # Custom overlays (e.g. structured product barriers/triggers) — per-path,
+    # so skip them on the density heatmap.
+    if overlay_fn is not None and path_view != "Density":
         overlay_fn(fig, result.price_paths, time_grid, idx_sample)
 
     spread_annotations(fig)
@@ -380,26 +450,242 @@ def _add_paths(
     row=1,
     show_legend=True,
     hover_fmt="<b>Price:</b> $%{y:.2f}",
+    width=0.7,
 ):
-    """Add a batch of paths to the figure."""
+    """Add a batch of paths to the figure as a single nan-separated trace.
+
+    All paths in the batch are concatenated into one ``go.Scatter`` with a
+    ``nan`` separator between consecutive paths (breaking the line). This keeps
+    the trace count at one per group instead of one per path, so thousands of
+    paths render without choking Plotly.
+    """
+    n = len(indices)
+    if n == 0:  # empty group (e.g. profit_mask all True/False)
+        return
+    t = np.asarray(time_grid, dtype=float)
+    m = t.size
+    x = np.tile(np.concatenate([t, [np.nan]]), n)
+    y_block = np.empty((n, m + 1), dtype=float)
+    y_block[:, :m] = data[indices]  # fancy index → copy, inputs untouched
+    y_block[:, m] = np.nan
     ht = f"<b>Time:</b> %{{x:.2f}} yr<br>{hover_fmt}<extra></extra>"
-    first = True
-    for idx in indices:
+    fig.add_trace(
+        go.Scatter(
+            x=x,
+            y=y_block.ravel(),
+            mode="lines",
+            line=dict(width=width, color=color),
+            name=legend_name,
+            showlegend=(show_legend and legend_name is not None),
+            legendgroup=legend_group,
+            connectgaps=False,
+            hovertemplate=ht,
+        ),
+        row=row,
+        col=1,
+    )
+
+
+def _rgba(base_rgb: tuple[int, int, int], alpha: float) -> str:
+    """Build a Plotly ``rgba(...)`` string from a base RGB triple and an alpha."""
+    r, g, b = base_rgb
+    return f"rgba({r}, {g}, {b}, {alpha})"
+
+
+def _auto_alpha(n: int) -> float:
+    """Per-line opacity that decreases with the displayed path count ``n``.
+
+    Many overlapping low-alpha lines compose into a readable density field
+    rather than a solid block of color. Anchored so ``n = PATH_ALPHA_REF_N``
+    yields ``PATH_ALPHA_BASE`` and clipped to ``[PATH_ALPHA_MIN, PATH_ALPHA_MAX]``.
+    """
+    raw = PATH_ALPHA_BASE * np.sqrt(PATH_ALPHA_REF_N / max(n, 1))
+    return float(np.clip(raw, PATH_ALPHA_MIN, PATH_ALPHA_MAX))
+
+
+def _sample_seed(price_paths: np.ndarray, n_display: int) -> int:
+    """Deterministic RNG seed from the data + display count (stable per rerun)."""
+    term_sum = float(np.nansum(price_paths[:, -1]))
+    return (abs(int(term_sum * 100.0)) + n_display * 1_000_003) & 0x7FFFFFFF
+
+
+def _balanced_sample(
+    pnl_values: np.ndarray,
+    n_paths: int,
+    n_display: int,
+    rng: np.random.Generator,
+) -> np.ndarray:
+    """Sample path indices with the profit/loss classes balanced ~50/50.
+
+    Draws up to ``n_display // 2`` from each P&L sign so a rare outcome stays
+    visible; any shortfall on one side is backfilled from the other. Degrades to
+    a uniform draw when only one class is present. Callers invoke this only when
+    ``n_paths > n_display``, so the combined pool always covers ``n_display`` and
+    exactly ``n_display`` indices are returned.
+    """
+    profit_idx = np.flatnonzero(pnl_values >= 0)
+    loss_idx = np.flatnonzero(pnl_values < 0)
+    if profit_idx.size == 0 or loss_idx.size == 0:  # single class → uniform
+        return rng.choice(n_paths, n_display, replace=False)
+
+    half = n_display // 2
+    n_profit = min(half, profit_idx.size)
+    n_loss = min(n_display - n_profit, loss_idx.size)
+    remaining = n_display - n_profit - n_loss
+    if remaining > 0:  # loss side was short — backfill from profit
+        add = min(remaining, profit_idx.size - n_profit)
+        n_profit += add
+        remaining -= add
+    if remaining > 0:  # both short (n_display > n_paths) — take what's left
+        n_loss = min(n_loss + remaining, loss_idx.size)
+
+    pick_profit = rng.choice(profit_idx, n_profit, replace=False)
+    pick_loss = rng.choice(loss_idx, n_loss, replace=False)
+    return np.concatenate([pick_profit, pick_loss])
+
+
+def _pnl_extremes(pnl_values: np.ndarray, n_paths: int, n_display: int) -> np.ndarray:
+    """Indices of the lowest- and highest-P&L paths — a best/worst overview.
+
+    Returns the bottom ``n_display // 2`` (lowest P&L) plus the top
+    ``n_display - n_display // 2`` (highest P&L) path indices, so the display
+    spans the full outcome range instead of a middling sample. Returns every
+    index when ``n_display >= n_paths``.
+    """
+    if n_display >= n_paths:
+        return np.arange(n_paths)
+    order = np.argsort(pnl_values, kind="stable")
+    k_bottom = n_display // 2
+    k_top = n_display - k_bottom
+    return np.concatenate([order[:k_bottom], order[n_paths - k_top:]])
+
+
+def _add_density(
+    fig: go.Figure,
+    x_grid: np.ndarray,
+    data: np.ndarray,
+    pnl_values: np.ndarray | None,
+    row: int = 1,
+    hover_label: str = "Price",
+    value_fmt: str = "$%{y:.2f}",
+) -> None:
+    """Render a 2D density heatmap of *all* ``data`` paths over time on ``row``.
+
+    With per-path P&L, two overlaid transparent heatmaps (green = profitable
+    paths, red = losing paths) show where the ensemble travels *and* the outcome
+    split with no cancellation: balanced-but-dense regions stay visible (green +
+    red), empty regions stay transparent. Without P&L, a single Viridis count
+    map. The color scale is clipped to a robust 98th-percentile count so one
+    dense cell (e.g. the degenerate t=0 column) cannot wash out the rest. Uses
+    every path, not the displayed subset — that is the point of the density view.
+
+    ``data`` is the array to bin (price paths, or volatility × 100); ``value_fmt``
+    is the Plotly y-hover format and ``hover_label`` its caption.
+    """
+    finite = data[np.isfinite(data)]
+    if finite.size == 0:
+        return
+    lo, hi = (float(v) for v in np.percentile(finite, [0.5, 99.5]))
+    if hi <= lo:  # degenerate (flat paths)
+        lo, hi = float(finite.min()), float(finite.max()) + 1e-9
+    edges = np.linspace(lo, hi, N_DENSITY_BINS + 1)
+    centers = 0.5 * (edges[:-1] + edges[1:])
+    n_t = x_grid.size
+
+    def _hist_block(rows: np.ndarray) -> np.ndarray:
+        """Per-time-step histogram → ``(N_DENSITY_BINS, n_t)`` counts.
+
+        Fully vectorised (one ``searchsorted`` + one ``bincount``) so it scales
+        to the full simulated ensemble. Out-of-range and NaN values are dropped,
+        matching ``np.histogram`` semantics.
+        """
+        k = rows.shape[0]
+        if k == 0:
+            return np.zeros((N_DENSITY_BINS, n_t), dtype=float)
+        bin_idx = np.searchsorted(edges, rows, side="right") - 1  # (k, n_t)
+        t_idx = np.broadcast_to(np.arange(n_t), rows.shape)
+        valid = (bin_idx >= 0) & (bin_idx < N_DENSITY_BINS) & np.isfinite(rows)
+        flat = bin_idx[valid] * n_t + t_idx[valid]
+        counts = np.bincount(flat, minlength=N_DENSITY_BINS * n_t)
+        return counts.reshape(N_DENSITY_BINS, n_t).astype(float)
+
+    def _robust_cap(*blocks: np.ndarray) -> float:
+        """98th-percentile of non-empty cell counts — tames the t=0 spike."""
+        nz = np.concatenate([b[b > 0] for b in blocks]) if blocks else np.array([])
+        return max(float(np.percentile(nz, 98)), 1.0) if nz.size else 1.0
+
+    has_pnl = pnl_values is not None and len(pnl_values) == data.shape[0]
+    if has_pnl:
+        z_profit = _hist_block(data[pnl_values >= 0])
+        z_loss = _hist_block(data[pnl_values < 0])
+        cap = _robust_cap(z_profit, z_loss)
+        # Draw losses first (behind), profits last (on top) — ascending P&L.
+        for z, rgb, lbl, grp in (
+            (z_loss, "239,68,68", "Losing", "loss"),
+            (z_profit, "34,197,94", "Profitable", "profit"),
+        ):
+            fig.add_trace(
+                go.Heatmap(
+                    x=x_grid,
+                    y=centers,
+                    z=z,
+                    zmin=0.0,
+                    zmax=cap,
+                    zsmooth="best",
+                    colorscale=[[0.0, f"rgba({rgb},0.0)"], [1.0, f"rgba({rgb},0.9)"]],
+                    showscale=False,
+                    legendgroup=grp,
+                    hovertemplate=(
+                        f"<b>Time:</b> %{{x:.2f}} yr<br><b>{hover_label}:</b> {value_fmt}"
+                        f"<br><b>{lbl} paths:</b> %{{z:.0f}}<extra></extra>"
+                    ),
+                    name=f"{lbl} density",
+                ),
+                row=row,
+                col=1,
+            )
+    else:
+        z = _hist_block(data)
         fig.add_trace(
-            go.Scatter(
-                x=time_grid,
-                y=data[idx],
-                mode="lines",
-                line=dict(width=0.7, color=color),
-                name=legend_name if (first and show_legend) else None,
-                showlegend=(first and show_legend and legend_name is not None),
-                legendgroup=legend_group,
-                hovertemplate=ht,
+            go.Heatmap(
+                x=x_grid,
+                y=centers,
+                z=z,
+                zmin=0.0,
+                zmax=_robust_cap(z),
+                zsmooth="best",
+                colorscale="Viridis",
+                colorbar=dict(title="Paths", thickness=12, len=0.42, y=(0.8 if row == 1 else 0.22)),
+                hovertemplate=(
+                    f"<b>Time:</b> %{{x:.2f}} yr<br><b>{hover_label}:</b> {value_fmt}"
+                    f"<br><b>Paths:</b> %{{z:.0f}}<extra></extra>"
+                ),
+                name="Density",
             ),
             row=row,
             col=1,
         )
-        first = False
+
+
+def _add_density_legend(fig: go.Figure) -> None:
+    """Add two legend-only swatches labelling the green/red density heatmaps."""
+    for rgb, name, grp in (
+        ((34, 197, 94), "Profitable density", "profit"),
+        ((239, 68, 68), "Losing density", "loss"),
+    ):
+        fig.add_trace(
+            go.Scatter(
+                x=[None],
+                y=[None],
+                mode="markers",
+                marker=dict(size=10, symbol="square", color=_rgba(rgb, 0.9)),
+                name=name,
+                legendgroup=grp,
+                showlegend=True,
+            ),
+            row=1,
+            col=1,
+        )
 
 
 # ── Exotic overlay logic ──────────────────────────────────────────────────
@@ -875,10 +1161,65 @@ def render_path_controls(
 
     # ═══ General display ═════════════════════════════════════════════
     _section("Display", "#94a3b8")
+    path_view = st.radio(
+        "Path view",
+        ["Lines", "Density"],
+        horizontal=True,
+        help=(
+            "Lines: individual sampled trajectories. "
+            "Density: a 2D histogram of all paths — green/red shows the "
+            "profit/loss balance per region with no overplotting."
+        ),
+    )
     show_bands = st.checkbox("Show 5-95% Bands", value=True)
-    n_paths = st.slider("Display Paths", 20, 500, 150, 10)
 
-    result: dict[str, Any] = {"n_display": n_paths, "show_bands": show_bands}
+    result: dict[str, Any] = {
+        "show_bands": show_bands,
+        "path_view": path_view,
+    }
+
+    # "Display Paths" and the per-path overlay controls only matter for the
+    # Lines view — the density heatmap bins every path, so they are hidden when
+    # Density is selected.
+    n_paths = 0
+    if path_view == "Lines":
+        n_paths = st.slider("Display Paths", 20, MAX_PATH_DISPLAY_CAP, 150, 10)
+        # Default opacity tracks the path count; a per-count key lets the user
+        # override it while still re-deriving a sane default when N changes.
+        path_alpha = st.slider(
+            "Path Opacity",
+            PATH_ALPHA_MIN,
+            PATH_ALPHA_MAX,
+            _auto_alpha(n_paths),
+            0.01,
+            key=f"sim_path_alpha_{n_paths}",
+            help=(
+                "Per-line transparency. The default auto-scales down as you show "
+                "more paths, so dense plots read as a density field instead of a "
+                "solid wall of color."
+            ),
+        )
+        balanced_sampling = st.checkbox(
+            "Balanced P&L sampling",
+            value=False,
+            help=(
+                "Sample profitable and losing paths in equal numbers so a rare "
+                "outcome stays visible, instead of a purely random subset."
+            ),
+        )
+        sort_vol_pnl = st.checkbox(
+            "Vol paths: P&L extremes",
+            value=True,
+            help=(
+                "Show the most profitable N/2 and most losing N/2 volatility "
+                "paths (worst behind, best on top) for an overview of the regimes "
+                "driving the best and worst outcomes. Stochastic-vol models only."
+            ),
+        )
+        result["n_display"] = n_paths
+        result["path_alpha"] = path_alpha
+        result["balanced_sampling"] = balanced_sampling
+        result["sort_vol_pnl"] = sort_vol_pnl
 
     # ═══ Exotic overlays ═════════════════════════════════════════════
     exotic_types: set[str] = set()
@@ -887,7 +1228,7 @@ def render_path_controls(
             m.get("instrument_class", "vanilla") for m in exotic_metadata
         } - {"vanilla"}
 
-    if exotic_types:
+    if path_view == "Lines" and exotic_types:
         _section("Exotic Overlays", "#7c3aed")
 
         exotic_viz: dict[str, Any] = {}
@@ -965,7 +1306,7 @@ def render_path_controls(
         result["exotic_viz"] = exotic_viz
 
     # ═══ Structured product overlays ═════════════════════════════════
-    if sp_config:
+    if path_view == "Lines" and sp_config:
         product_type = sp_config.get("product_type", "")
         sp_viz: dict[str, Any] = {}
 

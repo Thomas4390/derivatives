@@ -11,6 +11,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from config.constants import GARCH_FAMILY
+
 
 @dataclass(frozen=True)
 class ParamSpec:
@@ -27,6 +29,12 @@ class ParamSpec:
     # whose meaning is already obvious from the symbol (e.g. ρ, log-jump
     # statistics) — adding "[—]" everywhere is visual noise.
     units: str = ""
+    # Render as a typed ``st.number_input`` (with a min/max caption) instead
+    # of a slider. Reserved for genuinely tiny log-scale params (ω, h₀, the
+    # Heston-Nandi ARCH α) whose ~[1e-9, 1e-3] range a slider cannot resolve.
+    # Replaces the old ``p.lo < 1e-3`` heuristic, which mis-routed every param
+    # with a non-positive lower bound (ρ, λ, α_J, all GARCH α/β/γ) into a box.
+    log_scale: bool = False
 
 
 @dataclass(frozen=True)
@@ -55,8 +63,7 @@ _HESTON_DESCRIPTIONS = {
     "kappa": "Speed at which variance reverts to its long-run mean.",
     "theta": "Long-run variance level — square of the long-run vol.",
     "alpha": (
-        "Diffusion coefficient of the variance process — controls smile "
-        "curvature."
+        "Diffusion coefficient of the variance process — controls smile " "curvature."
     ),
     "rho": (
         "Correlation between spot and variance Brownian motions — negative "
@@ -71,25 +78,72 @@ _MERTON_DESCRIPTIONS = {
 _GARCH_DESCRIPTIONS = {
     "omega": "Constant term ω of the variance recursion.",
     "alpha": "Sensitivity of variance to last squared return.",
-    "beta": (
-        "Persistence of past variance — α + β must be < 1 for stationarity."
-    ),
+    "beta": ("Persistence of past variance — α + β must be < 1 for stationarity."),
 }
 
 HESTON_SPEC = ModelSpec(
     key="heston",
     display_name="Heston",
     params=(
-        ParamSpec("v0", "v₀ (initial variance)", 0.001, 0.5, 0.04, 0.001, "%.4f",
-                  _HESTON_DESCRIPTIONS["v0"], units="σ²"),
-        ParamSpec("kappa", "κ (mean-reversion speed)", 0.1, 10.0, 2.0, 0.1, "%.2f",
-                  _HESTON_DESCRIPTIONS["kappa"], units="yr⁻¹"),
-        ParamSpec("theta", "σ² (long-run variance)", 0.001, 0.5, 0.04, 0.001, "%.4f",
-                  _HESTON_DESCRIPTIONS["theta"], units="σ²"),
-        ParamSpec("alpha", "α (vol of vol)", 0.01, 1.5, 0.3, 0.01, "%.3f",
-                  _HESTON_DESCRIPTIONS["alpha"]),
-        ParamSpec("rho", "ρ (spot-vol correlation)", -0.999, 0.999, -0.7, 0.01, "%.3f",
-                  _HESTON_DESCRIPTIONS["rho"]),
+        # Defaults are deliberately OFFSET from the calibrator's ATM-IV seed
+        # ([atm², 2.0, atm², 0.3, -0.7] in heston_calibrator.py) so that, on the
+        # default synthetic surface, every solver starts genuinely far from the
+        # optimum and shows a real descent — instead of the seed landing exactly
+        # on the truth (which made gradient-free NM look frozen at the optimum).
+        # Stays inside bounds and satisfies Feller 2κθ > α² (0.36 > 0.25).
+        ParamSpec(
+            "v0",
+            "v₀ (initial variance)",
+            0.001,
+            0.5,
+            0.03,
+            0.001,
+            "%.4f",
+            _HESTON_DESCRIPTIONS["v0"],
+            units="σ²",
+        ),
+        ParamSpec(
+            "kappa",
+            "κ (mean-reversion speed)",
+            0.1,
+            10.0,
+            3.0,
+            0.1,
+            "%.2f",
+            _HESTON_DESCRIPTIONS["kappa"],
+            units="yr⁻¹",
+        ),
+        ParamSpec(
+            "theta",
+            "σ² (long-run variance)",
+            0.001,
+            0.5,
+            0.06,
+            0.001,
+            "%.4f",
+            _HESTON_DESCRIPTIONS["theta"],
+            units="σ²",
+        ),
+        ParamSpec(
+            "alpha",
+            "α (vol of vol)",
+            0.01,
+            1.5,
+            0.5,
+            0.01,
+            "%.3f",
+            _HESTON_DESCRIPTIONS["alpha"],
+        ),
+        ParamSpec(
+            "rho",
+            "ρ (spot-vol correlation)",
+            -0.999,
+            0.999,
+            -0.4,
+            0.01,
+            "%.3f",
+            _HESTON_DESCRIPTIONS["rho"],
+        ),
     ),
 )
 
@@ -97,14 +151,47 @@ MERTON_SPEC = ModelSpec(
     key="merton",
     display_name="Merton",
     params=(
-        ParamSpec("sigma", "σ (diffusion vol)", 0.01, 1.0, 0.18, 0.01, "%.3f",
-                  "Brownian diffusion volatility (continuous component)."),
-        ParamSpec("lam", "λ (jump intensity, annualised)", 0.0, 5.0, 0.5, 0.05, "%.2f",
-                  _MERTON_DESCRIPTIONS["lam"], units="yr⁻¹"),
-        ParamSpec("alpha_j", "α_J (mean log-jump)", -0.5, 0.1, -0.10, 0.01, "%.3f",
-                  _MERTON_DESCRIPTIONS["alpha_j"]),
-        ParamSpec("sigma_j", "σ_J (jump std)", 0.01, 0.5, 0.20, 0.01, "%.3f",
-                  _MERTON_DESCRIPTIONS["sigma_j"]),
+        ParamSpec(
+            "sigma",
+            "σ (diffusion vol)",
+            0.01,
+            1.0,
+            0.18,
+            0.01,
+            "%.3f",
+            "Brownian diffusion volatility (continuous component).",
+        ),
+        ParamSpec(
+            "lam",
+            "λ (jump intensity, annualised)",
+            0.0,
+            5.0,
+            0.5,
+            0.05,
+            "%.2f",
+            _MERTON_DESCRIPTIONS["lam"],
+            units="yr⁻¹",
+        ),
+        ParamSpec(
+            "alpha_j",
+            "α_J (mean log-jump)",
+            -0.5,
+            0.1,
+            -0.10,
+            0.01,
+            "%.3f",
+            _MERTON_DESCRIPTIONS["alpha_j"],
+        ),
+        ParamSpec(
+            "sigma_j",
+            "σ_J (jump std)",
+            0.01,
+            0.5,
+            0.20,
+            0.01,
+            "%.3f",
+            _MERTON_DESCRIPTIONS["sigma_j"],
+        ),
     ),
 )
 
@@ -112,22 +199,76 @@ BATES_SPEC = ModelSpec(
     key="bates",
     display_name="Bates",
     params=(
-        ParamSpec("v0", "v₀", 0.001, 0.5, 0.04, 0.001, "%.4f",
-                  _HESTON_DESCRIPTIONS["v0"], units="σ²"),
-        ParamSpec("kappa", "κ", 0.1, 10.0, 1.5, 0.1, "%.2f",
-                  _HESTON_DESCRIPTIONS["kappa"], units="yr⁻¹"),
-        ParamSpec("theta", "σ²", 0.001, 0.5, 0.04, 0.001, "%.4f",
-                  _HESTON_DESCRIPTIONS["theta"], units="σ²"),
-        ParamSpec("alpha", "α", 0.01, 1.5, 0.3, 0.01, "%.3f",
-                  _HESTON_DESCRIPTIONS["alpha"]),
-        ParamSpec("rho", "ρ", -0.999, 0.999, -0.65, 0.01, "%.3f",
-                  _HESTON_DESCRIPTIONS["rho"]),
-        ParamSpec("lam", "λ", 0.0, 5.0, 0.5, 0.05, "%.2f",
-                  _MERTON_DESCRIPTIONS["lam"], units="yr⁻¹"),
-        ParamSpec("alpha_j", "α_J", -0.5, 0.1, -0.10, 0.01, "%.3f",
-                  _MERTON_DESCRIPTIONS["alpha_j"]),
-        ParamSpec("sigma_j", "σ_J", 0.01, 0.5, 0.15, 0.01, "%.3f",
-                  _MERTON_DESCRIPTIONS["sigma_j"]),
+        ParamSpec(
+            "v0",
+            "v₀",
+            0.001,
+            0.5,
+            0.04,
+            0.001,
+            "%.4f",
+            _HESTON_DESCRIPTIONS["v0"],
+            units="σ²",
+        ),
+        ParamSpec(
+            "kappa",
+            "κ",
+            0.1,
+            10.0,
+            1.5,
+            0.1,
+            "%.2f",
+            _HESTON_DESCRIPTIONS["kappa"],
+            units="yr⁻¹",
+        ),
+        ParamSpec(
+            "theta",
+            "σ²",
+            0.001,
+            0.5,
+            0.04,
+            0.001,
+            "%.4f",
+            _HESTON_DESCRIPTIONS["theta"],
+            units="σ²",
+        ),
+        ParamSpec(
+            "alpha", "α", 0.01, 1.5, 0.3, 0.01, "%.3f", _HESTON_DESCRIPTIONS["alpha"]
+        ),
+        ParamSpec(
+            "rho", "ρ", -0.999, 0.999, -0.65, 0.01, "%.3f", _HESTON_DESCRIPTIONS["rho"]
+        ),
+        ParamSpec(
+            "lam",
+            "λ",
+            0.0,
+            5.0,
+            0.5,
+            0.05,
+            "%.2f",
+            _MERTON_DESCRIPTIONS["lam"],
+            units="yr⁻¹",
+        ),
+        ParamSpec(
+            "alpha_j",
+            "α_J",
+            -0.5,
+            0.1,
+            -0.10,
+            0.01,
+            "%.3f",
+            _MERTON_DESCRIPTIONS["alpha_j"],
+        ),
+        ParamSpec(
+            "sigma_j",
+            "σ_J",
+            0.01,
+            0.5,
+            0.15,
+            0.01,
+            "%.3f",
+            _MERTON_DESCRIPTIONS["sigma_j"],
+        ),
     ),
 )
 
@@ -146,16 +287,59 @@ HESTON_NANDI_SPEC = ModelSpec(
     key="heston_nandi",
     display_name="AGARCH (Heston-Nandi)",
     params=(
-        ParamSpec("omega", "ω (variance intercept)", 1e-9, 1e-4, 2e-6, 1e-7, "%.2e",
-                  _HESTON_NANDI_DESCRIPTIONS["omega"]),
-        ParamSpec("alpha", "α (ARCH effect)", 1e-9, 1e-3, 3e-6, 1e-7, "%.2e",
-                  _HESTON_NANDI_DESCRIPTIONS["alpha"]),
-        ParamSpec("beta", "β (GARCH persistence)", 0.0, 0.999, 0.82, 0.01, "%.3f",
-                  _HESTON_NANDI_DESCRIPTIONS["beta"]),
-        ParamSpec("gamma", "γ (risk-neutral leverage)", 0.0, 1000.0, 180.0, 5.0, "%.1f",
-                  _HESTON_NANDI_DESCRIPTIONS["gamma"]),
-        ParamSpec("h0", "h₀ (initial variance)", 1e-7, 1e-2, 1.2e-4, 1e-6, "%.2e",
-                  _HESTON_NANDI_DESCRIPTIONS["h0"]),
+        ParamSpec(
+            "omega",
+            "ω (variance intercept)",
+            1e-9,
+            1e-4,
+            2e-6,
+            1e-7,
+            "%.2e",
+            _HESTON_NANDI_DESCRIPTIONS["omega"],
+            log_scale=True,
+        ),
+        ParamSpec(
+            "alpha",
+            "α (ARCH effect)",
+            1e-9,
+            1e-3,
+            3e-6,
+            1e-7,
+            "%.2e",
+            _HESTON_NANDI_DESCRIPTIONS["alpha"],
+            log_scale=True,
+        ),
+        ParamSpec(
+            "beta",
+            "β (GARCH persistence)",
+            0.0,
+            0.999,
+            0.82,
+            0.01,
+            "%.3f",
+            _HESTON_NANDI_DESCRIPTIONS["beta"],
+        ),
+        ParamSpec(
+            "gamma",
+            "γ (risk-neutral leverage)",
+            0.0,
+            1000.0,
+            180.0,
+            5.0,
+            "%.1f",
+            _HESTON_NANDI_DESCRIPTIONS["gamma"],
+        ),
+        ParamSpec(
+            "h0",
+            "h₀ (initial variance)",
+            1e-7,
+            1e-2,
+            1.2e-4,
+            1e-6,
+            "%.2e",
+            _HESTON_NANDI_DESCRIPTIONS["h0"],
+            log_scale=True,
+        ),
     ),
 )
 
@@ -178,16 +362,63 @@ NGARCH_Q_SPEC = ModelSpec(
         # LRNVR the one-step-ahead conditional variance is invariant P -> Q,
         # so the same numerical box applies to both measures. Only γ is
         # Q-specific (γ* = γ + λ).
-        ParamSpec("omega", "ω (variance intercept)", 1e-6, 1e-3, 2e-6, 1e-7, "%.2e",
-                  _NGARCH_Q_DESCRIPTIONS["omega"]),
-        ParamSpec("alpha", "α (ARCH effect)", 0.0, 0.5, 0.04, 0.005, "%.3f",
-                  _NGARCH_Q_DESCRIPTIONS["alpha"]),
-        ParamSpec("beta", "β (GARCH persistence)", 0.0, 0.999, 0.80, 0.01, "%.3f",
-                  _NGARCH_Q_DESCRIPTIONS["beta"]),
-        ParamSpec("gamma", "γ (risk-neutral asymmetry)", 0.0, 4.0, 0.8, 0.05, "%.3f",
-                  _NGARCH_Q_DESCRIPTIONS["gamma"]),
-        ParamSpec("h0", "h₀ (initial variance)", 1e-7, 1e-2, 4e-5, 1e-6, "%.2e",
-                  _NGARCH_Q_DESCRIPTIONS["h0"]),
+        ParamSpec(
+            "omega",
+            "ω (variance intercept)",
+            1e-6,
+            1e-3,
+            2e-6,
+            1e-7,
+            "%.2e",
+            _NGARCH_Q_DESCRIPTIONS["omega"],
+            log_scale=True,
+        ),
+        ParamSpec(
+            "alpha",
+            "α (ARCH effect)",
+            0.0,
+            0.5,
+            0.04,
+            0.005,
+            "%.3f",
+            _NGARCH_Q_DESCRIPTIONS["alpha"],
+        ),
+        ParamSpec(
+            "beta",
+            "β (GARCH persistence)",
+            0.0,
+            0.999,
+            # Offset from the calibrator's hard-coded seed (β₀ = 0.80 in
+            # ngarch_q_calibrator.py) — same trick as Heston above — so the
+            # synthetic truth is NOT the seed and the solver shows a real
+            # descent instead of the x₀ marker occluding the truth star.
+            # Persistence β + α(1+γ²) = 0.85 + 0.04·1.64 = 0.9156 < 1 (stationary).
+            0.85,
+            0.01,
+            "%.3f",
+            _NGARCH_Q_DESCRIPTIONS["beta"],
+        ),
+        ParamSpec(
+            "gamma",
+            "γ (risk-neutral asymmetry)",
+            0.0,
+            4.0,
+            0.8,
+            0.05,
+            "%.3f",
+            _NGARCH_Q_DESCRIPTIONS["gamma"],
+        ),
+        ParamSpec(
+            "h0",
+            "h₀ (initial variance)",
+            1e-7,
+            1e-2,
+            4e-5,
+            1e-6,
+            "%.2e",
+            _NGARCH_Q_DESCRIPTIONS["h0"],
+            log_scale=True,
+        ),
     ),
 )
 
@@ -195,38 +426,114 @@ NGARCH_Q_SPEC = ModelSpec(
 # per-period parameters. garch_q is symmetric (no γ); gjr_q carries leverage.
 GARCH_Q_SPEC = ModelSpec(
     key="garch_q",
-    display_name="GARCH (risk-neutral)",
+    display_name="GARCH-Q (risk-neutral)",
     params=(
         # omega/alpha/beta sliders aligned with the P-family — LRNVR-invariant.
-        ParamSpec("omega", "ω (variance intercept)", 1e-6, 1e-3, 3e-6, 1e-7, "%.2e",
-                  "Constant term ω of the risk-neutral variance recursion (per period)."),
-        ParamSpec("alpha", "α (ARCH effect)", 0.0, 0.5, 0.06, 0.005, "%.3f",
-                  "ARCH coefficient — sensitivity of variance to the squared shock."),
-        ParamSpec("beta", "β (GARCH persistence)", 0.0, 0.999, 0.90, 0.01, "%.3f",
-                  "GARCH persistence of past variance. Stationarity needs β + α < 1."),
-        ParamSpec("h0", "h₀ (initial variance)", 1e-7, 1e-2, 4e-5, 1e-6, "%.2e",
-                  "Initial conditional variance h₁ (per period)."),
+        ParamSpec(
+            "omega",
+            "ω (variance intercept)",
+            1e-6,
+            1e-3,
+            3e-6,
+            1e-7,
+            "%.2e",
+            "Constant term ω of the risk-neutral variance recursion (per period).",
+            log_scale=True,
+        ),
+        ParamSpec(
+            "alpha",
+            "α (ARCH effect)",
+            0.0,
+            0.5,
+            0.06,
+            0.005,
+            "%.3f",
+            "ARCH coefficient — sensitivity of variance to the squared shock.",
+        ),
+        ParamSpec(
+            "beta",
+            "β (GARCH persistence)",
+            0.0,
+            0.999,
+            0.90,
+            0.01,
+            "%.3f",
+            "GARCH persistence of past variance. Stationarity needs β + α < 1.",
+        ),
+        ParamSpec(
+            "h0",
+            "h₀ (initial variance)",
+            1e-7,
+            1e-2,
+            4e-5,
+            1e-6,
+            "%.2e",
+            "Initial conditional variance h₁ (per period).",
+            log_scale=True,
+        ),
     ),
 )
 
 GJR_Q_SPEC = ModelSpec(
     key="gjr_q",
-    display_name="GJR-GARCH (risk-neutral)",
+    display_name="GJR-GARCH-Q (risk-neutral)",
     params=(
         # omega/alpha/beta sliders aligned with the P-family — LRNVR-invariant.
         # Only γ stays Q-specific (γ* = γ + λ, positive on this side).
-        ParamSpec("omega", "ω (variance intercept)", 1e-6, 1e-3, 2.5e-6, 1e-7, "%.2e",
-                  "Constant term ω of the risk-neutral variance recursion (per period)."),
-        ParamSpec("alpha", "α (ARCH effect)", 0.0, 0.5, 0.04, 0.005, "%.3f",
-                  "Symmetric ARCH coefficient (applies to every shock)."),
-        ParamSpec("beta", "β (GARCH persistence)", 0.0, 0.999, 0.78, 0.01, "%.3f",
-                  "GARCH persistence of past variance. With α and γ, stationarity "
-                  "needs β + α + γ/2 < 1 (default keeps it ≈ 0.97)."),
-        ParamSpec("gamma", "γ (risk-neutral leverage)", 0.0, 2.0, 0.3, 0.02, "%.3f",
-                  "Risk-neutral leverage-indicator coefficient (γ* = γ + λ): extra "
-                  "ARCH on negative shocks → skew. Stationarity needs β + α + γ/2 < 1."),
-        ParamSpec("h0", "h₀ (initial variance)", 1e-7, 1e-2, 4e-5, 1e-6, "%.2e",
-                  "Initial conditional variance h₁ (per period)."),
+        ParamSpec(
+            "omega",
+            "ω (variance intercept)",
+            1e-6,
+            1e-3,
+            2.5e-6,
+            1e-7,
+            "%.2e",
+            "Constant term ω of the risk-neutral variance recursion (per period).",
+            log_scale=True,
+        ),
+        ParamSpec(
+            "alpha",
+            "α (ARCH effect)",
+            0.0,
+            0.5,
+            0.04,
+            0.005,
+            "%.3f",
+            "Symmetric ARCH coefficient (applies to every shock).",
+        ),
+        ParamSpec(
+            "beta",
+            "β (GARCH persistence)",
+            0.0,
+            0.999,
+            0.78,
+            0.01,
+            "%.3f",
+            "GARCH persistence of past variance. With α and γ, stationarity "
+            "needs β + α + γ/2 < 1 (default keeps it ≈ 0.97).",
+        ),
+        ParamSpec(
+            "gamma",
+            "γ (risk-neutral leverage)",
+            0.0,
+            2.0,
+            0.3,
+            0.02,
+            "%.3f",
+            "Risk-neutral leverage-indicator coefficient (γ* = γ + λ): extra "
+            "ARCH on negative shocks → skew. Stationarity needs β + α + γ/2 < 1.",
+        ),
+        ParamSpec(
+            "h0",
+            "h₀ (initial variance)",
+            1e-7,
+            1e-2,
+            4e-5,
+            1e-6,
+            "%.2e",
+            "Initial conditional variance h₁ (per period).",
+            log_scale=True,
+        ),
     ),
 )
 
@@ -234,12 +541,37 @@ GARCH_SPEC = ModelSpec(
     key="garch",
     display_name="GARCH(1,1)",
     params=(
-        ParamSpec("omega", "ω (intercept)", 1e-6, 1e-3, 2e-6, 1e-7, "%.2e",
-                  _GARCH_DESCRIPTIONS["omega"]),
-        ParamSpec("alpha", "α (ARCH effect)", 0.0, 0.5, 0.08, 0.01, "%.3f",
-                  _GARCH_DESCRIPTIONS["alpha"]),
-        ParamSpec("beta", "β (GARCH persistence)", 0.0, 0.999, 0.90, 0.01, "%.3f",
-                  _GARCH_DESCRIPTIONS["beta"]),
+        ParamSpec(
+            "omega",
+            "ω (intercept)",
+            1e-6,
+            1e-3,
+            2e-6,
+            1e-7,
+            "%.2e",
+            _GARCH_DESCRIPTIONS["omega"],
+            log_scale=True,
+        ),
+        ParamSpec(
+            "alpha",
+            "α (ARCH effect)",
+            0.0,
+            0.5,
+            0.08,
+            0.01,
+            "%.3f",
+            _GARCH_DESCRIPTIONS["alpha"],
+        ),
+        ParamSpec(
+            "beta",
+            "β (GARCH persistence)",
+            0.0,
+            0.999,
+            0.90,
+            0.01,
+            "%.3f",
+            _GARCH_DESCRIPTIONS["beta"],
+        ),
     ),
 )
 
@@ -247,16 +579,35 @@ NGARCH_SPEC = ModelSpec(
     key="ngarch",
     display_name="NGARCH",
     params=(
-        ParamSpec("omega", "ω", 1e-6, 1e-3, 2e-6, 1e-7, "%.2e",
-                  _GARCH_DESCRIPTIONS["omega"]),
-        ParamSpec("alpha", "α", 0.0, 0.5, 0.08, 0.01, "%.3f",
-                  _GARCH_DESCRIPTIONS["alpha"]),
-        ParamSpec("beta", "β", 0.0, 0.999, 0.88, 0.01, "%.3f",
-                  _GARCH_DESCRIPTIONS["beta"]),
-        ParamSpec("gamma", "γ (leverage, physical)", -2.0, 2.0, 0.5, 0.05, "%.3f",
-                  "Physical-measure (P) leverage — negative shocks raise variance "
-                  "more when γ > 0. Under risk-neutral pricing it maps to "
-                  "γ* = γ + λ (the app's forward map assumes λ = 0)."),
+        ParamSpec(
+            "omega",
+            "ω",
+            1e-6,
+            1e-3,
+            2e-6,
+            1e-7,
+            "%.2e",
+            _GARCH_DESCRIPTIONS["omega"],
+            log_scale=True,
+        ),
+        ParamSpec(
+            "alpha", "α", 0.0, 0.5, 0.08, 0.01, "%.3f", _GARCH_DESCRIPTIONS["alpha"]
+        ),
+        ParamSpec(
+            "beta", "β", 0.0, 0.999, 0.88, 0.01, "%.3f", _GARCH_DESCRIPTIONS["beta"]
+        ),
+        ParamSpec(
+            "gamma",
+            "γ (leverage, physical)",
+            -2.0,
+            2.0,
+            0.5,
+            0.05,
+            "%.3f",
+            "Physical-measure (P) leverage — negative shocks raise variance "
+            "more when γ > 0. Under risk-neutral pricing it maps to "
+            "γ* = γ + λ (the app's forward map assumes λ = 0).",
+        ),
     ),
 )
 
@@ -264,16 +615,35 @@ GJR_SPEC = ModelSpec(
     key="gjr_garch",
     display_name="GJR-GARCH",
     params=(
-        ParamSpec("omega", "ω", 1e-6, 1e-3, 2e-6, 1e-7, "%.2e",
-                  _GARCH_DESCRIPTIONS["omega"]),
-        ParamSpec("alpha", "α", 0.0, 0.5, 0.05, 0.01, "%.3f",
-                  _GARCH_DESCRIPTIONS["alpha"]),
-        ParamSpec("beta", "β", 0.0, 0.999, 0.88, 0.01, "%.3f",
-                  _GARCH_DESCRIPTIONS["beta"]),
-        ParamSpec("gamma", "γ (leverage, physical)", 0.0, 0.5, 0.04, 0.01, "%.3f",
-                  "Physical-measure (P) leverage-indicator coefficient "
-                  "(non-negative). Risk-neutral pricing uses γ* = γ + λ "
-                  "(forward map assumes λ = 0)."),
+        ParamSpec(
+            "omega",
+            "ω",
+            1e-6,
+            1e-3,
+            2e-6,
+            1e-7,
+            "%.2e",
+            _GARCH_DESCRIPTIONS["omega"],
+            log_scale=True,
+        ),
+        ParamSpec(
+            "alpha", "α", 0.0, 0.5, 0.05, 0.01, "%.3f", _GARCH_DESCRIPTIONS["alpha"]
+        ),
+        ParamSpec(
+            "beta", "β", 0.0, 0.999, 0.88, 0.01, "%.3f", _GARCH_DESCRIPTIONS["beta"]
+        ),
+        ParamSpec(
+            "gamma",
+            "γ (leverage, physical)",
+            0.0,
+            0.5,
+            0.04,
+            0.01,
+            "%.3f",
+            "Physical-measure (P) leverage-indicator coefficient "
+            "(non-negative). Risk-neutral pricing uses γ* = γ + λ "
+            "(forward map assumes λ = 0).",
+        ),
     ),
 )
 
@@ -281,8 +651,16 @@ IV_SPEC = ModelSpec(
     key="iv_gbm",
     display_name="GBM (IV)",
     params=(
-        ParamSpec("sigma", "σ (volatility)", 0.05, 1.0, 0.20, 0.01, "%.3f",
-                  "Constant Black-Scholes implied volatility."),
+        ParamSpec(
+            "sigma",
+            "σ (volatility)",
+            0.05,
+            1.0,
+            0.20,
+            0.01,
+            "%.3f",
+            "Constant Black-Scholes implied volatility.",
+        ),
     ),
 )
 
@@ -309,7 +687,11 @@ def get_spec(model_key: str) -> ModelSpec:
 
 def supported_solvers(model_key: str) -> tuple[str, ...]:
     """Solvers the user can pick for this model."""
-    if model_key in ("garch", "ngarch", "gjr_garch"):
+    if model_key == "custom":
+        # User-defined surface model: scalar objective (MC or numpy-FFT priced),
+        # no JAX-differentiable residual, so LM-JAX is rejected.
+        return ("DE", "NM", "L-BFGS-B")
+    if model_key in GARCH_FAMILY:
         # GARCH MLE is scalar — LM is rejected
         return ("L-BFGS-B", "DE", "NM")
     if model_key in ("ngarch_q", "garch_q", "gjr_q"):
@@ -322,6 +704,38 @@ def supported_solvers(model_key: str) -> tuple[str, ...]:
     return ("LM-JAX", "DE", "NM", "L-BFGS-B")
 
 
+def default_solver(model_key: str) -> str | None:
+    """The solver the sidebar pre-selects for this model absent a user choice.
+
+    Returns ``None`` for models with no iterative solver (``iv_gbm`` is a
+    closed-form inversion). The nonaffine risk-neutral GARCH-Q trio defaults are
+    **measured**, not generic (see ``docs/calibration/garch_surface_calibration.md``):
+
+    * ``ngarch_q`` / ``garch_q`` → **Nelder-Mead** — its simplex gives the best
+      accuracy on these smooth-enough MC objectives at the interactive budget
+      (~8 / ~13 bp RMSE_iv vs ~26 / ~40 bp for L-BFGS-B);
+    * ``gjr_q`` → **L-BFGS-B** — the negative-shock indicator ``1{z<0}`` makes the
+      objective rough; the finite-difference quasi-Newton step (valid because
+      common random numbers make the objective deterministic) recovers the
+      parameters (~73 bp, persistence to 1e-3) where Nelder-Mead stalls (~164 bp).
+
+    Differential Evolution is a global explorer that is always *starved* at
+    interactive budgets for the trio (it needs ≥ 1000 evals ≈ 3 min), so it is
+    never a default here even though it is offered.
+    """
+    if model_key == "custom":
+        return "NM"  # derivative-free default for an arbitrary user objective
+    if model_key in ("ngarch_q", "garch_q"):
+        return "NM"
+    if model_key == "gjr_q":
+        return "L-BFGS-B"
+    if model_key in GARCH_FAMILY:
+        return "L-BFGS-B"  # GARCH MLE default (analytical JAX gradient)
+    if model_key == "iv_gbm":
+        return None  # closed-form IV inversion — no solver
+    return "LM-JAX"  # surface models: production trust-region default
+
+
 def supported_objectives(model_key: str) -> tuple[str, ...]:
     """Objective functions the user can pick for this model.
 
@@ -332,7 +746,11 @@ def supported_objectives(model_key: str) -> tuple[str, ...]:
     objective function in the same sense — we return an empty tuple so
     the UI masks the selector.
     """
-    if model_key in ("garch", "ngarch", "gjr_garch"):
+    if model_key == "custom":
+        # Same catalogue minus spread_weighted — synthetic / most snapshot
+        # quotes carry no bid/ask spread for the custom model to weight by.
+        return ("price_mse", "iv_mse", "vega_weighted", "relative", "huber")
+    if model_key in GARCH_FAMILY:
         return ()
     if model_key == "iv_gbm":
         # IV-GBM is a closed-form IV inversion; no objective to choose.

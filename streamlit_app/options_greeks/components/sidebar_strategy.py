@@ -3,6 +3,7 @@
 import streamlit as st
 from components.sidebar_add_leg import render_add_leg_button
 from components.sidebar_leg_editor import (
+    render_exotic_leg_editor,
     render_leg_editor,
     render_stock_leg_editor,
 )
@@ -17,11 +18,18 @@ from config.constants import (
     STRATEGY_LEGS,
     STRATEGY_STOCK_POSITION,
 )
+from config.exotic_config import EXOTIC_LEG_KEYS
+from services.exotic_pricing_adapter import (
+    calculate_exotic_premium,
+    haug_factory_params,
+)
 from services.pricing_adapter import calculate_option_premium
 from services.state_manager import create_option_position, create_stock_position
 
 
-def render_strategy_builder(spot_price: float, risk_free_rate: float) -> None:
+def render_strategy_builder(
+    spot_price: float, risk_free_rate: float, dividend_yield: float = 0.0
+) -> None:
     """Render the strategy builder section with editable legs."""
 
     st.markdown(
@@ -60,10 +68,31 @@ def render_strategy_builder(spot_price: float, risk_free_rate: float) -> None:
         "covered_call": "🛡️  Covered Call",
         "protective_put": "🛡️  Protective Put",
         "collar": "🛡️  Collar",
-        "── Structured Products ──": None,
-        "sp_cpn": "🏦  Capital Protected Note",
-        "sp_reverse_convertible": "🏦  Reverse Convertible",
-        "sp_autocallable": "🏦  Autocallable",
+        "── Exotic - Barrier ──": None,
+        "barrier_up_out_call": "🔮  Up-and-Out Call",
+        "barrier_down_out_put": "🔮  Down-and-Out Put",
+        "── Exotic - Digital ──": None,
+        "digital_call": "🎯  Digital Call",
+        "digital_put": "🎯  Digital Put",
+        "digital_range_bet": "🎯  Digital Range Bet",
+        "── Exotic - Other ──": None,
+        "chooser": "🎲  Chooser Option",
+        "asset_or_nothing_call": "💎  Asset-or-Nothing Call",
+        "asset_or_nothing_put": "💎  Asset-or-Nothing Put",
+        "power_call": "⚡  Power Call (n=2)",
+        "gap_call": "📐  Gap Call",
+        "── Exotic - Haug Power ──": None,
+        "powered_call": "⚡  Powered Call (Esser)",
+        "capped_power_call": "⚡  Capped Power Call (Esser)",
+        "── Exotic - Haug Analytic ──": None,
+        "log_contract": "📐  Log Contract",
+        "log_option": "📐  Log Option",
+        "supershare": "💠  Supershare",
+        "── Exotic - Haug Barriers ──": None,
+        "double_barrier_call": "🔮  Double Barrier Call",
+        "discrete_barrier_call": "🔮  Discrete Barrier Call",
+        "partial_barrier_call": "🔮  Partial-Time Barrier Call",
+        "binary_barrier_call": "🔮  Binary Barrier",
     }
 
     # Build options list (excluding separators for actual selection)
@@ -186,7 +215,9 @@ def render_strategy_builder(spot_price: float, risk_free_rate: float) -> None:
 
     # Auto-apply strategy when newly selected or spot price changes
     if should_auto_apply and not is_custom:
-        _apply_strategy(spot_price, risk_free_rate, strategy_legs, has_stock)
+        _apply_strategy(
+            spot_price, risk_free_rate, strategy_legs, has_stock, dividend_yield
+        )
 
     # Strategy info header with hover tooltip
     strategy_name = STRATEGY_DISPLAY_NAMES.get(
@@ -265,15 +296,33 @@ def render_strategy_builder(spot_price: float, risk_free_rate: float) -> None:
         is_additional_leg = i >= base_leg_count
         allow_remove = True  # All legs are removable
 
-        leg_cost, should_remove = render_leg_editor(
-            i,
-            leg,
-            spot_price,
-            risk_free_rate,
-            num_legs,
-            allow_remove=allow_remove,
-            is_additional=is_additional_leg and not is_custom,
+        # Check if this is an exotic leg
+        leg_state = st.session_state.strategy_legs_state.get(i, {})
+        inst_class = leg_state.get(
+            "instrument_class", leg.get("instrument_class", "vanilla")
         )
+
+        if inst_class != "vanilla":
+            leg_cost, should_remove = render_exotic_leg_editor(
+                i,
+                leg,
+                spot_price,
+                risk_free_rate,
+                num_legs,
+                allow_remove=allow_remove,
+                dividend_yield=dividend_yield,
+            )
+        else:
+            leg_cost, should_remove = render_leg_editor(
+                i,
+                leg,
+                spot_price,
+                risk_free_rate,
+                num_legs,
+                allow_remove=allow_remove,
+                is_additional=is_additional_leg and not is_custom,
+                dividend_yield=dividend_yield,
+            )
         leg_costs.append(leg_cost)
 
         if should_remove:
@@ -347,12 +396,44 @@ def render_strategy_builder(spot_price: float, risk_free_rate: float) -> None:
 
             # Update strategy_legs_state from widget values if they exist
             if type_key in st.session_state:
+                # Preserve existing exotic fields from current state
+                existing_state = st.session_state.strategy_legs_state.get(i, {})
                 new_state = {
                     "option_type": st.session_state[type_key],
                     "position_type": st.session_state[dir_key],
                     "strike": st.session_state[strike_key],
                     "quantity": st.session_state[qty_key],
                 }
+                # Carry over exotic fields
+                inst_class = existing_state.get("instrument_class", "vanilla")
+                if inst_class != "vanilla":
+                    new_state["instrument_class"] = inst_class
+                    for ekey in ("barrier", "is_up", "is_knock_in", "rebate", "payout"):
+                        # Read from widget if available, else from existing state
+                        widget_key = f"leg_{i}_{ekey}_v{version}"
+                        if widget_key in st.session_state:
+                            new_state[ekey] = st.session_state[widget_key]
+                        elif ekey in existing_state:
+                            new_state[ekey] = existing_state[ekey]
+                    # Handle barrier direction widget
+                    barrier_dir_key = f"leg_{i}_barrier_dir_v{version}"
+                    if barrier_dir_key in st.session_state:
+                        new_state["is_up"] = st.session_state[barrier_dir_key] == "Up"
+                    ki_key = f"leg_{i}_ki_v{version}"
+                    if ki_key in st.session_state:
+                        new_state["is_knock_in"] = (
+                            st.session_state[ki_key] == "Knock-In"
+                        )
+                    payout_key = f"leg_{i}_payout_v{version}"
+                    if payout_key in st.session_state:
+                        new_state["payout"] = st.session_state[payout_key]
+                    # Carry over any other exotic keys this widget-specific
+                    # rebuild doesn't read directly (supershare corridor,
+                    # double/discrete/partial/binary-barrier params, Asian
+                    # avg_*, ...) so Apply Changes doesn't drop them.
+                    for key in EXOTIC_LEG_KEYS:
+                        if key not in new_state and key in existing_state:
+                            new_state[key] = existing_state[key]
                 st.session_state.strategy_legs_state[i] = new_state
 
         # Also update stock state from widget values
@@ -368,7 +449,9 @@ def render_strategy_builder(spot_price: float, risk_free_rate: float) -> None:
                     "entry_price": st.session_state[stock_entry_key],
                 }
 
-        _apply_strategy(spot_price, risk_free_rate, strategy_legs, has_stock)
+        _apply_strategy(
+            spot_price, risk_free_rate, strategy_legs, has_stock, dividend_yield
+        )
 
 
 def _initialize_strategy_state(
@@ -426,6 +509,39 @@ def _initialize_strategy_state(
                 "strike": round(spot_price * leg.get("strike_factor", 1.0), 2),
                 "quantity": leg["quantity"],
             }
+            # Preserve exotic fields if present
+            inst_class = leg.get("instrument_class", "vanilla")
+            if inst_class != "vanilla":
+                state["instrument_class"] = inst_class
+                if "barrier_factor" in leg:
+                    state["barrier"] = round(spot_price * leg["barrier_factor"], 2)
+                for ekey in (
+                    "is_up",
+                    "is_knock_in",
+                    "rebate",
+                    "payout",
+                    "choice_time_pct",
+                    "power_n",
+                ):
+                    if ekey in leg:
+                        state[ekey] = leg[ekey]
+                if "gap_trigger_factor" in leg:
+                    state["gap_trigger"] = round(
+                        spot_price * leg["gap_trigger_factor"], 2
+                    )
+                # Compute extra1 for types that need it
+                if inst_class == "chooser":
+                    maturity = DEFAULT_DTE / 365.0
+                    state["extra1"] = leg.get("choice_time_pct", 0.5) * maturity
+                elif inst_class == "power":
+                    n_val = leg.get("power_n", 2.0)
+                    state["extra1"] = n_val
+                    # Strike must be in S^n space for ATM: K = S^n
+                    state["strike"] = round(spot_price**n_val, 2)
+                elif inst_class == "gap":
+                    state["extra1"] = round(
+                        spot_price * leg.get("gap_trigger_factor", 1.05), 2
+                    )
             st.session_state.strategy_legs_state[i] = state
 
         if has_stock:
@@ -444,7 +560,11 @@ def _initialize_strategy_state(
 
 
 def _apply_strategy(
-    spot_price: float, risk_free_rate: float, strategy_legs: list, has_stock: bool
+    spot_price: float,
+    risk_free_rate: float,
+    strategy_legs: list,
+    has_stock: bool,
+    dividend_yield: float = 0.0,
 ) -> None:
     """Apply the configured strategy to positions using dict-based storage."""
     new_positions = []
@@ -452,22 +572,66 @@ def _apply_strategy(
     for i, _ in enumerate(strategy_legs):
         leg_state = st.session_state.strategy_legs_state.get(i, {})
         if leg_state:
-            premium = calculate_option_premium(
-                spot=spot_price,
-                strike=leg_state["strike"],
-                dte_days=DEFAULT_DTE,
-                risk_free_rate=risk_free_rate,
-                volatility=DEFAULT_IV / 100,
-                option_type=leg_state["option_type"],
-            )
+            inst_class = leg_state.get("instrument_class", "vanilla")
+            is_exotic = inst_class != "vanilla"
 
+            # Calculate premium
+            if is_exotic:
+                premium = calculate_exotic_premium(
+                    spot=spot_price,
+                    strike=leg_state["strike"],
+                    dte_days=DEFAULT_DTE,
+                    risk_free_rate=risk_free_rate,
+                    volatility=DEFAULT_IV / 100,
+                    option_type=leg_state["option_type"],
+                    exotic_type=inst_class,
+                    barrier=leg_state.get("barrier", 0.0),
+                    is_up=leg_state.get("is_up", True),
+                    is_knock_in=leg_state.get("is_knock_in", False),
+                    rebate=leg_state.get("rebate", 0.0),
+                    payout=leg_state.get("payout", 1.0),
+                    extra1=leg_state.get("extra1", 0.0),
+                    dividend_yield=dividend_yield,
+                    cap=leg_state.get("cap", 0.0),
+                    params=haug_factory_params(leg_state),
+                )
+            else:
+                premium = calculate_option_premium(
+                    spot=spot_price,
+                    strike=leg_state["strike"],
+                    dte_days=DEFAULT_DTE,
+                    risk_free_rate=risk_free_rate,
+                    volatility=DEFAULT_IV / 100,
+                    option_type=leg_state["option_type"],
+                    dividend_yield=dividend_yield,
+                )
+
+            # Create dict-based position
             position = create_option_position(
                 option_type=leg_state["option_type"],
                 position_type=leg_state["position_type"],
                 strike=leg_state["strike"],
                 quantity=leg_state["quantity"],
                 premium_paid=premium,
+                instrument_class=inst_class,
+                barrier=leg_state.get("barrier"),
+                is_up=leg_state.get("is_up"),
+                is_knock_in=leg_state.get("is_knock_in"),
+                rebate=leg_state.get("rebate", 0.0),
+                payout=leg_state.get("payout", 1.0),
+                extra1=leg_state.get("extra1", 0.0),
+                choice_time_pct=leg_state.get("choice_time_pct", 0.5),
+                power_n=leg_state.get("power_n", 2.0),
+                gap_trigger=leg_state.get("gap_trigger"),
             )
+            # create_option_position only knows the basic exotic fields; carry
+            # the advanced-family keys (corridor, adv_* barrier flags, cash,
+            # binary_type, ...) from the editor state so the leg keeps
+            # describing the instrument the user configured.
+            if is_exotic:
+                for key in EXOTIC_LEG_KEYS:
+                    if key not in position and key in leg_state:
+                        position[key] = leg_state[key]
             new_positions.append(position)
 
     new_stock_position = None

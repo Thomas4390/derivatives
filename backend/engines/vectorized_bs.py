@@ -54,6 +54,7 @@ def calculate_first_order_greeks(
     risk_free_rate: float,
     volatility: float,
     option_type: int,
+    dividend_yield: float = 0.0,
 ) -> tuple[float, float, float, float, float, float]:
     """
     Calculate first-order Black-Scholes Greeks.
@@ -74,6 +75,8 @@ def calculate_first_order_greeks(
         Annualized volatility (decimal, e.g., 0.20 for 20%)
     option_type : int
         Option type: 1 = call, 0 = put
+    dividend_yield : float, default 0.0
+        Annualized continuous dividend yield (decimal)
 
     Returns
     -------
@@ -90,7 +93,15 @@ def calculate_first_order_greeks(
     is_call = option_type == 1
 
     # Delegate to single source of truth
-    return _bs_greeks(spot, strike, time_to_expiry, risk_free_rate, volatility, is_call)
+    return _bs_greeks(
+        spot,
+        strike,
+        time_to_expiry,
+        risk_free_rate,
+        volatility,
+        is_call,
+        dividend_yield,
+    )
 
 
 # =============================================================================
@@ -106,6 +117,7 @@ def calculate_all_greeks(
     risk_free_rate: float,
     volatility: float,
     option_type: int,
+    dividend_yield: float = 0.0,
 ) -> np.ndarray:
     """
     Calculate all 14 Greeks in a single pass.
@@ -126,6 +138,8 @@ def calculate_all_greeks(
         Implied volatility (decimal)
     option_type : int
         1 for call, 0 for put
+    dividend_yield : float, default 0.0
+        Annualized continuous dividend yield (decimal)
 
     Returns
     -------
@@ -140,7 +154,13 @@ def calculate_all_greeks(
 
     # First-order Greeks (from utils/math)
     price, delta, gamma, vega, theta, rho = _bs_greeks(
-        spot, strike, time_to_expiry, risk_free_rate, volatility, is_call
+        spot,
+        strike,
+        time_to_expiry,
+        risk_free_rate,
+        volatility,
+        is_call,
+        dividend_yield,
     )
     greeks[0] = price
     greeks[1] = delta
@@ -151,7 +171,7 @@ def calculate_all_greeks(
 
     # Second-order Greeks (from utils/math)
     vanna, volga, charm, veta = bs_second_order_greeks(
-        spot, strike, time_to_expiry, risk_free_rate, volatility
+        spot, strike, time_to_expiry, risk_free_rate, volatility, dividend_yield, is_call
     )
     greeks[6] = vanna
     greeks[7] = volga
@@ -160,7 +180,7 @@ def calculate_all_greeks(
 
     # Third-order Greeks (from utils/math)
     speed, zomma, color, ultima = bs_third_order_greeks(
-        spot, strike, time_to_expiry, risk_free_rate, volatility
+        spot, strike, time_to_expiry, risk_free_rate, volatility, dividend_yield
     )
     greeks[10] = speed
     greeks[11] = zomma
@@ -183,6 +203,7 @@ def calculate_greeks_vectorized(
     risk_free_rate: float,
     volatility: float,
     option_type: int,
+    dividend_yield: float = 0.0,
 ) -> np.ndarray:
     """
     Calculate all Greeks for a single option across spot range.
@@ -201,6 +222,8 @@ def calculate_greeks_vectorized(
         Implied volatility
     option_type : int
         1 for call, 0 for put
+    dividend_yield : float, default 0.0
+        Annualized continuous dividend yield (decimal)
 
     Returns
     -------
@@ -218,6 +241,7 @@ def calculate_greeks_vectorized(
             risk_free_rate,
             volatility,
             option_type,
+            dividend_yield,
         )
 
     return result

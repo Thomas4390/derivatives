@@ -69,7 +69,9 @@ class MonteCarloEngine(PricingEngine):
     seed : int, optional
         Random seed for reproducibility
     antithetic : bool
-        Use antithetic variates (default True)
+        Variance-reduction hint, not applied by the generic terminal-simulator
+        path (configure antithetic on the model's simulator instead). Retained
+        for API compatibility; see MCConfig.antithetic.
 
     Examples
     --------
@@ -288,10 +290,13 @@ class MonteCarloEngine(PricingEngine):
         # Compute payoffs using instrument's payoff function (DRY)
         payoffs = option.payoff(terminals)
 
-        # Compute price and standard error
+        # Compute price and standard error. Use the sample std (ddof=1) so the
+        # SE matches the n-1 convention of the fused estimator on the main price
+        # path (np.std defaults to ddof=0, which understates the SE).
+        n = len(payoffs)
         discount = np.exp(-r * t)
         price = discount * np.mean(payoffs)
-        std_error = discount * np.std(payoffs) / np.sqrt(len(payoffs))
+        std_error = discount * np.std(payoffs, ddof=1) / np.sqrt(n) if n > 1 else 0.0
 
         result = PricingResult(
             price=max(price, 0.0),

@@ -38,6 +38,16 @@ INSTRUMENT_CLASSES = {
     "asset_or_nothing": "Asset-or-Nothing",
     "power": "Power",
     "gap": "Gap",
+    # Haug advanced catalog (registry-priced, model-consistent in this app)
+    "powered": "Powered (Esser)",
+    "capped_power": "Capped Power (Esser)",
+    "log_contract": "Log Contract",
+    "log_option": "Log Option",
+    "supershare": "Supershare",
+    "double_barrier": "Double Barrier",
+    "discrete_barrier": "Discrete Barrier",
+    "partial_barrier": "Partial-Time Barrier",
+    "binary_barrier": "Binary Barrier",
 }
 
 # =============================================================================
@@ -82,6 +92,16 @@ STRATEGY_DISPLAY_NAMES = {
     "asset_or_nothing_put": "Asset-or-Nothing Put",
     "power_call": "Power Call (n=2)",
     "gap_call": "Gap Call",
+    # Haug advanced catalog
+    "powered_call": "Powered Call (Esser)",
+    "capped_power_call": "Capped Power Call (Esser)",
+    "log_contract": "Log Contract (Neuberger)",
+    "log_option": "Log Option (Wilmott)",
+    "supershare": "Supershare (Hakansson)",
+    "double_barrier_call": "Double Barrier Call (Ikeda-Kunitomo)",
+    "discrete_barrier_call": "Discrete Barrier Call (BGK)",
+    "partial_barrier_call": "Partial-Time Barrier Call (Heynen-Kat)",
+    "binary_barrier_call": "Binary Barrier (Reiner-Rubinstein)",
 }
 
 # =============================================================================
@@ -129,6 +149,16 @@ STRATEGY_DESCRIPTIONS = {
     "asset_or_nothing_put": "Pays the asset price S if S < K at expiry, else zero.",
     "power_call": "Payoff on S^n instead of S. n=2 gives quadratic payoff. Adjusted vol = n * sigma.",
     "gap_call": "Two strikes: K1 (payment) and K2 (trigger). Pays (S-K1) if S > K2.",
+    # Exotic — Haug advanced
+    "powered_call": "Esser powered payoff max(S-K, 0)^i. Convex, leverages deep-ITM moves.",
+    "capped_power_call": "Esser power payoff min(max(S^i - K, 0), cap). Capped upside.",
+    "log_contract": "Neuberger log contract: pays ln(S/K). Building block for variance swaps.",
+    "log_option": "Wilmott log option: pays max(ln(S/K), 0). Convex in log-moneyness.",
+    "supershare": "Hakansson supershare: pays S/X_L if X_L < S < X_H at expiry, else zero.",
+    "double_barrier_call": "Ikeda-Kunitomo corridor: knocks out if the path leaves [L, U].",
+    "discrete_barrier_call": "Barrier monitored at discrete dates only (BGK correction).",
+    "partial_barrier_call": "Heynen-Kat: barrier live only over a partial window [0, t1] (or [t1, T]).",
+    "binary_barrier_call": "Reiner-Rubinstein binary barrier: cash/asset gated by a path hit (28 types).",
 }
 
 # =============================================================================
@@ -512,6 +542,93 @@ STRATEGY_LEGS = {
             "quantity": 1,
             "instrument_class": "gap",
             "gap_trigger_factor": 1.05,
+        },
+    ],
+    # ── Exotic — Haug Power (Esser) ──
+    "powered_call": [
+        {
+            "option_type": "call",
+            "position_type": "long",
+            "strike_factor": 1.0,
+            "quantity": 1,
+            "instrument_class": "powered",
+            "power_n": 2,
+        },
+    ],
+    "capped_power_call": [
+        {
+            "option_type": "call",
+            "position_type": "long",
+            "strike_factor": 1.0,
+            "quantity": 1,
+            "instrument_class": "capped_power",
+            "power_n": 2.0,
+            "cap": 50.0,
+        },
+    ],
+    # ── Exotic — Haug Analytic ──
+    "log_contract": [
+        {
+            "option_type": "call",
+            "position_type": "long",
+            "strike_factor": 1.0,
+            "quantity": 1,
+            "instrument_class": "log_contract",
+        },
+    ],
+    "log_option": [
+        {
+            "option_type": "call",
+            "position_type": "long",
+            "strike_factor": 1.0,
+            "quantity": 1,
+            "instrument_class": "log_option",
+        },
+    ],
+    "supershare": [
+        {
+            "option_type": "call",
+            "position_type": "long",
+            "strike_factor": 1.0,
+            "quantity": 1,
+            "instrument_class": "supershare",
+        },
+    ],
+    # ── Exotic — Haug Advanced Barriers ──
+    "double_barrier_call": [
+        {
+            "option_type": "call",
+            "position_type": "long",
+            "strike_factor": 1.0,
+            "quantity": 1,
+            "instrument_class": "double_barrier",
+        },
+    ],
+    "discrete_barrier_call": [
+        {
+            "option_type": "call",
+            "position_type": "long",
+            "strike_factor": 1.0,
+            "quantity": 1,
+            "instrument_class": "discrete_barrier",
+        },
+    ],
+    "partial_barrier_call": [
+        {
+            "option_type": "call",
+            "position_type": "long",
+            "strike_factor": 1.0,
+            "quantity": 1,
+            "instrument_class": "partial_barrier",
+        },
+    ],
+    "binary_barrier_call": [
+        {
+            "option_type": "call",
+            "position_type": "long",
+            "strike_factor": 1.0,
+            "quantity": 1,
+            "instrument_class": "binary_barrier",
         },
     ],
 }

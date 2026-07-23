@@ -17,10 +17,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import numpy as np
-from scipy.stats import norm
 
 from backend.utils.math import bs_price as _bs_price_canonical
 from backend.utils.math import d1_d2 as _d1_d2_canonical
+from backend.utils.math import norm_pdf as _norm_pdf
 
 from backend.core.interfaces import Instrument, Model, PricingEngine
 from backend.core.market import MarketEnvironment
@@ -312,7 +312,9 @@ class BSAnalyticEngine(PricingEngine):
 
         d1, _ = _d1_d2_canonical(s0, k, t, r, sigma, q)
         forward_discount = np.exp(-q * t)
-        return s0 * forward_discount * norm.pdf(d1) * np.sqrt(t)
+        # Inlined (njit) normal pdf: avoids the slow scipy.stats.norm frozen-dist
+        # call on every Newton iteration of the IV inversion.
+        return s0 * forward_discount * _norm_pdf(d1) * np.sqrt(t)
 
 
 if __name__ == "__main__":

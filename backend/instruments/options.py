@@ -13,6 +13,7 @@ Created: 2026
 from __future__ import annotations
 
 from backend.core.interfaces import Instrument, Payoff
+from backend.instruments._frozen import FrozenInstrument
 from backend.core.result_types import ExerciseStyle
 from backend.instruments.payoffs import (
     DigitalCallPayoff,
@@ -21,13 +22,46 @@ from backend.instruments.payoffs import (
     VanillaPutPayoff,
 )
 
+# Re-export exotic options for backward compatibility
+from backend.instruments.exotic_options import (  # noqa: F401
+    AsianCall,
+    AsianGeometricCall,
+    AsianGeometricPut,
+    AsianOption,
+    AsianPut,
+    AssetOrNothingCall,
+    AssetOrNothingOption,
+    AssetOrNothingPut,
+    BarrierDownInCall,
+    BarrierDownInPut,
+    BarrierDownOutCall,
+    BarrierDownOutPut,
+    BarrierOption,
+    BarrierUpInCall,
+    BarrierUpInPut,
+    BarrierUpOutCall,
+    BarrierUpOutPut,
+    Chooser,
+    ChooserOption,
+    GapCall,
+    GapOption,
+    GapPut,
+    LookbackCall,
+    LookbackFixedCall,
+    LookbackFixedPut,
+    LookbackOption,
+    LookbackPut,
+    PowerCall,
+    PowerOption,
+    PowerPut,
+)
 
 # =============================================================================
 # VANILLA OPTIONS
 # =============================================================================
 
 
-class VanillaOption(Instrument):
+class VanillaOption(FrozenInstrument, Instrument):
     """
     Vanilla European/American option.
 
@@ -78,12 +112,6 @@ class VanillaOption(Instrument):
         else:
             cached_payoff = VanillaPutPayoff(strike)
         object.__setattr__(self, "_payoff", cached_payoff)
-
-    def __setattr__(self, name: str, value: object) -> None:
-        raise AttributeError("VanillaOption is immutable")
-
-    def __delattr__(self, name: str) -> None:
-        raise AttributeError("VanillaOption is immutable")
 
     @property
     def strike(self) -> float:
@@ -145,7 +173,7 @@ class VanillaOption(Instrument):
 # =============================================================================
 
 
-class DigitalOption(Instrument):
+class DigitalOption(FrozenInstrument, Instrument):
     """
     Digital (binary) option.
 
@@ -199,12 +227,6 @@ class DigitalOption(Instrument):
         else:
             cached_payoff = DigitalPutPayoff(strike, payout)
         object.__setattr__(self, "_payoff", cached_payoff)
-
-    def __setattr__(self, name: str, value: object) -> None:
-        raise AttributeError("DigitalOption is immutable")
-
-    def __delattr__(self, name: str) -> None:
-        raise AttributeError("DigitalOption is immutable")
 
     @property
     def strike(self) -> float:

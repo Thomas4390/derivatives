@@ -38,8 +38,8 @@ MODEL_DISPLAY_NAMES: dict[str, str] = {
 }
 
 # Emoji prefix per model — keeps the sidebar dropdown visually
-# consistent with the tab strip ("🌐 Setup", "▶️ Live", "🔁 Multi-Start",
-# …) where every entry is already glyph-prefixed.
+# consistent with the tab strip ("🌐 Setup", "▶️ Live", "🗺️ Loss
+# Landscape", …) where every entry is already glyph-prefixed.
 MODEL_ICONS: dict[str, str] = {
     "heston": "🌀",      # SV swirl
     "merton": "💥",      # jump
@@ -222,6 +222,14 @@ SURFACE_FAMILY: tuple[str, ...] = (
     "iv_gbm",
 )
 
+# Nonaffine risk-neutral GARCH surface models (Duan-Q): no closed-form
+# characteristic function, so they are calibrated to the option SURFACE by
+# Monte-Carlo. Their scalar MC objective has no analytical Jacobian, so they
+# share special calibration wiring — a single seeded start (multi-start hurts),
+# a higher per-eval budget floor, a final polish, and a non-DE default solver.
+# Reused across solver_panel, calibration_service, and synthetic_data_service.
+RN_GARCH_SURFACE_MODELS: tuple[str, ...] = ("ngarch_q", "garch_q", "gjr_q")
+
 # Public mapping: data family → ordered tuple of eligible model keys.
 # Used by sidebar widgets to filter generator / candidate dropdowns when
 # the user toggles the family switch.
@@ -349,6 +357,10 @@ OBJECTIVE_DISPLAY_NAMES: dict[str, str] = {
     "spread_weighted": "Spread-weighted",
     "relative": "Relative / Log",
     "huber": "Huber",
+    # Pseudo-objective shown for the returns-GARCH family, whose calibration
+    # target is the MLE negative log-likelihood (not an ObjectiveStrategy).
+    # Deliberately NOT in OBJECTIVE_CHOICES — it is never user-selectable.
+    "nll": "Returns NLL",
 }
 
 # Single-glyph prefix per objective — keeps the sidebar pills tight.
@@ -359,6 +371,7 @@ OBJECTIVE_ICONS: dict[str, str] = {
     "spread_weighted": "↔️",
     "relative": "⚖️",
     "huber": "🛡️",
+    "nll": "📉",
 }
 
 OBJECTIVE_DESCRIPTIONS: dict[str, str] = {
@@ -455,13 +468,39 @@ DEFAULT_SURFACE_CONFIG: dict = {
     "dividend_yield": 0.0,
     "n_strikes": 11,
     "n_maturities": 5,
-    "strike_min": 80.0,
-    "strike_max": 120.0,
+    # Half-width of the strike grid in standardized-moneyness units (σ√T). Each
+    # maturity's strikes span F·exp(±moneyness_width·σ_T·√T), so the surface fills
+    # for any vol level. Replaces the old fixed dollar strike_min/strike_max.
+    # Defaults to ±5σ√T; the sidebar slider can dial it back toward the forward.
+    # ``generate_surface`` clamps the effective wings inward whenever the outermost
+    # strikes would price below the inversion floor, so the grid renders NaN-free
+    # even when the requested width reaches into the dead wings (see the wing-clamp
+    # thresholds in the "Numerical guardrails" section).
+    "moneyness_width": 5.0,
     "maturity_min": 1.0 / 12.0,
     "maturity_max": 2.0,
     "noise_std": 0.0,
     "seed": 42,
 }
+
+# ── IV-surface display x-axis ──────────────────────────────────────────
+# Display-only choice of how the surface/smile x-axis is labelled. The
+# synthetic grid is always generated on σ√T-standardized moneyness (with the
+# wings clamped in so it fills without NaN holes for any vol level); these
+# options re-express the
+# *already priced* quotes in more familiar units at plot time — no surface
+# regeneration. ``moneyness_sigma`` (the σ√T-standardized ``ln(K/F) / (σ√T)``
+# the grid is natively built on) is the default; ``log_moneyness`` is the
+# academic alternative. Keyed display-label → internal key (consumed by
+# services/axis_display.py).
+X_AXIS_OPTIONS: dict[str, str] = {
+    "Log-moneyness  ln(K/F)": "log_moneyness",
+    "σ√T-moneyness": "moneyness_sigma",
+    "Strike  K ($)": "strike",
+    "Moneyness  K / F": "k_over_f",
+}
+DEFAULT_X_AXIS: str = "moneyness_sigma"
+
 
 DEFAULT_RETURNS_CONFIG: dict = {
     "n_periods": 1000,
@@ -480,9 +519,106 @@ DEFAULT_RETURNS_CONFIG: dict = {
 IV_FILTER_MIN: float = 0.01
 IV_FILTER_MAX: float = 4.99
 
+# Smallest *model* option price (price units, spot ≈ 100) we trust to carry
+# information for a Black-Scholes IV inversion. Below it the price is either a
+# floored zero (no Monte-Carlo path crossed a deep-OTM short-maturity strike) or
+# a tiny negative value from the FFT call→put parity on a deep-ITM call — in both
+# cases the cell holds no model signal, so we mark it NaN instead of inverting the
+# floor into a fabricated, model-independent IV. Mirrors the long-standing 1e-6
+# price floor: any cell that rounds to the floor is exactly the artefact.
+MIN_PRICE_FOR_IV: float = 1e-6
+
+# Wing-clamp thresholds for the adaptive synthetic surface. A ±moneyness_width·σ√T
+# grid can push its outermost strikes into wings where the model price falls below
+# the IV-inversion floor, leaving NaN holes. Rather than fabricate an IV from a
+# floored price, ``generate_surface`` shrinks the grid's wings to the domain where
+# the *production* re-pricing still yields an informative price. A cell priced below
+# the applicable threshold is treated as "dead" and clamped out. The threshold is
+# route-dependent, and carries a margin above MIN_PRICE_FOR_IV because the overlay
+# re-prices at the FIT (not the truth):
+#   - FFT / closed-form surfaces: a ×10 margin on MIN_PRICE_FOR_IV is enough — the
+#     re-price is deterministic, only the fitted parameters differ from the truth.
+#   - Monte-Carlo surfaces (GARCH-Q trio, nonaffine custom): a much wider margin,
+#     because a true price of ~2.9e-4 can round to 0 under a finite path count. The
+#     ground-truth surface prices at MC_PATHS_TRUTH (80k), but the post-calibration
+#     overlay re-prices at only MC_PATHS_SURFACE (30k), so the clamp keeps the wings
+#     where even the coarser overlay stays above the inversion floor.
+SURFACE_WING_MIN_PRICE_FFT: float = 1e-5
+SURFACE_WING_MIN_PRICE_MC: float = 1e-3
+# Never pull a wing tighter than ±1σ√T (the near-ATM core always prices well above
+# the floor); a persistent dead cell inside this core keeps the NaN convention.
+SURFACE_WING_MIN_WIDTH: float = 1.0
+# The MC re-price of a clamped grid can resurface a boundary dead cell, so the clamp
+# iterates a few times before falling back to the NaN convention + a logged warning.
+SURFACE_WING_CLAMP_MAX_ITERS: int = 3
+
 # Lower bound on |true_param| used by the recovery-error denominator to
 # avoid blow-up when a true parameter is zero.
 RECOVERY_DENOM_CLAMP: float = 1e-12
+
+# Risk-free rate assumed when pricing a returns-family (GARCH) model's
+# model-implied IV surface under Q (Duan LRNVR). The returns data carries a
+# physical drift μ, not a rate, so the diagnostics surface uses this fixed
+# assumption rather than silently defaulting an inline literal.
+RETURNS_IMPLIED_SURFACE_RATE: float = 0.05
+
+# Strike span of the returns-family model-implied IV surface (Diagnostics tab).
+# The grid is shared by every displayed maturity, so its half-width follows the
+# SHORTEST maturity: ±RETURNS_IMPLIED_STRIKE_SPAN_SIGMAS·σ_LR·√T_min, where σ_LR
+# is the smallest long-run annualised vol on display. The old fixed ±20 % grid
+# was ~7σ√T at 1 month for a low-vol GARCH — the MC prices there round to zero
+# and the IV inversion fails, punching NaN holes in the chart. Clamped to
+# [MIN, MAX] so the chart never collapses nor exceeds the old span.
+RETURNS_IMPLIED_STRIKE_SPAN_SIGMAS: float = 4.0
+RETURNS_IMPLIED_HALFWIDTH_MIN: float = 0.05
+RETURNS_IMPLIED_HALFWIDTH_MAX: float = 0.20
+
+
+# ── Calibration numeric defaults ──────────────────────────────────────
+# Domain defaults that were previously hard-coded (some duplicated across the UI
+# panels and the calibration service). Centralised here so they have one home.
+
+# Vega-weighted objective fallback IV (used when a quote carries no implied vol).
+FALLBACK_IV: float = 0.20
+# Huber objective threshold δ default (price units).
+HUBER_DELTA_DEFAULT: float = 0.05
+# Default volatility for the closed-form GBM (iv_gbm) synthetic surface.
+DEFAULT_GBM_SIGMA: float = 0.2
+
+# Monte-Carlo paths / seed for the risk-neutral GARCH pricing paths. A fixed seed
+# gives common random numbers, so repeated re-pricing is reproducible.
+MC_PATHS_INTERACTIVE: int = 20_000  # per-eval cap during interactive calibration
+MC_PATHS_SURFACE: int = 30_000  # post-calibration surface re-pricing / animation
+MC_PATHS_TRUTH: int = 80_000  # clean synthetic ground-truth surface (nonaffine GARCH-Q)
+MC_SEED: int = 12_345
+
+# Loss-landscape sweep budgets. The grid re-prices the model at EVERY cell, so
+# MC-priced models (GARCH-Q trio, MC-only custom models) get a reduced path
+# budget — the fixed MC_SEED gives common random numbers, so the surface stays
+# smooth and deterministic; only the loss LEVEL shifts slightly vs the 20k-path
+# calibration objective, never the basin shape — and a coarser default grid
+# than the closed-form / NLL backends.
+LANDSCAPE_MC_PATHS: int = 5_000
+LANDSCAPE_RESOLUTION_DEFAULT: int = 20
+LANDSCAPE_RESOLUTION_DEFAULT_MC: int = 15
+
+# Per-eval budget *floor* for the nonaffine GARCH-Q calibrators (ngarch_q / garch_q
+# / gjr_q). Their scalar MC objective has no Jacobian, so only derivative-free
+# solvers run (NM / DE / L-BFGS-B); the shared default of 200 stalls far from the
+# optimum even when the truth is attainable. Measured sweet spot is a single seeded
+# start at ~300 evals + a ~100-eval polish ≈ 1 min wall-clock (400 raises accuracy
+# but overshoots the responsiveness budget; 500 worse still). See
+# ``services/calibration_service._calibrator_for``.
+GARCH_Q_MAX_NFEV_FLOOR: int = 300
+# Budget for the calibrator's final local polish (a fresh local solve from the
+# multi-start incumbent). Buys ~30–40 % RMSE for ~16 s on the trio. See the
+# ``polish_nfev`` / ``polish_optimizer`` params of ``GARCHRiskNeutralCalibrator``.
+GARCH_Q_POLISH_NFEV: int = 100
+
+# Soft Feller / stationarity penalty-weight slider (shared by both panels).
+PENALTY_WEIGHT_DEFAULT: float = 1000.0
+PENALTY_WEIGHT_MAX: float = 5000.0
+PENALTY_WEIGHT_STEP: float = 100.0
 
 
 # ── Live runner tuning ────────────────────────────────────────────────

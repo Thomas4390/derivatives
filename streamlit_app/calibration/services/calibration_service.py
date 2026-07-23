@@ -45,7 +45,16 @@ from backend.calibration.utils import (
     model_prices_to_ivs,
 )
 
-from config.constants import RECOVERY_DENOM_CLAMP
+from config.constants import (
+    FALLBACK_IV,
+    GARCH_FAMILY,
+    GARCH_Q_MAX_NFEV_FLOOR,
+    GARCH_Q_POLISH_NFEV,
+    HUBER_DELTA_DEFAULT,
+    MC_PATHS_INTERACTIVE,
+    MC_SEED,
+    RECOVERY_DENOM_CLAMP,
+)
 from services.post_calibration import _engine, rebuild_model
 
 logger = logging.getLogger(__name__)
@@ -175,6 +184,7 @@ def _surface_fit_metrics(model: Any, market_data: Any) -> tuple[float | None, fl
             compute_rmse_iv(model_ivs[valid], market_ivs[valid]) if valid.any() else None
         )
     except (ValueError, FloatingPointError, RuntimeError, ArithmeticError, AttributeError):
+        logger.debug("RMSE (price/IV) computation failed", exc_info=True)
         return None, None
     rp = float(rmse_price) if rmse_price is not None and math.isfinite(rmse_price) else None
     ri = float(rmse_iv) if rmse_iv is not None and math.isfinite(rmse_iv) else None
@@ -235,7 +245,7 @@ def partial_from_history(
     # A no-op for the surface models that reach here — kept for parity should a
     # GARCH rebuild ever be added to ``_rebuild_for_partial``.
     disp = dict(model_params)
-    if model_key in ("garch", "ngarch", "gjr_garch") and "omega" in disp:
+    if model_key in GARCH_FAMILY and "omega" in disp:
         af = float(getattr(market_data, "annualization_factor", 1.0))
         disp["omega"] = disp["omega"] / af
     est_filtered = {k: float(v) for k, v in disp.items() if k in true_params}
@@ -290,6 +300,7 @@ def _calibrator_for(
     feller_weight: float = DEFAULT_FELLER_WEIGHT,
     stationarity_mode: StationarityMode = StationarityMode.SOFT,
     stationarity_weight: float = DEFAULT_STATIONARITY_WEIGHT,
+    param_bounds: dict[str, tuple[float, float]] | None = None,
 ):
     """Build a backend calibrator for the given model with the requested optimizer + objective.
 
@@ -301,6 +312,10 @@ def _calibrator_for(
     Heston-Nandi (β + αγ² < 1) and the Duan NGARCH-Q (β + α(1 + γ²) < 1). Merton
     and the physical-measure GARCH family have neither, so nothing is forwarded
     there.
+
+    ``param_bounds`` is the per-run search universe ``{param: (lo, hi)}`` for
+    this model (``None`` -> each calibrator's canonical default box). Every
+    calibrator accepts it; a partial dict overrides only the named parameters.
     """
     if model_key == "heston":
         return HestonCalibrator(
@@ -312,6 +327,7 @@ def _calibrator_for(
             iteration_callback=iteration_callback,
             feller_mode=feller_mode,
             feller_weight=feller_weight,
+            param_bounds=param_bounds,
         )
     if model_key == "merton":
         return MertonCalibrator(
@@ -321,6 +337,7 @@ def _calibrator_for(
             objective=objective,
             log_iterations=log_iterations,
             iteration_callback=iteration_callback,
+            param_bounds=param_bounds,
         )
     if model_key == "bates":
         return BatesCalibrator(
@@ -333,6 +350,7 @@ def _calibrator_for(
             iteration_callback=iteration_callback,
             feller_mode=feller_mode,
             feller_weight=feller_weight,
+            param_bounds=param_bounds,
         )
     if model_key == "heston_nandi":
         return HestonNandiGARCHCalibrator(
@@ -344,33 +362,66 @@ def _calibrator_for(
             iteration_callback=iteration_callback,
             stationarity_mode=stationarity_mode,
             stationarity_weight=stationarity_weight,
+            param_bounds=param_bounds,
         )
     # Risk-neutral GARCH surface models (nonaffine, MC-priced): map the app key
     # to the simulator variant and use the generalised calibrator. NGARCH-Q keeps
     # its dedicated subclass for back-compat.
     _rn_garch_variant = {"ngarch_q": "ngarch", "garch_q": "garch", "gjr_q": "gjr_garch"}
     if model_key in _rn_garch_variant:
-        # Nonaffine MC surface fit — cap restarts/paths so the interactive run
-        # stays responsive (each objective eval prices the surface by MC).
+        # Nonaffine MC surface fit. Each objective eval prices the surface by MC, so
+        # the budget is tuned for interactive responsiveness rather than handed the
+        # raw slider. Measured policy (see docs/calibration/garch_surface_calibration.md):
+        #   • single seeded start — multi-start HURTS here (the ATM-IV seed already
+        #     sits in the right basin; random log-uniform restarts waste budget in bad
+        #     basins, and "best-of" on the MC-noisy loss picks spurious minima), so the
+        #     slider's n_restarts is overridden to 1;
+        #   • the scalar MC objective is derivative-free and Nelder-Mead in 5-D
+        #     under-converges at the shared 200-eval default, so floor the per-start
+        #     budget at GARCH_Q_MAX_NFEV_FLOOR and run a GARCH_Q_POLISH_NFEV-eval local
+        #     polish from the incumbent (NM by default — frees a stalled simplex);
+        #   • ``mc_seed=MC_SEED`` matches the seed the synthetic truth is priced with
+        #     (synthetic_data_service), so the true parameters sit at an attainable
+        #     optimum rather than behind a structural MC-grid mismatch.
+        # The default *solver* per variant is wired in config/model_registry
+        # (NM for ngarch_q/garch_q, L-BFGS-B for the rough GJR indicator); whatever the
+        # user picks arrives here as ``optimizer``.
         return GARCHRiskNeutralCalibrator(
             garch_type=_rn_garch_variant[model_key],
-            n_restarts=min(n_restarts, 2),
-            max_nfev=max_nfev,
-            n_paths=20_000,
+            n_restarts=1,
+            max_nfev=max(max_nfev, GARCH_Q_MAX_NFEV_FLOOR),
+            n_paths=MC_PATHS_INTERACTIVE,
+            mc_seed=MC_SEED,
+            polish_nfev=GARCH_Q_POLISH_NFEV,
             optimizer=optimizer,
             objective=objective,
             log_iterations=log_iterations,
             iteration_callback=iteration_callback,
             stationarity_mode=stationarity_mode,
             stationarity_weight=stationarity_weight,
+            param_bounds=param_bounds,
         )
-    if model_key in ("garch", "ngarch", "gjr_garch"):
+    if model_key in GARCH_FAMILY:
         return GARCHCalibrator(
             garch_type=model_key,
             optimizer=optimizer,
             log_iterations=log_iterations,
             iteration_callback=iteration_callback,
             max_nfev=max_nfev,
+            param_bounds=param_bounds,
+        )
+    if model_key == "custom":
+        # User-defined surface model registered in the Custom Model tab. Lazy
+        # import keeps the service free of a hard dependency on the UI layer.
+        from services.custom_model_service import build_custom_calibrator
+
+        return build_custom_calibrator(
+            optimizer=optimizer,
+            objective=objective,
+            max_nfev=max_nfev,
+            iteration_callback=iteration_callback,
+            log_iterations=log_iterations,
+            param_bounds=param_bounds,
         )
     raise NotImplementedError(f"No calibrator for {model_key}")
 
@@ -382,7 +433,9 @@ def _build_objective(
     """Instantiate an ObjectiveStrategy from the UI selection + settings dict."""
     settings = objective_settings or {}
     if objective_name == "huber":
-        return make_objective("huber", delta=float(settings.get("huber_delta", 0.05)))
+        return make_objective(
+            "huber", delta=float(settings.get("huber_delta", HUBER_DELTA_DEFAULT))
+        )
     if objective_name == "relative":
         return make_objective(
             "relative",
@@ -391,7 +444,7 @@ def _build_objective(
     if objective_name == "vega_weighted":
         return make_objective(
             "vega_weighted",
-            fallback_iv=float(settings.get("fallback_iv", 0.20)),
+            fallback_iv=float(settings.get("fallback_iv", FALLBACK_IV)),
         )
     return make_objective(objective_name)
 
@@ -440,18 +493,23 @@ def calibrate_with(
     objective_name: str = "price_mse",
     objective_settings: dict[str, Any] | None = None,
     constraint_settings: dict[str, Any] | None = None,
+    search_bounds: dict[str, tuple[float, float]] | None = None,
     n_restarts: int = 5,
     max_nfev: int = 200,
     de_seed: int = 42,
     log_iterations: bool = True,
     iteration_callback=None,
 ) -> CalibrationRunSummary:
-    """Run a single calibration with the chosen solver and objective."""
+    """Run a single calibration with the chosen solver and objective.
+
+    ``search_bounds`` is this model's per-parameter search universe
+    ``{param: (lo, hi)}`` (``None`` -> the calibrator's canonical default box).
+    """
     optimizer = make_strategy(solver_name, max_nfev=max_nfev, de_seed=de_seed)
     # GARCH calibrators do not consume an objective — pass None.
     objective = (
         None
-        if model_key in ("garch", "ngarch", "gjr_garch")
+        if model_key in GARCH_FAMILY
         else _build_objective(objective_name, objective_settings)
     )
     feller_mode, feller_weight = _build_feller(constraint_settings)
@@ -468,6 +526,7 @@ def calibrate_with(
         feller_weight=feller_weight,
         stationarity_mode=stationarity_mode,
         stationarity_weight=stationarity_weight,
+        param_bounds=search_bounds,
     )
 
     t0 = time.perf_counter()
@@ -483,7 +542,7 @@ def calibrate_with(
     # user enters / compares ω at the per-period (daily) scale. Convert the
     # estimated ω back to per-period so recovery vs. true_params is
     # apples-to-apples. α/β/θ/γ are dimensionless and unchanged.
-    if model_key in ("garch", "ngarch", "gjr_garch") and "omega" in est:
+    if model_key in GARCH_FAMILY and "omega" in est:
         af = float(getattr(market_data, "annualization_factor", 1.0))
         est = {**est, "omega": float(est["omega"]) / af}
     # Filter out non-calibratable extras (e.g., GARCH has 'sigma0' which is not in true_params)
@@ -508,136 +567,3 @@ def calibrate_with(
         final_loss=float(result.objective_value),
         grad_norm=float(grad) if grad is not None else None,
     )
-
-
-def calibrate_many(
-    model_key: str,
-    market_data,
-    solver_names: tuple[str, ...],
-    true_params: dict[str, float],
-    *,
-    objective_name: str = "price_mse",
-    objective_settings: dict[str, Any] | None = None,
-    constraint_settings: dict[str, Any] | None = None,
-    n_restarts: int = 5,
-    max_nfev: int = 200,
-    de_seed: int = 42,
-    log_iterations: bool = True,
-    progress_cb=None,
-) -> dict[str, CalibrationRunSummary]:
-    """Run calibrations sequentially for a tuple of solver names."""
-    results: dict[str, CalibrationRunSummary] = {}
-    n = len(solver_names)
-    for i, name in enumerate(solver_names):
-        if progress_cb is not None:
-            progress_cb(i, n, name)
-        try:
-            results[name] = calibrate_with(
-                model_key=model_key,
-                market_data=market_data,
-                solver_name=name,
-                true_params=true_params,
-                objective_name=objective_name,
-                objective_settings=objective_settings,
-                constraint_settings=constraint_settings,
-                n_restarts=n_restarts,
-                max_nfev=max_nfev,
-                de_seed=de_seed,
-                log_iterations=log_iterations,
-            )
-        except Exception as exc:  # noqa: BLE001 — surfaced to the UI
-            logger.exception("Solver %s failed for model %s", name, model_key)
-            results[name] = CalibrationRunSummary.failure(
-                name,
-                true_params,
-                exc,
-                objective_name=objective_name,
-            )
-    if progress_cb is not None:
-        progress_cb(n, n, None)
-    return results
-
-
-# Nested result shape produced by ``calibrate_multi``: indexed first by
-# candidate model key, then by solver name. An ``UNSUPPORTED`` sentinel
-# is stored when a solver is not available for a model so the UI can
-# render a "skipped" row rather than silently dropping the pair.
-MultiModelRunResult = dict[str, dict[str, CalibrationRunSummary]]
-
-
-def calibrate_multi(
-    candidate_models: tuple[str, ...],
-    market_data,
-    solver_names: tuple[str, ...],
-    *,
-    true_params_per_model: dict[str, dict[str, float]] | None = None,
-    constraint_settings: dict[str, Any] | None = None,
-    n_restarts: int = 5,
-    max_nfev: int = 200,
-    de_seed: int = 42,
-    log_iterations: bool = True,
-    progress_cb=None,
-) -> MultiModelRunResult:
-    """Run every ``(model, solver)`` pair sequentially.
-
-    ``true_params_per_model`` is the synthetic ground truth used for the
-    recovery-error metric. Pass an empty dict to skip recovery tracking
-    (e.g. in real-data mode where there is no ground truth).
-    """
-    from config.model_registry import supported_solvers  # local to avoid cycle
-
-    true_params_per_model = true_params_per_model or {}
-    results: MultiModelRunResult = {}
-
-    for model_key in candidate_models:
-        model_supported = set(supported_solvers(model_key))
-        per_solver: dict[str, CalibrationRunSummary] = {}
-        # Use the candidate's own defaults when no synthetic truth exists
-        # for it (e.g. it isn't the generator). The recovery error is
-        # then a sanity proxy, not a strict identification check.
-        truth = true_params_per_model.get(model_key, {})
-
-        for solver_name in solver_names:
-            if solver_name not in model_supported:
-                per_solver[solver_name] = CalibrationRunSummary(
-                    solver_name=solver_name,
-                    result=None,
-                    elapsed=-1.0,
-                    estimated_params={},
-                    true_params=dict(truth),
-                    relative_recovery_error={},
-                    error=f"solver '{solver_name}' is not supported for model '{model_key}'",
-                )
-                if progress_cb is not None:
-                    progress_cb(model_key, solver_name, "skipped")
-                continue
-
-            if progress_cb is not None:
-                progress_cb(model_key, solver_name, "running")
-            try:
-                per_solver[solver_name] = calibrate_with(
-                    model_key=model_key,
-                    market_data=market_data,
-                    solver_name=solver_name,
-                    true_params=truth,
-                    constraint_settings=constraint_settings,
-                    n_restarts=n_restarts,
-                    max_nfev=max_nfev,
-                    de_seed=de_seed,
-                    log_iterations=log_iterations,
-                )
-            except Exception as exc:  # noqa: BLE001 — surfaced to the UI
-                logger.exception(
-                    "Solver %s failed for model %s",
-                    solver_name,
-                    model_key,
-                )
-                per_solver[solver_name] = CalibrationRunSummary.failure(
-                    solver_name,
-                    truth,
-                    exc,
-                )
-
-        results[model_key] = per_solver
-
-    return results

@@ -81,56 +81,56 @@ def penalty_weight(mode: FellerMode, weight: float) -> float:
     return float(weight) if mode is FellerMode.SOFT else 0.0
 
 
-def feller_capped_xi(
+def feller_capped_alpha(
     kappa: Any,
     theta: Any,
     unit: Any,
-    xi_lo: float,
-    xi_hi: float,
+    alpha_lo: float,
+    alpha_hi: float,
     *,
     xp: Any,
 ) -> Any:
     """Map a unit variable ``u in (0, 1)`` to ``alpha`` with ``alpha**2 <= 2*kappa*theta``.
 
     Used by the HARD-mode forward reparametrisation. ``alpha`` is confined to
-    ``[xi_lower, xi_upper]`` where ``xi_upper = min(xi_hi, FELLER_STRICT_FACTOR
-    * sqrt(2*kappa*theta))`` and ``xi_lower = min(xi_lo, xi_upper)``. The
-    ``min`` with ``xi_upper`` on the lower bound gives Feller precedence over
+    ``[alpha_lower, alpha_upper]`` where ``alpha_upper = min(alpha_hi, FELLER_STRICT_FACTOR
+    * sqrt(2*kappa*theta))`` and ``alpha_lower = min(alpha_lo, alpha_upper)``. The
+    ``min`` with ``alpha_upper`` on the lower bound gives Feller precedence over
     the numerical box floor in the negligible ``kappa*theta -> 0`` corner.
 
     Parameters
     ----------
     kappa, theta, unit :
         Scalars or arrays from ``xp`` (``numpy`` or ``jax.numpy``).
-    xi_lo, xi_hi :
+    alpha_lo, alpha_hi :
         Box bounds on the vol-of-vol.
     xp :
         Array module providing ``sqrt`` and ``minimum`` (``numpy`` / ``jnp``).
     """
-    xi_feller_max = FELLER_STRICT_FACTOR * xp.sqrt(2.0 * kappa * theta)
-    xi_upper = xp.minimum(xi_hi, xi_feller_max)
-    xi_lower = xp.minimum(xi_lo, xi_upper)
-    return xi_lower + (xi_upper - xi_lower) * unit
+    alpha_feller_max = FELLER_STRICT_FACTOR * xp.sqrt(2.0 * kappa * theta)
+    alpha_upper = xp.minimum(alpha_hi, alpha_feller_max)
+    alpha_lower = xp.minimum(alpha_lo, alpha_upper)
+    return alpha_lower + (alpha_upper - alpha_lower) * unit
 
 
-def feller_xi_to_unit(
+def feller_alpha_to_unit(
     kappa: float,
     theta: float,
     alpha: float,
-    xi_lo: float,
-    xi_hi: float,
+    alpha_lo: float,
+    alpha_hi: float,
 ) -> float:
-    """Inverse of :func:`feller_capped_xi` for HARD-mode seed construction.
+    """Inverse of :func:`feller_capped_alpha` for HARD-mode seed construction.
 
     Returns the unit variable ``u in (0, 1)`` whose forward image matches a
     (possibly Feller-violating) seed ``alpha``, clamped into the admissible
     capped interval. NumPy-only — used to seed the unconstrained start point.
     """
-    xi_feller_max = FELLER_STRICT_FACTOR * float((2.0 * kappa * theta) ** 0.5)
-    xi_upper = min(xi_hi, xi_feller_max)
-    xi_lower = min(xi_lo, xi_upper)
-    span = xi_upper - xi_lower
+    alpha_feller_max = FELLER_STRICT_FACTOR * float((2.0 * kappa * theta) ** 0.5)
+    alpha_upper = min(alpha_hi, alpha_feller_max)
+    alpha_lower = min(alpha_lo, alpha_upper)
+    span = alpha_upper - alpha_lower
     if span <= 0.0:
         return 0.5
-    clamped = min(max(float(alpha), xi_lower), xi_upper)
-    return (clamped - xi_lower) / span
+    clamped = min(max(float(alpha), alpha_lower), alpha_upper)
+    return (clamped - alpha_lower) / span

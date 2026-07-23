@@ -25,6 +25,13 @@ _OPTION_TO_FAMILY: dict[str, str] = {
 }
 _FAMILY_TO_OPTION: dict[str, str] = {v: k for k, v in _OPTION_TO_FAMILY.items()}
 
+# The P-measure (ℙ · Returns) family is hidden from the UI for now (per request):
+# the app defaults to the Q / Surface family and the picker + its explainer below are
+# not rendered. Everything in this module is kept intact so the toggle can be restored
+# by flipping this flag back to True. Tests still pre-seed ``calib_data_family`` to
+# exercise the Returns path — the early-return in ``render`` reads that state.
+_SHOW_FAMILY_PICKER = False
+
 
 def _render_measure_explainer() -> None:
     """Pedagogical popover detailing the P vs Q distinction.
@@ -99,6 +106,13 @@ resets the model dropdowns to that family's defaults.
 
 
 def render() -> str:
+    if not _SHOW_FAMILY_PICKER:
+        # UI hidden — default to Q / Surface; honour any pre-seeded family (tests
+        # set ``calib_data_family`` directly to exercise the Returns path).
+        family = state_manager.get("calib_data_family") or "surface"
+        state_manager.set("calib_data_family", family)
+        return family
+
     st.subheader("🗂️ Data Family")
     _render_measure_explainer()
 

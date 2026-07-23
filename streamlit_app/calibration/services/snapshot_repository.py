@@ -13,6 +13,7 @@ swap (e.g. plugging a remote data source).
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -20,6 +21,10 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 import pyarrow.parquet as pq
+
+# Filename token validators (spx_YYYY-MM-DD_HHMMSS.parquet).
+_DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
+_HMS_RE = re.compile(r"\d{6}")
 
 # SPX trades on the CBOE — quote times are most natural in New York time.
 # zoneinfo handles the EDT ↔ EST DST switch automatically.
@@ -31,9 +36,9 @@ DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 @dataclass(frozen=True)
 class SnapshotEntry:
     file: Path
-    label: str          # e.g., "2025-06-02 · 13:30 EDT"
+    label: str  # e.g., "2025-06-02 · 13:30 EDT"
     trade_date: str
-    snap_iso: str       # e.g., "2025-06-02T17:30:00Z"
+    snap_iso: str  # e.g., "2025-06-02T17:30:00Z"
 
     @property
     def key(self) -> str:
@@ -41,14 +46,21 @@ class SnapshotEntry:
 
 
 def _parse_filename(p: Path) -> tuple[str, str] | None:
-    """File name format: spx_YYYY-MM-DD_HHMMSS.parquet (UTC)."""
-    try:
-        stem = p.stem  # spx_2025-06-02_173000
-        _, date, hms = stem.split("_")
-        hh, mm, ss = hms[:2], hms[2:4], hms[4:6]
-        return date, f"{date}T{hh}:{mm}:{ss}Z"
-    except (ValueError, IndexError):
+    """File name format: spx_YYYY-MM-DD_HHMMSS.parquet (UTC).
+
+    Validates the date and time tokens (a non-numeric / short HHMMSS used to
+    slip through and build a malformed ISO string that later crashed
+    ``datetime.fromisoformat`` inside :func:`list_embedded_snapshots`, outside
+    any try — breaking the whole real-data path over one stray file)."""
+    stem = p.stem  # spx_2025-06-02_173000
+    parts = stem.split("_")
+    if len(parts) != 3:
         return None
+    _, date, hms = parts
+    if not _DATE_RE.fullmatch(date) or not _HMS_RE.fullmatch(hms):
+        return None
+    hh, mm, ss = hms[:2], hms[2:4], hms[4:6]
+    return date, f"{date}T{hh}:{mm}:{ss}Z"
 
 
 def to_nyc(snap_iso: str, *, fmt: str = "full") -> str:
@@ -85,12 +97,14 @@ def list_embedded_snapshots() -> list[SnapshotEntry]:
         if parsed is None:
             continue
         date, snap_iso = parsed
-        entries.append(SnapshotEntry(
-            file=p,
-            label=to_nyc(snap_iso, fmt="full"),
-            trade_date=date,
-            snap_iso=snap_iso,
-        ))
+        entries.append(
+            SnapshotEntry(
+                file=p,
+                label=to_nyc(snap_iso, fmt="full"),
+                trade_date=date,
+                snap_iso=snap_iso,
+            )
+        )
     return entries
 
 

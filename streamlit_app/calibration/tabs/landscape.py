@@ -1,8 +1,11 @@
 """Tab — Loss Landscape (P2).
 
 Slices the calibration objective along any pair of model parameters and
-overlays every solver's trajectory + multi-start endpoints. Only
-surface models are supported — GARCH MLE has a different objective.
+overlays every solver's trajectory + multi-start endpoints. Every model
+family has a landscape backend (see ``landscape_service.loss_backend``):
+FFT surface models and FFT-capable custom models price in closed form, the
+MC trio / MC-only custom models price with a reduced common-random-number
+budget, and the returns-GARCH family plots its MLE negative log-likelihood.
 
 Post-audit fixes (B1-B6) + pedagogical extras (A1-A6) + UX (C3):
   * Initial-guess marker uses the *first evaluation snapshot* from the
@@ -20,43 +23,78 @@ Post-audit fixes (B1-B6) + pedagogical extras (A1-A6) + UX (C3):
 
 from __future__ import annotations
 
-import math
 from typing import Any
 
 import numpy as np
 import streamlit as st
 
 from charts.landscape import LandscapeLayer, render_landscape
-from config.constants import MODEL_DISPLAY_NAMES
+from config.constants import (
+    GARCH_FAMILY,
+    LANDSCAPE_MC_PATHS,
+    LANDSCAPE_RESOLUTION_DEFAULT,
+    LANDSCAPE_RESOLUTION_DEFAULT_MC,
+    MC_PATHS_INTERACTIVE,
+    MODEL_DISPLAY_NAMES,
+    RN_GARCH_SURFACE_MODELS,
+)
 from config.model_registry import get_spec
 from services import state_manager
 from services.calibration_service import build_objective
+from services.model_selection_service import best_slot
 from services.landscape_service import (
-    basin_curvature,
     compute_loss_grid,
+    evaluate_slice_points,
     feller_boundary_segments,
     feller_feasible_window,
     initial_point_from_history,
     is_supported,
-    slice_minimum,
+    loss_backend,
+    mask_nonstationary,
+    stationarity_boundary_segments,
+    stationarity_label,
     trajectory_points,
 )
 from streamlit_app.simulation.config.styles import (  # type: ignore
-    render_stats_row,
     section_header_html,
 )
-from tabs._helpers import active_model_picker, active_objectives_picker
+from tabs._helpers import active_model_picker
+from tabs._landscape_panels import (
+    render_convergence_at_seed_caption,
+    render_pedagogy_panel,
+    render_slice_diagnostics,
+)
 
 
-# Default param pair per model — chosen for visual interest.
+# Default param pair per model — chosen for visual interest. The GARCH
+# families default to (α, β): the persistence ridge α+β ≈ 1 (and its
+# leverage-adjusted variants) is the pedagogical story of those slices.
 _DEFAULT_PAIRS: dict[str, tuple[str, str]] = {
     "heston": ("kappa", "theta"),
     "bates": ("kappa", "rho"),
     "merton": ("lam", "sigma_j"),
+    "heston_nandi": ("beta", "gamma"),
+    "garch": ("alpha", "beta"),
+    "ngarch": ("alpha", "beta"),
+    "gjr_garch": ("alpha", "beta"),
+    "garch_q": ("alpha", "beta"),
+    "ngarch_q": ("alpha", "beta"),
+    "gjr_q": ("alpha", "beta"),
 }
 
 # Zoom factor (±) applied around the estimated point for B3.
 _DEFAULT_ZOOM_FACTOR = 3.0
+
+# The multiplicative ±3×|estimate| zoom is right for scale parameters
+# (Heston κ, θ, …) but degenerate for the GARCH persistence parameters:
+# β̂ ≈ 0.9 gives a 2.7 half-width that spans the whole [0, 1) domain, so the
+# grid cells end up far wider than the NLL valley. For those parameters the
+# half-width is capped at a fraction of the spec span. ω (log-scale, a scale
+# parameter) keeps the multiplicative rule; heston_nandi's α/γ live on very
+# different scales and are excluded on purpose.
+_ADDITIVE_ZOOM_MODELS = frozenset(GARCH_FAMILY) | frozenset(RN_GARCH_SURFACE_MODELS)
+_PERSISTENCE_ZOOM_PARAMS = frozenset({"alpha", "beta", "gamma"})
+_PERSISTENCE_ZOOM_FRAC = 0.15  # half-width as a fraction of the spec span
 
 
 def _zoom_range(
@@ -64,14 +102,19 @@ def _zoom_range(
     spec_lo: float,
     spec_hi: float,
     factor: float = _DEFAULT_ZOOM_FACTOR,
+    *,
+    additive_half: float | None = None,
 ) -> tuple[float, float]:
     """Build a window around ``estimate`` of half-width ``factor·|estimate|``.
 
     Clamped to ``[spec_lo, spec_hi]``. Falls back to a fraction of the
     spec range when ``estimate`` is ~0 so we don't end up with a
-    zero-width window.
+    zero-width window. ``additive_half`` caps the half-width (persistence
+    parameters: a β̂ near 1 must not blow the window up to the full domain).
     """
     half = factor * abs(float(estimate))
+    if additive_half is not None:
+        half = min(half, float(additive_half))
     if half < 1e-12:
         half = 0.25 * (spec_hi - spec_lo)
     lo = max(spec_lo, estimate - half)
@@ -116,84 +159,6 @@ def _fit_window(
     return float(lo), float(hi)
 
 
-def _render_pedagogy_panel(model_key_hint: str | None) -> None:
-    """Pedagogical explainer rendered above the chart.
-
-    Collapsed by default so the panel does not push the chart below the
-    fold for repeat users, but always available for first-timers. The
-    content focuses on *reading* the chart — what every colour, marker,
-    and *empty* region means — and on the subtle but important fact that
-    a 2-D slice is not the full objective.
-    """
-    with st.expander(
-        "📖 How to read this chart (read once before exploring)",
-        expanded=False,
-    ):
-        st.markdown(
-            """
-**What is a loss landscape?**
-
-Calibration tunes the model parameters $\\theta$ to reproduce the market.
-For every candidate $\\theta$, we measure how badly the model misprices the
-surface — that number is the **loss** $L(\\theta)$. The set of all
-$(\\theta, L(\\theta))$ pairs is a high-dimensional landscape; calibration
-is the descent from a starting guess down into a valley.
-
-For a model with $p$ parameters, the landscape lives in $\\mathbb{R}^p$ and
-you cannot see it. **What this tab shows is a 2-D *slice*** of that
-landscape: two parameters vary on the $(x, y)$ axes, every other parameter
-is **frozen** at the values listed at the bottom of the chart.
-
-**How to read the colour map**
-
-- **Dark blue / purple** → low loss → model fits the market well.
-- **Yellow / red** → high loss → model misprices the market.
-- The **valley** (lowest dark region) is the slice's local optimum.
-
-**The overlays**
-
-| Marker | Meaning |
-|---|---|
-| 🟢 *Star (green)* | Synthetic-mode ground truth — the parameters that **generated** the data. The solver should land here. |
-| 🟠 *Diamond (orange)* | The solver's **initial guess** $x_0$ — typically a heuristic (ATM IV for Heston, etc.). |
-| 🔴 *Polyline (red)* | The **trajectory** — every step the optimiser made, from $x_0$ to its final answer. |
-| 🟣 *Dots (purple)* | **Multi-start endpoints** (LM-JAX only) — final point of each restart. They tell you whether all restarts agreed. |
-| ⚪ *White curve* | The **Feller boundary** $2\\kappa\\sigma^2 = \\alpha^2$ (Heston/Bates only). Crossing it makes variance negative. |
-
-**Why doesn't the colour cover the whole rectangle?**
-
-The blank / white regions are **not bugs** — they are **infeasible
-regions** of parameter space:
-
-1. **Feller violation (Heston/Bates).** If $2\\kappa\\sigma^2 < \\alpha^2$, the
-   variance process can hit zero in finite time and the model is rejected.
-   The pricer returns `NaN`, the contour stays blank.
-2. **Pricing failures.** Some configurations make the characteristic
-   function or the FFT inversion diverge (e.g. $\\alpha \\to 0$, extreme
-   correlations $|\\rho| \\to 1$). The cell is left as `NaN` and stays
-   blank.
-3. **Numerical exceptions** (overflow, division by zero in the closed-form
-   formulas) are caught and reported as `NaN` so a single bad cell does
-   not crash the whole grid.
-
-This is also why **the contour map is sometimes very narrow**: the user
-toggle "Full spec range" is OFF by default and we zoom **±3 ×|estimate|**
-around the solver's best point — a tight window where the curvature is
-visible. Turn the toggle ON to see the full bounded region, including
-how much of it is actually infeasible.
-
-**Caveat: 2-D slice ≠ full optimisation problem**
-
-The solver does not walk along this slice. It walks in $\\mathbb{R}^p$,
-varying *all* parameters at once. The trajectory you see is **projected**
-onto the $(x, y)$ plane. A point that looks like a yellow plateau here
-may actually be a deep valley in the full $p$-dimensional space because
-the hidden parameters were different at that step. Use this chart to
-build intuition, not to second-guess the optimiser.
-"""
-        )
-
-
 def _flatten_per_solver(per_solver: dict):
     """Yield ``(label, summary)`` pairs handling both legacy and nested schemas.
 
@@ -210,30 +175,103 @@ def _flatten_per_solver(per_solver: dict):
             yield solver_name, slot
 
 
-def _pick_anchor_solver(per_solver: dict) -> tuple[str | None, Any]:
-    """Pick the slot whose calibrated point anchors the slice (best RMSE).
+def _objectives_from_labels(labels: set[str], primary: str | None) -> list[str]:
+    """Unique objectives among ``solver/objective`` labels, the primary first.
 
-    Returns ``(label, summary)`` or ``(None, None)`` when no run
-    succeeded yet. Honours the user's current ``active_objective`` when
-    one exists so the anchor follows the inspected slice.
+    A legacy label without ``/`` maps to ``primary`` (or ``price_mse``). When the
+    ``primary`` objective is no longer represented in the selection, the first
+    (sorted) objective becomes the anchor — the caller promotes
+    ``calib_active_objective`` to match.
+    """
+    objs: list[str] = []
+    seen: set[str] = set()
+    for lbl in sorted(labels):
+        obj = lbl.split("/", 1)[1] if "/" in lbl else (primary or "price_mse")
+        if obj not in seen:
+            seen.add(obj)
+            objs.append(obj)
+    if primary and primary in objs:
+        return [primary] + [o for o in objs if o != primary]
+    return objs
+
+
+def _lmjax_selected_for_objective(
+    chosen_set: set[str], obj_name: str, primary_obj: str
+) -> bool:
+    """True when the user has an LM-JAX run for ``obj_name`` selected.
+
+    Multi-start endpoints are an LM-JAX artefact, so they are shown only while
+    an LM-JAX run for their objective is selected. This gates on the **picker
+    selection** (``chosen_set``) rather than on the *drawn* trajectory dict: a
+    seed that reaches the optimum in one step produces a 1-point path that the
+    ``len(xs) > 1`` gate in :func:`_gather_overlays_by_objective` rightly skips,
+    but its endpoints stay meaningful and must not vanish with the polyline
+    (the synthetic Heston→Heston default case, ATM-IV seed on truth). Labels are
+    ``solver/objective`` (nested schema) or a bare solver name (legacy →
+    ``primary_obj``).
+    """
+    return any(
+        lbl.split("/", 1)[0].startswith("LM-JAX")
+        and (lbl.split("/", 1)[1] if "/" in lbl else primary_obj) == obj_name
+        for lbl in chosen_set
+    )
+
+
+def _runs_picker(per_solver: dict, *, key_suffix: str) -> tuple[set[str], list[str]]:
+    """ONE multi-pill over the model's successful ``solver/objective`` runs.
+
+    Returns ``(chosen_labels, selected_objectives)``: the chosen runs drive BOTH the
+    loss surfaces (their unique objectives, primary first) AND the overlaid solver
+    paths. Replaces the old separate "objectives" + "trajectories" pickers — one
+    run = its objective's surface + its solver path.
+    """
+    labels = sorted(
+        {lbl for lbl, s in _flatten_per_solver(per_solver) if s.result is not None}
+    )
+    if not labels:
+        return set(), []
+    chosen = st.pills(
+        "Overlay runs · loss surface + solver path",
+        options=labels,
+        default=labels,
+        selection_mode="multi",
+        key=f"landscape_runs_{key_suffix}",
+    )
+    chosen_set = set(chosen) if chosen else set(labels)
+    primary = state_manager.get("calib_active_objective")
+    objs = _objectives_from_labels(chosen_set, primary)
+    if objs and objs[0] != primary:
+        # Promote the anchor when the active objective is no longer selected
+        # (mirrors the old active_objectives_picker behaviour).
+        state_manager.update(calib_active_objective=objs[0])
+    return chosen_set, objs
+
+
+def _pick_anchor_solver(per_solver: dict) -> tuple[str | None, Any]:
+    """Pick the slot whose calibrated point anchors the slice.
+
+    Returns ``(label, summary)`` or ``(None, None)`` when no run succeeded
+    yet. Honours the user's current ``active_objective`` when one exists so
+    the anchor follows the inspected slice. Scoring is delegated to the shared
+    :func:`best_slot`, which never compares ``rmse_price`` (dollars) with
+    ``objective_value`` (rss/2 or NLL) — that unit mix used to let a
+    failure-branch slot anchor the slice at unfitted parameters.
     """
     active_obj = state_manager.get("calib_active_objective")
-    best_name: str | None = None
-    best_summary = None
-    best_score = math.inf
-    for label, summary in _flatten_per_solver(per_solver):
-        if summary.result is None:
-            continue
+    candidates = [
+        (label, summary)
+        for label, summary in _flatten_per_solver(per_solver)
         # Prefer entries matching the active objective when one is set.
-        if active_obj is not None and "/" in label and not label.endswith(f"/{active_obj}"):
-            continue
-        rmse = summary.result.rmse_price
-        score = float(rmse) if rmse is not None else float(summary.result.objective_value)
-        if score < best_score:
-            best_score = score
-            best_name = label
-            best_summary = summary
-    return best_name, best_summary
+        if not (
+            active_obj is not None
+            and "/" in label
+            and not label.endswith(f"/{active_obj}")
+        )
+    ]
+    chosen = best_slot(candidates)
+    if chosen is None:
+        return None, None
+    return chosen
 
 
 def _gather_overlays_by_objective(per_solver: dict, px: str, py: str, primary_obj: str):
@@ -281,6 +319,71 @@ def _gather_overlays_by_objective(per_solver: dict, px: str, py: str, primary_ob
     )
 
 
+def _exact_overlay_losses(
+    eval_fn,
+    *,
+    model_key: str,
+    market_data,
+    meta: dict,
+    base_params: dict[str, float],
+    px: str,
+    py: str,
+    obj_traj: dict[str, tuple[np.ndarray, np.ndarray]],
+    ms: tuple[list[float], list[float]] | None,
+    objective,
+    objective_key: str,
+    initial_point: tuple[float, float] | None,
+    true_point: tuple[float, float] | None,
+) -> tuple[dict[str, float] | None, np.ndarray | None, float | None, float | None]:
+    """Exact slice losses for one layer's marker points (one batched call).
+
+    Covers the final vertex of every trajectory, the multi-start endpoints,
+    and — when given — x₀ / ground truth. Exact heights keep the 3-D markers
+    on the surface: a nearest-cell lookup could snap a converged endpoint up
+    the valley wall (or beyond the stationarity boundary), drawing the final
+    fit above the seed.
+    """
+    labels = list(obj_traj)
+    points: list[tuple[float, float]] = [
+        (float(obj_traj[lbl][0][-1]), float(obj_traj[lbl][1][-1])) for lbl in labels
+    ]
+    n_ms = len(ms[0]) if ms is not None else 0
+    if n_ms:
+        points.extend((float(x), float(y)) for x, y in zip(ms[0], ms[1]))
+    if initial_point is not None:
+        points.append((float(initial_point[0]), float(initial_point[1])))
+    if true_point is not None:
+        points.append((float(true_point[0]), float(true_point[1])))
+    if not points:
+        return None, None, None, None
+    losses = eval_fn(
+        model_key=model_key,
+        market_data=market_data,
+        meta=meta,
+        base_params=base_params,
+        param_x=px,
+        param_y=py,
+        points=tuple(points),
+        objective=objective,
+        objective_key=objective_key,
+    )
+    end_losses = {lbl: float(losses[i]) for i, lbl in enumerate(labels)} or None
+    ms_losses = (
+        np.asarray(losses[len(labels) : len(labels) + n_ms], dtype=float)
+        if n_ms
+        else None
+    )
+    k = len(labels) + n_ms
+    init_loss: float | None = None
+    true_loss: float | None = None
+    if initial_point is not None:
+        init_loss = float(losses[k])
+        k += 1
+    if true_point is not None:
+        true_loss = float(losses[k])
+    return end_losses, ms_losses, init_loss, true_loss
+
+
 def render(ctx: dict) -> None:
     ensure_data = ctx["ensure_data"]
     data_source = ctx["data_source"]
@@ -294,27 +397,16 @@ def render(ctx: dict) -> None:
         unsafe_allow_html=True,
     )
     st.caption(
-        "Pick two parameters to vary while every other parameter is held at "
-        "its current value. The contour (or 3-D surface) shows the calibration "
-        "loss under the **selected objective** (switch it with the picker "
-        "below). Overlay the optimiser's trajectory to see how each solver "
-        "climbs out of (or settles into) the basin."
+        "Pick two parameters to vary while every other parameter is held at its "
+        "current value. The contour (or 3-D surface) shows the calibration loss "
+        "under each selected run's objective. Use the **Overlay runs** picker below "
+        "to choose which calibration runs to show — each adds its objective's loss "
+        "surface and overlays its solver's trajectory across the basin."
     )
 
-    _render_pedagogy_panel(model_key_hint=None)
+    render_pedagogy_panel(model_key_hint=None)
 
     inspected = active_model_picker(key_suffix="landscape")
-    # The objective picker ties the inspected slice to the user's active
-    # objective(s): the contour values, the anchor, and the axis label all
-    # follow them. Multi-select overlays one loss surface per chosen
-    # objective; the first (primary) drives the anchor + base params. Fall
-    # back to the first selected objective (then price_mse) when no run has
-    # produced multiple objectives yet.
-    selected_objectives = active_objectives_picker(key_suffix="landscape")
-    if not selected_objectives:
-        selection = state_manager.get("calib_objective_selection") or ()
-        selected_objectives = [selection[0] if selection else "price_mse"]
-    active_obj_name = selected_objectives[0]
     model_key = inspected or generator or (candidates[0] if candidates else None)
     if model_key is None:
         st.info("Pick at least one candidate model in the sidebar.")
@@ -333,6 +425,9 @@ def render(ctx: dict) -> None:
         st.info("Data unavailable — fix the sidebar config first.")
         return
 
+    backend = loss_backend(model_key)
+    nll_mode = backend == "nll"
+
     spec = get_spec(model_key)
     param_names = [p.name for p in spec.params]
     if len(param_names) < 2:
@@ -340,13 +435,15 @@ def render(ctx: dict) -> None:
         return
 
     default_x, default_y = _DEFAULT_PAIRS.get(
-        model_key, (param_names[0], param_names[1]),
+        model_key,
+        (param_names[0], param_names[1]),
     )
 
     col_x, col_y, col_res = st.columns([2, 2, 1])
     with col_x:
         px = st.selectbox(
-            "Parameter X", options=param_names,
+            "Parameter X",
+            options=param_names,
             index=param_names.index(default_x) if default_x in param_names else 0,
             key=f"landscape_x_{model_key}",
         )
@@ -354,7 +451,8 @@ def render(ctx: dict) -> None:
         py_options = [p for p in param_names if p != px]
         py_default = default_y if default_y in py_options else py_options[0]
         py = st.selectbox(
-            "Parameter Y", options=py_options,
+            "Parameter Y",
+            options=py_options,
             index=py_options.index(py_default),
             key=f"landscape_y_{model_key}",
         )
@@ -362,17 +460,48 @@ def render(ctx: dict) -> None:
         resolution = st.select_slider(
             "Grid",
             options=[15, 20, 30, 40, 60],
-            value=20,
+            value=(
+                LANDSCAPE_RESOLUTION_DEFAULT_MC
+                if backend == "mc"
+                else LANDSCAPE_RESOLUTION_DEFAULT
+            ),
             help=(
                 "Higher resolution = smoother contour but quadratic compute. "
-                "20 ≈ 1-2 s per Heston slice; 60 ≈ 8-15 s."
+                "Monte-Carlo models re-price the surface at every cell, so "
+                "they default coarser (15 ≈ 5-15 s); FFT / NLL backends run "
+                "20 ≈ 1-2 s and 60 ≈ 8-20 s."
             ),
             key=f"landscape_res_{model_key}",
+        )
+    if backend == "mc":
+        st.caption(
+            f"🎲 Monte-Carlo pricing at every cell ({LANDSCAPE_MC_PATHS:,} "
+            f"paths, fixed seed → common random numbers keep the surface "
+            f"smooth and deterministic; the calibrator used "
+            f"{MC_PATHS_INTERACTIVE:,} paths). The loss *level* therefore "
+            "differs from the solver's objective value — the diagnostics "
+            "card below shows both, labelled; the basin shape does not move."
         )
 
     # ── Pick base_params + anchor solver ─────────────────────────────
     nested = state_manager.get("calib_results") or {}
     per_solver = nested.get(model_key, {})
+
+    # ── ONE overlay picker (replaces the old objectives + trajectories menus) ──
+    # Each chosen "solver/objective" run draws its solver path AND ensures its
+    # objective's loss surface is shown (surfaces dedupe by objective). Runs BEFORE
+    # the anchor pick so a promoted primary objective anchors the slice this rerun.
+    chosen_set, selected_objectives = _runs_picker(per_solver, key_suffix=model_key)
+    if not selected_objectives:
+        selection = state_manager.get("calib_objective_selection") or ()
+        selected_objectives = [selection[0] if selection else "price_mse"]
+    if nll_mode:
+        # Returns-GARCH runs are stored under a pseudo "price_mse" objective
+        # key, but their loss IS the MLE negative log-likelihood — one single
+        # "nll" surface regardless of how the runs were labelled.
+        selected_objectives = ["nll"]
+    active_obj_name = selected_objectives[0]
+
     anchor_name, anchor_summary = _pick_anchor_solver(per_solver)
 
     # Default base_params:
@@ -385,11 +514,7 @@ def render(ctx: dict) -> None:
         for k, v in anchor_summary.estimated_params.items():
             if k in base_params:
                 base_params[k] = float(v)
-    elif (
-        data_source == "synthetic"
-        and inspected == generator
-        and true_params
-    ):
+    elif data_source == "synthetic" and inspected == generator and true_params:
         for k, v in true_params.items():
             if k in base_params and isinstance(v, (int, float)):
                 base_params[k] = float(v)
@@ -400,12 +525,18 @@ def render(ctx: dict) -> None:
     # ── Toggles row ──────────────────────────────────────────────────
     opt_a, opt_b, opt_c = st.columns(3)
     with opt_a:
-        log_scale = st.toggle(
-            "Log scale",
-            value=True,
-            help="Show log₁₀(loss). Reveals the basin near the optimum.",
-            key=f"landscape_log_{model_key}",
-        )
+        if nll_mode:
+            # The NLL is typically negative, so log₁₀(loss) is meaningless —
+            # _safe_log10 would floor the whole grid to a constant.
+            log_scale = False
+            st.caption("Linear loss scale — the NLL can be negative.")
+        else:
+            log_scale = st.toggle(
+                "Log scale",
+                value=True,
+                help="Show log₁₀(loss). Reveals the basin near the optimum.",
+                key=f"landscape_log_{model_key}",
+            )
     with opt_b:
         full_range = st.toggle(
             "Full spec range",
@@ -421,7 +552,7 @@ def render(ctx: dict) -> None:
             "3-D view",
             value=False,
             help="Swap the contour for a Plotly 3-D surface. The basin "
-                 "becomes a literal valley.",
+            "becomes a literal valley.",
             key=f"landscape_3d_{model_key}",
         )
 
@@ -436,7 +567,9 @@ def render(ctx: dict) -> None:
     initial_point: tuple[float, float] | None = None
     if anchor_summary is not None and anchor_summary.result is not None:
         initial_point = initial_point_from_history(
-            anchor_summary.result.iteration_history, px, py,
+            anchor_summary.result.iteration_history,
+            px,
+            py,
         )
     if initial_point is None:
         defaults = spec.true_param_dict()
@@ -445,8 +578,20 @@ def render(ctx: dict) -> None:
     # Trajectories + multi-start endpoints grouped by objective, plus the
     # bounding box of every overlay coordinate used to fit the slice window.
     traj_by_obj, ms_by_obj, content_x, content_y = _gather_overlays_by_objective(
-        per_solver, px, py, active_obj_name,
+        per_solver,
+        px,
+        py,
+        active_obj_name,
     )
+    if nll_mode:
+        # Collapse every stored objective onto the single "nll" surface so the
+        # runs' trajectories land on the one layer drawn below.
+        traj_by_obj = {
+            "nll": {lbl: xy for d in traj_by_obj.values() for lbl, xy in d.items()}
+        }
+        ms_all_x = [x for xs, _ys in ms_by_obj.values() for x in xs]
+        ms_all_y = [y for _xs, ys in ms_by_obj.values() for y in ys]
+        ms_by_obj = {"nll": (ms_all_x, ms_all_y)} if ms_all_x else {}
     extra_x = [p[0] for p in (true_point, initial_point) if p is not None]
     extra_y = [p[1] for p in (true_point, initial_point) if p is not None]
     if extra_x:
@@ -454,15 +599,40 @@ def render(ctx: dict) -> None:
         content_y = np.concatenate([content_y, np.asarray(extra_y, dtype=float)])
 
     # ── Slice extents — fit the window to the runs so they lie on the surface ──
+    def _additive_half(spec, name: str) -> float | None:
+        if model_key in _ADDITIVE_ZOOM_MODELS and name in _PERSISTENCE_ZOOM_PARAMS:
+            return _PERSISTENCE_ZOOM_FRAC * (float(spec.hi) - float(spec.lo))
+        return None
+
     if full_range:
         x_range = (float(px_spec.lo), float(px_spec.hi))
         y_range = (float(py_spec.lo), float(py_spec.hi))
     elif anchor_summary is None:
-        x_range = _zoom_range(base_params[px], px_spec.lo, px_spec.hi)
-        y_range = _zoom_range(base_params[py], py_spec.lo, py_spec.hi)
+        x_range = _zoom_range(
+            base_params[px],
+            px_spec.lo,
+            px_spec.hi,
+            additive_half=_additive_half(px_spec, px),
+        )
+        y_range = _zoom_range(
+            base_params[py],
+            py_spec.lo,
+            py_spec.hi,
+            additive_half=_additive_half(py_spec, py),
+        )
     else:
-        zx_lo, zx_hi = _zoom_range(base_params[px], px_spec.lo, px_spec.hi)
-        zy_lo, zy_hi = _zoom_range(base_params[py], py_spec.lo, py_spec.hi)
+        zx_lo, zx_hi = _zoom_range(
+            base_params[px],
+            px_spec.lo,
+            px_spec.hi,
+            additive_half=_additive_half(px_spec, px),
+        )
+        zy_lo, zy_hi = _zoom_range(
+            base_params[py],
+            py_spec.lo,
+            py_spec.hi,
+            additive_half=_additive_half(py_spec, py),
+        )
         x_range = _fit_window(zx_lo, zx_hi, content_x, px_spec.lo, px_spec.hi)
         y_range = _fit_window(zy_lo, zy_hi, content_y, py_spec.lo, py_spec.hi)
         # CIR models: crop the window onto the Feller-feasible region so the
@@ -476,11 +646,13 @@ def render(ctx: dict) -> None:
                 fxlo, fxhi, fylo, fyhi = fb
                 cxlo, cxhi = (
                     (float(content_x.min()), float(content_x.max()))
-                    if len(content_x) else (fxlo, fxhi)
+                    if len(content_x)
+                    else (fxlo, fxhi)
                 )
                 cylo, cyhi = (
                     (float(content_y.min()), float(content_y.max()))
-                    if len(content_y) else (fylo, fyhi)
+                    if len(content_y)
+                    else (fylo, fyhi)
                 )
                 nxlo, nxhi = min(fxlo, cxlo), max(fxhi, cxhi)
                 nylo, nyhi = min(fylo, cylo), max(fyhi, cyhi)
@@ -496,34 +668,33 @@ def render(ctx: dict) -> None:
         oy = (content_y < y_range[0]) | (content_y > y_range[1])
         out_of_range = int(np.count_nonzero(ox | oy))
 
-    # ── Trajectory overlay picker (across all selected objectives) ──────
-    all_traj_labels = sorted({lbl for d in traj_by_obj.values() for lbl in d})
-    chosen_set = set(all_traj_labels)
-    if all_traj_labels:
-        chosen = st.pills(
-            "Overlay solver trajectories",
-            options=all_traj_labels,
-            default=all_traj_labels,
-            selection_mode="multi",
-            key=f"landscape_traj_{model_key}",
-        )
-        chosen_set = set(chosen) if chosen else set()
-
     # ── One loss surface per selected objective; assemble overlay layers ──
+    # ``chosen_set`` (the runs picked above) selects which trajectories appear.
     # The grid is cached (by model / params / ranges / objective / resolution),
     # so unchanged renders are instant; the spinner covers a genuine recompute.
     objective_settings = state_manager.get("calib_objective_settings") or {}
+    eval_points_fn = ctx.get("evaluate_slice_points") or evaluate_slice_points
+    initial_point_loss: float | None = None
+    true_point_loss: float | None = None
+    primary_objective = None
+    primary_objective_key = ""
     layers: list[LandscapeLayer] = []
     selected_trajectory_labels: list[str] = []
     with st.spinner(
-        f"Pricing {len(selected_objectives)} surface(s) × "
+        f"Evaluating {len(selected_objectives)} loss surface(s) × "
         f"{resolution * resolution} configurations…"
     ):
-        for obj_name in selected_objectives:
-            objective = build_objective(obj_name, objective_settings)
-            objective_key = f"{obj_name}|" + "|".join(
-                f"{k}={objective_settings[k]}" for k in sorted(objective_settings)
-            )
+        for obj_idx, obj_name in enumerate(selected_objectives):
+            if nll_mode:
+                # The NLL backend evaluates the likelihood directly — there is
+                # no ObjectiveStrategy to build.
+                objective = None
+                objective_key = "nll"
+            else:
+                objective = build_objective(obj_name, objective_settings)
+                objective_key = f"{obj_name}|" + "|".join(
+                    f"{k}={objective_settings[k]}" for k in sorted(objective_settings)
+                )
             res = compute_grid_fn(
                 model_key=model_key,
                 market_data=market_data,
@@ -537,6 +708,11 @@ def render(ctx: dict) -> None:
                 objective_key=objective_key,
                 resolution=int(resolution),
             )
+            if model_key in _ADDITIVE_ZOOM_MODELS:
+                # GARCH families: blank the non-stationary region (persistence
+                # ≥ 1) so its exploding soft-barrier loss doesn't crush the
+                # colour/z scale — the dashed boundary curve marks the edge.
+                res = mask_nonstationary(res, model_key)
             obj_traj = {
                 lbl: xy
                 for lbl, xy in traj_by_obj.get(obj_name, {}).items()
@@ -544,11 +720,47 @@ def render(ctx: dict) -> None:
             }
             selected_trajectory_labels.extend(obj_traj)
             ms = ms_by_obj.get(obj_name)
-            # Multi-start endpoints belong to LM-JAX — drop them when that
-            # trajectory is deselected so the overlay stays self-consistent.
-            if ms is not None and not any(lbl.startswith("LM-JAX") for lbl in obj_traj):
+            # Multi-start endpoints belong to LM-JAX — keep them while an LM-JAX
+            # run for this objective is selected (the picker), NOT while its drawn
+            # trajectory survives the ``len(xs) > 1`` gate. See
+            # :func:`_lmjax_selected_for_objective` for the one-step-seed case.
+            if ms is not None and not _lmjax_selected_for_objective(
+                chosen_set, obj_name, active_obj_name
+            ):
                 ms = None
-            layers.append(LandscapeLayer(obj_name, res, obj_traj or None, ms))
+            # Exact slice losses at the marker points (3-D height override —
+            # x₀ / ground truth ride the primary surface, so only that layer
+            # evaluates them).
+            end_losses, ms_losses, init_loss, true_loss = _exact_overlay_losses(
+                eval_points_fn,
+                model_key=model_key,
+                market_data=market_data,
+                meta=meta,
+                base_params=base_params,
+                px=px,
+                py=py,
+                obj_traj=obj_traj,
+                ms=ms,
+                objective=objective,
+                objective_key=objective_key,
+                initial_point=initial_point if obj_idx == 0 else None,
+                true_point=true_point if obj_idx == 0 else None,
+            )
+            if obj_idx == 0:
+                initial_point_loss = init_loss
+                true_point_loss = true_loss
+                primary_objective = objective
+                primary_objective_key = objective_key
+            layers.append(
+                LandscapeLayer(
+                    obj_name,
+                    res,
+                    obj_traj or None,
+                    ms,
+                    end_losses,
+                    ms_losses,
+                )
+            )
 
     # Primary surface drives the downstream slice-minimum / curvature panels.
     result = layers[0].result
@@ -561,9 +773,24 @@ def render(ctx: dict) -> None:
         # surface instead of running off to the full parameter bounds.
         feller_curve = feller_boundary_segments(
             {p.name: (p.lo, p.hi) for p in spec.params},
-            px, py, base_params,
-            x_range=x_range, y_range=y_range,
+            px,
+            py,
+            base_params,
+            x_range=x_range,
+            y_range=y_range,
         )
+
+    # GARCH families (P and Q) + Heston-Nandi: persistence = 1 boundary,
+    # clipped to the visible window exactly like the Feller curve.
+    stat_curve = stationarity_boundary_segments(
+        model_key,
+        {p.name: (p.lo, p.hi) for p in spec.params},
+        px,
+        py,
+        base_params,
+        x_range=x_range,
+        y_range=y_range,
+    )
 
     st.plotly_chart(
         render_landscape(
@@ -571,8 +798,12 @@ def render(ctx: dict) -> None:
             true_point=true_point,
             initial_point=initial_point,
             feller_curve=feller_curve,
+            stationarity_curve=stat_curve,
+            stationarity_label=stationarity_label(model_key) or "stationarity boundary",
             log_scale=log_scale,
             view_3d=view_3d,
+            initial_point_loss=initial_point_loss,
+            true_point_loss=true_point_loss,
         ),
         width="stretch",
         # Stable key so Streamlit keeps the same chart element across the
@@ -583,12 +814,49 @@ def render(ctx: dict) -> None:
         key=f"landscape_chart_{'3d' if view_3d else 'contour'}_{model_key}",
     )
 
-    _render_convergence_at_seed_caption(layers, x_range, y_range)
+    if view_3d and true_point is not None and anchor_summary is not None:
+        # The marker's z is a *slice* loss (hidden params frozen at the fit),
+        # so after a run the truth generally rides the valley wall — spell
+        # that out under the chart so it doesn't read as a plotting bug.
+        st.caption(
+            f"Ground-truth height = loss at (true {px}, true {py}) with the "
+            "remaining parameters frozen at the **fit** — a point on this "
+            "slice, not the loss of the full true vector (≈ 0). The valley "
+            "floor passes through the fit, so the truth sits up the wall "
+            "unless the fit recovered every parameter; the dotted dropline "
+            "measures that gap (markers also carry a small constant "
+            "anti-clipping lift)."
+        )
 
-    _render_slice_diagnostics(
+    render_convergence_at_seed_caption(layers, x_range, y_range)
+
+    # Grid-comparable loss at the anchor's estimate — the same cell loss the
+    # primary surface sweeps (cached alongside the marker evaluations). The
+    # solver's own objective_value is NOT comparable (rss/2 vs the objective's
+    # compute_loss; reduced MC budget), so the card shows both, labelled.
+    anchor_slice_loss: float | None = None
+    if anchor_summary is not None and anchor_summary.estimated_params:
+        est = anchor_summary.estimated_params
+        if px in est and py in est:
+            anchor_slice_loss = float(
+                eval_points_fn(
+                    model_key=model_key,
+                    market_data=market_data,
+                    meta=meta,
+                    base_params=base_params,
+                    param_x=px,
+                    param_y=py,
+                    points=((float(est[px]), float(est[py])),),
+                    objective=primary_objective,
+                    objective_key=primary_objective_key,
+                )[0]
+            )
+
+    render_slice_diagnostics(
         result=result,
         anchor_summary=anchor_summary,
         anchor_name=anchor_name,
+        anchor_slice_loss=anchor_slice_loss,
         px=px,
         py=py,
         out_of_range=out_of_range,
@@ -599,197 +867,3 @@ def render(ctx: dict) -> None:
         inspected=inspected,
         generator=generator,
     )
-
-
-# Below this fraction of the slice window, a solver trajectory is
-# indistinguishable from the x₀ marker and the user sees no path at
-# all. Two-axis tolerance (max of relative spans) so we only fire when
-# *both* parameters barely moved.
-_DEGENERATE_TRAJECTORY_THRESHOLD: float = 0.01
-
-
-def _render_convergence_at_seed_caption(
-    layers: list[LandscapeLayer],
-    x_range: tuple[float, float],
-    y_range: tuple[float, float],
-) -> None:
-    """Tell the student why a solver path can shrink into the seed marker.
-
-    LM-JAX seeded from the ATM-IV inverse converges almost instantly when
-    the synthetic surface uses the default true parameters — the path
-    spans a fraction of a percent of the window and disappears under x₀.
-    Flag the case explicitly so they don't read it as a bug.
-    """
-    window_x = max(abs(x_range[1] - x_range[0]), 1e-12)
-    window_y = max(abs(y_range[1] - y_range[0]), 1e-12)
-    degenerate: list[tuple[str, int]] = []
-    for layer in layers:
-        for solver_name, (xs, ys) in (layer.solver_trajectories or {}).items():
-            if len(xs) < 2:
-                continue
-            rel_x = float(np.ptp(xs)) / window_x
-            rel_y = float(np.ptp(ys)) / window_y
-            if max(rel_x, rel_y) < _DEGENERATE_TRAJECTORY_THRESHOLD:
-                degenerate.append((solver_name, len(xs)))
-    if not degenerate:
-        return
-    names = ", ".join(f"`{name}` ({nfev} evals)" for name, nfev in degenerate)
-    st.caption(
-        f"ℹ️ {names} converged right at the seed. On synthetic surfaces "
-        f"the ATM-IV-derived x₀ already sits inside the basin, so the "
-        f"trajectory spans less than 1% of the window and hides under "
-        f"the x₀ marker. Change the true parameters in the sidebar to "
-        f"displace the optimum and watch the path stretch out."
-    )
-
-
-# Basin condition-number verdict → stats-card colour variant.
-_KAPPA_VARIANT: dict[str, str] = {
-    "well-conditioned": "teal",
-    "moderately elongated": "amber",
-    "highly elongated": "red",
-}
-
-
-def _render_slice_diagnostics(
-    *,
-    result: Any,
-    anchor_summary: Any,
-    anchor_name: str | None,
-    px: str,
-    py: str,
-    out_of_range: int,
-    solver_trajectories: list[str],
-    base_params: dict[str, float],
-    param_names: list[str],
-    data_source: str,
-    inspected: str,
-    generator: str | None,
-) -> None:
-    """Render the slice-diagnostics panel below the landscape chart.
-
-    A coloured stat-card row (slice minimum, solver optimum, the gap between
-    them, and the basin condition number κ(H)), a one-line legend, and a
-    collapsible explainer holding the 2-D-slice caveat and the anchoring rule.
-    Pure presentation — every value is read from already-computed objects.
-    """
-    minimum = slice_minimum(result)
-
-    anchor_loss: float | None = None
-    anchor_coords: tuple[float, float] | None = None
-    if anchor_summary is not None and anchor_summary.estimated_params:
-        est = anchor_summary.estimated_params
-        if px in est and py in est:
-            anchor_coords = (float(est[px]), float(est[py]))
-        if anchor_summary.result is not None and anchor_summary.result.rmse_iv is not None:
-            anchor_loss = float(anchor_summary.result.rmse_iv) ** 2  # variance proxy
-
-    curvature = basin_curvature(result)
-
-    # ── Stat cards — built dynamically; render_stats_row fits the columns ──
-    stats: list[tuple[str, str, str]] = []
-    variants: list[str] = []
-    if minimum is not None:
-        xm, ym, lm = minimum
-        stats.append(
-            ("Slice minimum", f"{lm:.3e}", f"{px} = {xm:.3g} · {py} = {ym:.3g}")
-        )
-        variants.append("blue")
-    if anchor_name is not None and anchor_coords is not None:
-        loss_val = f"{anchor_loss:.2e}" if anchor_loss is not None else "—"
-        stats.append(
-            (
-                f"{anchor_name} optimum",
-                loss_val,
-                f"{px} = {anchor_coords[0]:.3g} · {py} = {anchor_coords[1]:.3g}",
-            )
-        )
-        variants.append("green")
-    if minimum is not None and anchor_coords is not None:
-        dx = abs(anchor_coords[0] - minimum[0])
-        dy = abs(anchor_coords[1] - minimum[1])
-        stats.append(("Min ↔ optimum gap", f"Δ{px} = {dx:.3g}", f"Δ{py} = {dy:.3g}"))
-        variants.append("amber")
-    if curvature is not None:
-        kappa = curvature["kappa"]
-        lam_min = curvature["lambda_min"]
-        lam_max = curvature["lambda_max"]
-        verdict = (
-            "well-conditioned" if kappa < 5
-            else "moderately elongated" if kappa < 30
-            else "highly elongated"
-        )
-        stats.append(
-            (
-                "Condition κ(H)",
-                f"{kappa:,.0f}",
-                f"{verdict} · λ ∈ [{lam_min:.1e}, {lam_max:.1e}]",
-            )
-        )
-        variants.append(_KAPPA_VARIANT[verdict])
-
-    if stats:
-        st.markdown(
-            section_header_html("📐", "Slice diagnostics"), unsafe_allow_html=True
-        )
-        render_stats_row(stats, variants)
-
-    # ── Out-of-window trajectory warning ──────────────────────────────
-    if out_of_range > 0:
-        st.caption(
-            f"⚠ {out_of_range} trajectory point(s) fall outside the slice "
-            "window — toggle **Full spec range** above to widen the view."
-        )
-
-    # ── Legend (the map key — stays visible) ──────────────────────────
-    overlaid = ", ".join(solver_trajectories) if solver_trajectories else "none selected"
-    st.caption(
-        "Legend: 🟢 ground truth (synthetic) · 🟠 initial guess (x₀) · "
-        "🔴 solver trajectory · 🟣 multi-start endpoints (LM-JAX) · "
-        f"⚪ Feller boundary.  Trajectories overlaid: {overlaid}."
-    )
-
-    # ── Collapsible explainer: slice caveat + anchoring rule ──────────
-    with st.expander("ℹ️ How to read this slice", expanded=False):
-        if minimum is not None and anchor_coords is not None:
-            st.markdown(
-                "Large gaps between the **slice minimum** and the **solver "
-                "optimum** mean the basin curves through the *hidden* parameters."
-            )
-        if curvature is not None and curvature["kappa"] > 30:
-            st.markdown(
-                "Gradient-free solvers (NM, DE) struggle when the condition "
-                "number κ(H) ≫ 1 — the basin is a long, narrow valley."
-            )
-        hidden_str = ", ".join(
-            f"`{n}` = {base_params[n]:.4f}"
-            for n in param_names if n not in (px, py)
-        )
-        st.markdown(
-            "**⚠ This is a 2-D slice of a high-dimensional objective.** The "
-            f"contour shows the loss with hidden parameters frozen at "
-            f"{hidden_str or '(none)'}. Solver trajectories pass through "
-            "*different* hidden-param values along the way, so the true loss at "
-            "a trajectory point is generally lower than what the contour reads "
-            "at the same (x, y) location."
-        )
-        if anchor_name is not None:
-            stopped = " *(best-so-far — solver was stopped)*" if getattr(
-                anchor_summary, "partial", False
-            ) else ""
-            st.markdown(
-                f"Slice anchored at the **{anchor_name}** estimated point.{stopped} "
-                "Toggle **Center on solver optimum** is implicit here — the "
-                f"hidden parameters and zoom window are derived from {anchor_name}'s fit."
-            )
-        elif data_source == "synthetic" and inspected == generator:
-            st.markdown(
-                "Slice anchored at the **synthetic ground truth** parameters "
-                "(no calibration has run yet). Run a calibration to anchor the "
-                "slice at the optimiser's optimum instead."
-            )
-        else:
-            st.markdown(
-                "Slice anchored at the model's **registry defaults** (no run "
-                "yet). Run a calibration to anchor the slice at the optimum."
-            )

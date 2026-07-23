@@ -60,9 +60,11 @@ class MyGBM(Model):
         return {"sigma": self._sigma}
 
     def drift(self, s: float, v: float, t: float, r: float, q: float) -> float:
+        # Risk-neutral drift of the spot: (r - q) S.
         return (r - q) * s
 
     def diffusion(self, s: float, v: float, t: float) -> float:
+        # Constant-volatility diffusion: sigma S (the coefficient of dW).
         return self._sigma * s
 ''',
     "CEV (Constant Elasticity of Variance)": '''\
@@ -125,9 +127,12 @@ class CEVModel(Model):
         return {"sigma": self._sigma, "gamma": self._gamma}
 
     def drift(self, s: float, v: float, t: float, r: float, q: float) -> float:
+        # Risk-neutral drift (r - q) S; the skew lives in diffusion, not here.
         return (r - q) * s
 
     def diffusion(self, s: float, v: float, t: float) -> float:
+        # Local volatility sigma*S^gamma. Floor S at a tiny positive value so the
+        # fractional power stays real if an Euler step overshoots below zero.
         return self._sigma * np.power(np.maximum(s, 1e-10), self._gamma)
 ''',
     "Mean-Reverting (Ornstein-Uhlenbeck)": '''\
@@ -196,9 +201,11 @@ class OUModel(Model):
         return {"kappa": self._kappa, "theta": self._theta, "sigma": self._sigma}
 
     def drift(self, s: float, v: float, t: float, r: float, q: float) -> float:
+        # Linear mean reversion: the price is pulled to theta at speed kappa.
         return self._kappa * (self._theta - s)
 
     def diffusion(self, s: float, v: float, t: float) -> float:
+        # Proportional volatility sigma S (note: additive OU can go negative).
         return self._sigma * s
 ''',
     "Merton Jump-Diffusion": '''\
@@ -300,6 +307,7 @@ class MertonJD(Model):
         return (r - q - self._lambda_j * self._k) * s
 
     def diffusion(self, s: float, v: float, t: float) -> float:
+        # Continuous (Brownian) part only; the jumps are added by jump().
         return self._sigma * s
 
     def jump(self, s: np.ndarray, dt: float) -> np.ndarray:
@@ -309,6 +317,8 @@ class MertonJD(Model):
         n_jumps = np.random.poisson(self._lambda_j * dt, n)
         total = np.zeros(n)
         max_j = n_jumps.max() if n > 0 else 0
+        # One masked pass per jump-count level k: add the k-th jump to every
+        # path that drew at least k jumps in this step.
         for k in range(1, max_j + 1):
             mask = n_jumps >= k
             j = np.random.normal(self._mu_j, self._sigma_j, mask.sum())
@@ -403,9 +413,12 @@ class CIRModel(Model):
         return {"kappa": self._kappa, "theta": self._theta, "sigma": self._sigma}
 
     def drift(self, s: float, v: float, t: float, r: float, q: float) -> float:
+        # Mean reversion toward theta at speed kappa.
         return self._kappa * (self._theta - s)
 
     def diffusion(self, s: float, v: float, t: float) -> float:
+        # Square-root (CIR) diffusion sigma*sqrt(S); floor S >= 0. Feller
+        # 2*kappa*theta > sigma^2 keeps S strictly positive.
         return self._sigma * np.sqrt(np.maximum(s, 1e-10))
 ''',
     "Exponential OU (Schwartz)": '''\
@@ -476,11 +489,14 @@ class ExpOUModel(Model):
         return {"kappa": self._kappa, "theta": self._theta, "sigma": self._sigma}
 
     def drift(self, s: float, v: float, t: float, r: float, q: float) -> float:
+        # Price-space drift of an OU process on ln S; the +0.5*sigma^2 term is
+        # the Ito correction from working in log-space. Floor S > 0 before log.
         log_s = np.log(np.maximum(s, 1e-10))
         log_theta = np.log(self._theta)
         return s * (self._kappa * (log_theta - log_s) + 0.5 * self._sigma**2)
 
     def diffusion(self, s: float, v: float, t: float) -> float:
+        # Lognormal volatility sigma S.
         return self._sigma * s
 ''',
     "Heston-Like (Stochastic Volatility)": '''\
@@ -591,13 +607,16 @@ class HestonLike(Model):
         return (r - q) * s
 
     def diffusion(self, s: float, v: float, t: float) -> float:
+        # sqrt(V) * S; floor V at >= 0 since an Euler step can push it negative.
         return np.sqrt(np.maximum(v, 1e-10)) * s
 
     # ── Variance SDE coefficients (detected by simulator) ──
     def variance_drift(self, v: np.ndarray, s: np.ndarray, t: float) -> np.ndarray:
+        # CIR mean reversion: the variance is pulled to theta at speed kappa.
         return self._kappa * (self._theta - v)
 
     def variance_diffusion(self, v: np.ndarray, s: np.ndarray, t: float) -> np.ndarray:
+        # Vol-of-vol term alpha * sqrt(V) (same non-negativity floor).
         return self._xi * np.sqrt(np.maximum(v, 1e-10))
 
     def get_correlation(self) -> float:
@@ -608,6 +627,8 @@ class HestonLike(Model):
         self, u: complex, s0: float, t: float, r: float, q: float = 0.0
     ) -> complex:
         """Heston semi-analytical CF."""
+        # Heston (1993) CF: exp(C(u,T) + D(u,T) v0 + i u ln S0), where C and D
+        # solve the Riccati ODEs; d and g below are the standard helper terms.
         kappa, theta, alpha, rho, v0 = (
             self._kappa, self._theta, self._xi, self._rho, self._v0
         )
@@ -673,9 +694,11 @@ class GBMWithFFT(Model):
 
     # ── Monte Carlo SDE coefficients ──
     def drift(self, s: float, v: float, t: float, r: float, q: float) -> float:
+        # Risk-neutral drift (r - q) S (used by the MC route).
         return (r - q) * s
 
     def diffusion(self, s: float, v: float, t: float) -> float:
+        # Constant-volatility diffusion: sigma S.
         return self._sigma * s
 
     # ── Characteristic function for FFT ──

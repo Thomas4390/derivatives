@@ -7,6 +7,8 @@ from pathlib import Path
 import streamlit as st
 from config.constants import (
     DEFAULT_MC_PATHS,
+    SP_GBM_VOL_SPEC,
+    SP_HESTON_PARAM_SPECS,
     STRUCTURED_MODEL_TYPES,
     STRUCTURED_PRODUCT_DEFAULTS,
     STRUCTURED_PRODUCT_TYPES,
@@ -236,62 +238,33 @@ def render_structured_product_section(
 
 
 def _render_sp_model_params(model_type: str) -> dict:
-    """Render model-specific parameter inputs for structured products."""
+    """Render model-specific parameter inputs for structured products.
+
+    Heston inputs are driven by ``SP_HESTON_PARAM_SPECS`` (bounds/defaults live in
+    config) — same widgets, keys, order and 2-column layout as before.
+    """
     if model_type == "gbm":
+        s = SP_GBM_VOL_SPEC
         sigma = st.slider(
-            "Volatility", 0.05, 0.80, 0.20, 0.01, format="%.2f", key="sp_sigma"
+            s["label"], s["min"], s["max"], s["default"], s["step"],
+            format=s["format"], key="sp_sigma",
         )
         return {"sigma": sigma}
 
     if model_type == "heston":
-        col1, col2 = st.columns(2)
-        with col1:
-            v0 = st.number_input(
-                "v₀",
-                value=0.04,
-                min_value=0.001,
-                max_value=0.50,
-                step=0.01,
-                format="%.3f",
-                key="sp_v0",
-            )
-            kappa = st.number_input(
-                "κ",
-                value=2.0,
-                min_value=0.1,
-                max_value=10.0,
-                step=0.1,
-                format="%.1f",
-                key="sp_kappa",
-            )
-            rho = st.number_input(
-                "ρ",
-                value=-0.7,
-                min_value=-0.99,
-                max_value=0.99,
-                step=0.05,
-                format="%.2f",
-                key="sp_rho",
-            )
-        with col2:
-            theta = st.number_input(
-                "σ²",
-                value=0.04,
-                min_value=0.001,
-                max_value=0.50,
-                step=0.01,
-                format="%.3f",
-                key="sp_theta",
-            )
-            alpha = st.number_input(
-                "α",
-                value=0.3,
-                min_value=0.01,
-                max_value=1.5,
-                step=0.05,
-                format="%.2f",
-                key="sp_xi",
-            )
-        return {"v0": v0, "kappa": kappa, "theta": theta, "alpha": alpha, "rho": rho}
+        cols = st.columns(2)
+        params: dict = {}
+        for spec in SP_HESTON_PARAM_SPECS:
+            with cols[spec["col"]]:
+                params[spec["name"]] = st.number_input(
+                    spec["label"],
+                    value=spec["default"],
+                    min_value=spec["min"],
+                    max_value=spec["max"],
+                    step=spec["step"],
+                    format=spec["format"],
+                    key=spec["key"],
+                )
+        return params
 
     return {}

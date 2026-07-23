@@ -98,8 +98,11 @@ def _content_hash(payload: dict[str, Any]) -> str:
 def from_surface(sd: SurfaceData, data_config: dict) -> MarketDataBundle:
     meta = {
         "iv_grid": sd.iv_grid,
-        "strikes": sd.strikes,
+        "strikes": sd.strikes,  # (n_T, n_K) per-maturity dollar strikes
         "maturities": sd.maturities,
+        "moneyness": sd.moneyness,  # shared 1D plot axis (σ√T-standardized)
+        "x_label": sd.x_label,
+        "atm_x": sd.atm_x,
         "true_model": sd.true_model,
         "spot": data_config["spot"],
         "rate": data_config["rate"],
@@ -139,10 +142,20 @@ def from_returns(rd: ReturnsData, data_config: dict) -> MarketDataBundle:
 
 
 def from_real_snapshot(snap: RealMarketSnapshot) -> MarketDataBundle:
+    # Real quotes share one dollar-strike axis across maturities → tile to the
+    # uniform 2D-strikes representation and use K/S₀ as the plot axis (σ√T binning
+    # of sparse, irregular real quotes would be lossy — deliberate asymmetry vs the
+    # synthetic σ-moneyness surface).
+    strikes_1d = np.asarray(snap.strikes, dtype=float)
+    strikes_2d = np.tile(strikes_1d, (len(snap.maturities), 1))
+    moneyness = strikes_1d / float(snap.spot) if snap.spot else strikes_1d
     meta = {
         "iv_grid": snap.iv_grid,
-        "strikes": snap.strikes,
+        "strikes": strikes_2d,
         "maturities": snap.maturities,
+        "moneyness": moneyness,
+        "x_label": "Moneyness  K / S₀",
+        "atm_x": 1.0,
         "true_model": None,
         "real_label": snap.snapshot_label,
         "spot": snap.spot,

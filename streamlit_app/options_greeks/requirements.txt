@@ -1,0 +1,8 @@
+# Dependencies for the Options Greeks Explorer Streamlit app (app + backend).
+# numpy is left unpinned so numba can resolve a compatible version.
+streamlit>=1.38.0
+plotly>=6.0.0
+scipy>=1.16.0
+numba>=0.61.2
+jax>=0.10.0
+jaxlib>=0.10.0

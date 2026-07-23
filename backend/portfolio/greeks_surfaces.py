@@ -65,6 +65,7 @@ def portfolio_greeks_surface_dte(
     risk_free_rate: float,
     volatility: float,
     greek_index: int = 1,
+    dividend_yield: float = 0.0,
 ) -> np.ndarray:
     """
     Calculate 2D matrix of a specific Greek varying spot and DTE.
@@ -91,6 +92,8 @@ def portfolio_greeks_surface_dte(
         Implied volatility (constant across surface)
     greek_index : int, default 1
         Index of Greek to return (1=delta, 2=gamma, etc.)
+    dividend_yield : float, default 0.0
+        Annualized continuous dividend yield (decimal)
 
     Returns
     -------
@@ -115,6 +118,7 @@ def portfolio_greeks_surface_dte(
                     risk_free_rate,
                     volatility,
                     option_types[k],
+                    dividend_yield,
                 )
                 multiplier = quantities[k] * position_types[k]
                 total_greek += greeks[greek_index] * multiplier
@@ -135,6 +139,7 @@ def portfolio_greeks_surface_iv(
     risk_free_rate: float,
     base_dte: float,
     greek_index: int = 1,
+    dividend_yield: float = 0.0,
 ) -> np.ndarray:
     """
     Calculate 2D matrix of a specific Greek varying spot and IV.
@@ -159,6 +164,8 @@ def portfolio_greeks_surface_iv(
         Base DTE in days (fixed for this surface)
     greek_index : int, default 1
         Index of Greek to return
+    dividend_yield : float, default 0.0
+        Annualized continuous dividend yield (decimal)
 
     Returns
     -------
@@ -183,6 +190,7 @@ def portfolio_greeks_surface_iv(
                     risk_free_rate,
                     iv_range[j],
                     option_types[k],
+                    dividend_yield,
                 )
                 multiplier = quantities[k] * position_types[k]
                 total_greek += greeks[greek_index] * multiplier
@@ -203,6 +211,7 @@ def single_option_greeks_surface_strike(
     position_type: int,
     quantity: int,
     greek_index: int = 1,
+    dividend_yield: float = 0.0,
 ) -> np.ndarray:
     """
     Calculate 2D matrix of a Greek varying spot and strike for single option.
@@ -227,6 +236,8 @@ def single_option_greeks_surface_strike(
         Quantity (with multiplier)
     greek_index : int, default 1
         Index of Greek to return
+    dividend_yield : float, default 0.0
+        Annualized continuous dividend yield (decimal)
 
     Returns
     -------
@@ -248,6 +259,7 @@ def single_option_greeks_surface_strike(
                 risk_free_rate,
                 volatility,
                 option_type,
+                dividend_yield,
             )
             result[i, j] = greeks[greek_index] * multiplier
 

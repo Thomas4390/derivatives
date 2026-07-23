@@ -26,6 +26,7 @@ def create_pnl_figure(
     breakeven_result=None,
     dte_range=None,
     iv_range=None,
+    scenario_expiries=None,
 ) -> go.Figure:
     """
     Create the P&L profile figure with interactive slider.
@@ -111,28 +112,57 @@ def create_pnl_figure(
             )
         )
 
-    # Add expiration curve (use dense grid if available for sharp payoff kinks)
-    expiry_x = pnl_data.get("expiry_dense_x", spot_range)
-    expiry_y = pnl_data.get("expiry_dense_y", pnl_data["expiry"])
-    fig.add_trace(
-        go.Scatter(
-            x=expiry_x,
-            y=expiry_y,
-            mode="lines",
-            name="P&L at Expiration",
-            visible=True,
-            line=dict(
-                color=LINE_STYLES["expiry"]["color"],
-                width=LINE_STYLES["expiry"]["width"],
-                dash=LINE_STYLES["expiry"]["dash"],
-            ),
-            hovertemplate=(
-                "<b>Underlying:</b> $%{x:,.2f}<br>"
-                + "<b>P&L at Expiry:</b> $%{y:,.2f}<br>"
-                + "<extra></extra>"
-            ),
+    # Add expiration curve(s). For discrete-event exotics both conditional
+    # outcomes are overlaid: each is NaN-masked to its feasible region, so the
+    # two dashed curves tile the spot axis (no toggle needed). Otherwise a
+    # single expiry curve is drawn.
+    if scenario_expiries:
+        _SCENARIO_COLORS = ("#7c3aed", "#ea580c")  # purple, orange — distinct
+        for _idx, (_label, _curve) in enumerate(scenario_expiries):
+            fig.add_trace(
+                go.Scatter(
+                    x=spot_range,
+                    y=_curve,
+                    mode="lines",
+                    name=f"Expiry — {_label}",
+                    visible=True,
+                    connectgaps=False,
+                    line=dict(
+                        color=_SCENARIO_COLORS[_idx % len(_SCENARIO_COLORS)],
+                        width=LINE_STYLES["expiry"]["width"],
+                        dash=LINE_STYLES["expiry"]["dash"],
+                    ),
+                    hovertemplate=(
+                        f"<b>{_label}</b><br>"
+                        + "<b>Underlying:</b> $%{x:,.2f}<br>"
+                        + "<b>P&L at Expiry:</b> $%{y:,.2f}<br>"
+                        + "<extra></extra>"
+                    ),
+                )
+            )
+    else:
+        # Single expiry curve (use dense grid for sharp payoff kinks).
+        expiry_x = pnl_data.get("expiry_dense_x", spot_range)
+        expiry_y = pnl_data.get("expiry_dense_y", pnl_data["expiry"])
+        fig.add_trace(
+            go.Scatter(
+                x=expiry_x,
+                y=expiry_y,
+                mode="lines",
+                name="P&L at Expiration",
+                visible=True,
+                line=dict(
+                    color=LINE_STYLES["expiry"]["color"],
+                    width=LINE_STYLES["expiry"]["width"],
+                    dash=LINE_STYLES["expiry"]["dash"],
+                ),
+                hovertemplate=(
+                    "<b>Underlying:</b> $%{x:,.2f}<br>"
+                    + "<b>P&L at Expiry:</b> $%{y:,.2f}<br>"
+                    + "<extra></extra>"
+                ),
+            )
         )
-    )
 
     # Add breakeven lines (pass spot_price for smart positioning)
     _add_breakeven_lines(fig, breakeven_result, spot_price)
@@ -650,6 +680,7 @@ def render_pnl_tab(
     sp_mode: bool = False,
     dte_range=None,
     iv_range=None,
+    dividend_yield: float = 0.0,
 ) -> None:
     """
     Render the complete P&L tab content.
@@ -666,6 +697,16 @@ def render_pnl_tab(
         calculate_pnl_at_expiry_func: Function to calculate P&L at expiry (for strike variation)
         find_breakeven_func: Function to find breakeven points (for strike variation)
     """
+    # Empty portfolio: draw nothing (not a flat zero line). Show a short hint so
+    # the tab reads as "waiting for input" rather than broken. Comes before the
+    # banner/controls so nothing else renders on a blank portfolio.
+    if len(positions) == 0 and stock_position is None:
+        st.info(
+            "No positions — add a leg in the sidebar to see the payoff diagram.",
+            icon="ℹ️",
+        )
+        return
+
     from components.metrics import (
         render_chart_controls,
         render_metrics_row,
@@ -677,23 +718,23 @@ def render_pnl_tab(
     if not sp_mode:
         render_position_info_banner(positions, stock_position, default_premium)
 
-    # Path-dependent disclaimer
-    if has_exotic_legs and not sp_mode:
-        path_dependent = any(
-            pos.get("instrument_class")
-            in ("asian", "lookback_fixed", "lookback_floating")
-            for pos in positions
-        )
-        if path_dependent:
+    # Discrete-event path-dependent legs: both conditional outcomes are drawn
+    # on the payoff chart together (see below), so no per-leg toggle is needed.
+    has_discrete_event = False
+    discrete_event_legs: list[int] = []
+    if not sp_mode and has_exotic_legs:
+        from config.exotic_config import PAYOFF_SCENARIOS
+
+        for i, pos in enumerate(positions):
+            spec = PAYOFF_SCENARIOS.get(pos.get("instrument_class"))
+            if spec and spec.get("kind") == "discrete_event":
+                has_discrete_event = True
+                discrete_event_legs.append(i)
+        if has_discrete_event:
             st.caption(
-                "P&L at expiry for path-dependent options (Asian, Lookback) is approximate."
-            )
-        barrier_legs = any(
-            pos.get("instrument_class") == "barrier" for pos in positions
-        )
-        if barrier_legs:
-            st.caption(
-                "Barrier P&L at expiry uses a simplified terminal barrier check (not full path monitoring)."
+                "Path-dependent legs: both conditional outcomes are overlaid on "
+                "the payoff chart below (each shown only over the region where it "
+                "can occur), so you can compare them without toggling."
             )
 
     # Detect single-leg position (structured products are never single-leg)
@@ -705,6 +746,125 @@ def render_pnl_tab(
     # Extract base data
     pnl_data = all_data["pnl_data"]
     breakeven_result = all_data["breakeven_result"]
+
+    # For discrete-event legs, compute BOTH conditional outcomes and overlay
+    # them on the payoff chart instead of toggling one at a time. Each outcome
+    # curve is NaN-masked to its feasible region, so the two dashed curves tile
+    # the spot axis. The intermediate-DTE (priced) slider curves stay on the
+    # scenario-agnostic base, so the time slider is unaffected; the metrics are
+    # recombined from the overlay curves below.
+    scenario_expiries: list[tuple[str, np.ndarray]] | None = None
+    if has_discrete_event and not sp_mode and calculate_pnl_at_expiry_func is not None:
+        from services.portfolio_calculator import (
+            _calculate_expiry_pnl,
+            prepare_portfolio_arrays,
+        )
+        from services.scenario_labels import scenario_options
+
+        scenario_expiries = []
+        for scen_idx in (0, 1):
+            # Copy the legs so the live positions are never mutated; set every
+            # discrete-event leg to its scenario ``scen_idx``. The contextual
+            # scenario_options labels (same source as the per-leg payoff
+            # diagram) keep the two outcome names identical across tabs.
+            scen_positions = [dict(p) for p in positions]
+            labels: list[str] = []
+            for i in discrete_event_legs:
+                key, label = scenario_options(scen_positions[i])[scen_idx]
+                scen_positions[i]["scenario"] = key
+                labels.append(label)
+            scenario_pdata = {
+                "spot_price": spot_price,
+                "options": scen_positions,
+                "stock": stock_position,
+            }
+            (
+                _s_strikes,
+                _s_otypes,
+                _s_ptypes,
+                _s_qty,
+                _s_prem,
+                _s_stock_qty,
+                _s_stock_entry,
+                _s_meta,
+            ) = prepare_portfolio_arrays(scenario_pdata)
+            curve = _calculate_expiry_pnl(
+                spot_range,
+                _s_strikes,
+                _s_otypes,
+                _s_ptypes,
+                _s_qty,
+                _s_prem,
+                _s_stock_qty,
+                _s_stock_entry,
+                calculate_pnl_at_expiry_func,
+                exotic_metadata=_s_meta,
+                portfolio_data=scenario_pdata,
+            )
+            scenario_expiries.append((" · ".join(labels), curve))
+
+    # For a single terminal exotic leg with a tunable primary parameter, a
+    # slider sweeps it so you can see the effect on the terminal payoff (current
+    # vs what-if), overlaid on the same chart. The stored leg is never changed —
+    # the sweep is a non-destructive "what-if". Skipped for discrete-event legs
+    # (already showing both outcomes) and multi-leg / stock positions.
+    if (
+        scenario_expiries is None
+        and not sp_mode
+        and has_exotic_legs
+        and len(positions) == 1
+        and stock_position is None
+        and calculate_pnl_at_expiry_func is not None
+    ):
+        from config.exotic_config import EXOTIC_SWEEP_PARAM
+
+        _leg = positions[0]
+        _sweep = EXOTIC_SWEEP_PARAM.get(_leg.get("instrument_class"))
+        if _sweep is not None:
+            _cur = min(
+                max(float(_leg.get(_sweep["key"], _sweep["default"])), _sweep["lo"]),
+                _sweep["hi"],
+            )
+            _val = st.slider(
+                _sweep["label"],
+                _sweep["lo"],
+                _sweep["hi"],
+                _cur,
+                _sweep["step"],
+                key="exotic_param_sweep",
+                help="Sweep this parameter to see how the terminal payoff "
+                "changes. Your leg is left unchanged.",
+            )
+            if abs(_val - _cur) > 1e-9:
+                from services.portfolio_calculator import (
+                    _calculate_expiry_pnl,
+                    prepare_portfolio_arrays,
+                )
+
+                def _sweep_expiry(_param_value: float) -> np.ndarray:
+                    _mod = dict(_leg)
+                    _mod[_sweep["key"]] = _param_value
+                    _pd = {"spot_price": spot_price, "options": [_mod], "stock": None}
+                    (_a, _b, _c, _d, _e, _f, _g, _m) = prepare_portfolio_arrays(_pd)
+                    return _calculate_expiry_pnl(
+                        spot_range,
+                        _a,
+                        _b,
+                        _c,
+                        _d,
+                        _e,
+                        _f,
+                        _g,
+                        calculate_pnl_at_expiry_func,
+                        exotic_metadata=_m,
+                        portfolio_data=_pd,
+                    )
+
+                _short = _sweep["short"]
+                scenario_expiries = [
+                    (f"{_short} = {_cur:g} (current)", _sweep_expiry(_cur)),
+                    (f"{_short} = {_val:g}", _sweep_expiry(_val)),
+                ]
 
     # Get position details for strike variation
     if positions:
@@ -739,6 +899,7 @@ def render_pnl_tab(
             _calculate_all_greeks_func=calculate_all_greeks_func,
             _calculate_pnl_at_expiry_func=calculate_pnl_at_expiry_func,
             _find_breakeven_func=find_breakeven_func,
+            dividend_yield=dividend_yield,
         )
 
         # Create chart with integrated Plotly slider and metrics
@@ -759,6 +920,22 @@ def render_pnl_tab(
             max_profit = all_data.get("max_profit_display", breakeven_result.max_profit)
             max_loss = all_data.get("max_loss_display", breakeven_result.max_loss)
             breakeven_points = breakeven_result.breakeven_points
+            if has_discrete_event and scenario_expiries:
+                # The chart overlays the two conditional outcome curves, so the
+                # metrics must describe those curves too — not the
+                # scenario-agnostic base. ±inf (unlimited) from the base flags
+                # is kept: the grid-bounded curves cannot see an unbounded tail.
+                from services.portfolio_calculator import combine_scenario_metrics
+
+                combined = combine_scenario_metrics(
+                    [curve for _, curve in scenario_expiries], spot_range
+                )
+                if combined is not None:
+                    if max_profit != float("inf"):
+                        max_profit = combined.max_profit
+                    if max_loss != float("-inf"):
+                        max_loss = combined.max_loss
+                    breakeven_points = combined.breakeven_points
             be_count = len(breakeven_points) if breakeven_points else 0
         else:
             max_profit = max_loss = 0
@@ -779,6 +956,14 @@ def render_pnl_tab(
             breakeven_result=breakeven_result,
             dte_range=dte_range,
             iv_range=iv_range,
+            scenario_expiries=scenario_expiries,
         )
+
+        if has_discrete_event and not sp_mode:
+            # Both outcome curves are drawn and NaN-masked to their feasible
+            # regions, so they already tile the axis — no infeasible shading.
+            from charts._exotic_annotations import add_barrier_markers
+
+            add_barrier_markers(fig, positions)
 
         st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})

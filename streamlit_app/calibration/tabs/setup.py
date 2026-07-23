@@ -3,7 +3,8 @@
 In surface mode the IV-surface and smile charts overlay every selected
 ``(model, solver, objective)`` fit (via ``series_view_filter``) against
 the market, instead of showing one solver at a time. The surface-fit
-animation is inherently single-run, so it animates one chosen series.
+animation renders every selected model in ONE figure: all model surfaces
+morph on a shared 3D scene and each model owns its own parameter column.
 """
 
 from __future__ import annotations
@@ -13,16 +14,17 @@ import streamlit as st
 
 from charts.iv_surface import (
     render_iv_surface_3d,
-    render_iv_surface_animation,
     render_iv_surface_overlay_3d,
     render_returns_summary,
     render_smile_slices,
     render_smile_slices_overlay,
+    render_surface_fit_anatomy_animated,
 )
 from components.equations_panel import render as render_equations_panel
 from config.constants import MODEL_DESCRIPTIONS, MODEL_DISPLAY_NAMES
 from config.model_registry import get_spec
 from services import state_manager
+from services.axis_display import resolve_display_axis
 from services.post_calibration import (
     iv_grid_animation_frames,
     model_iv_grid,
@@ -31,7 +33,7 @@ from streamlit_app.simulation.config.styles import (  # type: ignore
     render_metric_row,
     section_header_html,
 )
-from tabs._helpers import Series, series_view_filter
+from tabs._helpers import Series, reference_surface_label, series_view_filter
 
 
 def render(ctx: dict) -> None:
@@ -77,6 +79,9 @@ def render(ctx: dict) -> None:
 def _render_surface_setup(ctx: dict, market_data, meta: dict) -> None:
     data_source = ctx["data_source"]
     true_params = ctx["true_params"]
+    # Name the reference (target) surface after its generating model for
+    # synthetic data; real SPX quotes stay "Market".
+    ref_label = reference_surface_label(data_source, ctx.get("generator_model"))
 
     results = state_manager.get("calib_results") or {}
     selected = series_view_filter(results, key="setup") if results else []
@@ -127,7 +132,42 @@ def _render_surface_setup(ctx: dict, market_data, meta: dict) -> None:
     # name each run unambiguously.
     fit_grids = _compute_fit_grids(selected, market_data, meta)
 
+    # Display-axis choice (ln(K/F) by default) — re-labels the already priced
+    # quotes without regenerating the surface.
+    axis = resolve_display_axis(meta)
+
     st.markdown(section_header_html("📈", "IV surface (3D)"), unsafe_allow_html=True)
+    # Presentation-only visual settings: retune the red market markers and the
+    # surface opacity without regenerating the priced surface (mirrors the
+    # display-axis picker — these keys never enter the data hash).
+    with st.expander("🎨 Surface visual settings", expanded=False):
+        _vc = st.columns(5, vertical_alignment="center")
+        with _vc[0]:
+            st.slider("Market point size", 2, 16, 5, key="calib_vis_marker_size")
+        with _vc[1]:
+            st.slider(
+                "Market point opacity",
+                0.1,
+                1.0,
+                0.95,
+                0.05,
+                key="calib_vis_marker_opacity",
+            )
+        with _vc[2]:
+            st.slider(
+                "Surface opacity",
+                0.1,
+                1.0,
+                0.45,
+                0.05,
+                key="calib_vis_market_surf_opacity",
+            )
+        with _vc[3]:
+            st.color_picker(
+                "Market point colour", "#dc2626", key="calib_vis_marker_color"
+            )
+        with _vc[4]:
+            st.toggle("Fill market points", value=True, key="calib_vis_marker_fill")
     if fit_grids:
         if len(fit_grids) > 4:
             st.caption(
@@ -140,8 +180,10 @@ def _render_surface_setup(ctx: dict, market_data, meta: dict) -> None:
                 fit_grids,
                 meta["strikes"],
                 meta["maturities"],
+                **axis.kwargs(),
                 title="",
                 spot=meta["spot"],
+                reference_label=ref_label,
             ),
             width="stretch",
             key="setup_surface_overlay",
@@ -178,7 +220,9 @@ def _render_surface_setup(ctx: dict, market_data, meta: dict) -> None:
                     smile_grids,
                     meta["strikes"],
                     meta["maturities"],
+                    **axis.kwargs(),
                     spot=meta["spot"],
+                    reference_label=ref_label,
                 ),
                 width="stretch",
                 key="setup_smiles_overlay",
@@ -190,6 +234,7 @@ def _render_surface_setup(ctx: dict, market_data, meta: dict) -> None:
                     meta["iv_grid"],
                     meta["strikes"],
                     meta["maturities"],
+                    **axis.kwargs(),
                     spot=meta["spot"],
                 ),
                 width="stretch",
@@ -198,7 +243,11 @@ def _render_surface_setup(ctx: dict, market_data, meta: dict) -> None:
     else:
         st.plotly_chart(
             render_smile_slices(
-                meta["iv_grid"], meta["strikes"], meta["maturities"], spot=meta["spot"]
+                meta["iv_grid"],
+                meta["strikes"],
+                meta["maturities"],
+                **axis.kwargs(),
+                spot=meta["spot"],
             ),
             width="stretch",
             key="setup_smiles",
@@ -212,9 +261,17 @@ def _render_surface_setup(ctx: dict, market_data, meta: dict) -> None:
     # solver's surface across its iterations), so it animates one chosen
     # series rather than the whole overlay.
     st.markdown(
-        section_header_html("🎞️", "Surface fit animation"), unsafe_allow_html=True
+        section_header_html("🎞️", "Surface fit progression + parameter roles"),
+        unsafe_allow_html=True,
     )
-    _render_fit_animation(selected, market_data, meta)
+    _render_fit_animation(
+        selected,
+        market_data,
+        meta,
+        true_params=true_params,
+        gen_model=ctx["model_key"],
+        data_source=data_source,
+    )
 
 
 def _distinct_models(selected: list[Series]) -> list[str]:
@@ -254,13 +311,16 @@ def _render_surface_fallback(ctx: dict, market_data, meta: dict) -> None:
     real calibration result exists (see ``_render_surface_setup``).
     """
     st.caption("Run a calibration to overlay the model surface here.")
+    ref_label = reference_surface_label(ctx["data_source"], ctx.get("generator_model"))
     st.plotly_chart(
         render_iv_surface_3d(
             meta["iv_grid"],
             meta["strikes"],
             meta["maturities"],
+            **resolve_display_axis(meta).kwargs(),
             title="",
             spot=meta["spot"],
+            reference_label=ref_label,
         ),
         width="stretch",
         key="setup_surface_market",
@@ -376,8 +436,20 @@ def _render_fit_animation(
     selected: list[Series],
     market_data,
     meta: dict,
+    *,
+    true_params: dict[str, float] | None = None,
+    gen_model: str | None = None,
+    data_source: str = "real",
 ) -> None:
-    """Animate one chosen run's model surface across its iteration callbacks."""
+    """Overlay the selected models' surfaces + parameter paths in one figure.
+
+    Runs are grouped by model. Variations of one model (different solvers /
+    objectives) are overlaid with a clickable legend. Several models can be
+    animated together: their morphing surfaces all share the single 3D scene,
+    while each model gets its own column of parameter panels on the right —
+    distinct models' parameter sets are not comparable, so they are never merged
+    onto one axis. One ▶ Replay / slider drives everything in lock-step.
+    """
     animatable = [s for s in selected if s.summary.result.iteration_history]
     if not animatable:
         st.info(
@@ -386,48 +458,165 @@ def _render_fit_animation(
         )
         return
 
-    if len(animatable) > 1:
-        labels = [s.label for s in animatable]
-        chosen_label = st.selectbox(
-            "Animate which fit?",
-            options=labels,
-            index=0,
-            key="setup_anim_series",
-        )
-        series = next(s for s in animatable if s.label == chosen_label)
-    else:
-        series = animatable[0]
+    by_model: dict[str, list[Series]] = {}
+    for s in animatable:
+        by_model.setdefault(s.model, []).append(s)
 
-    history = _pick_animation_history(series.summary.result)
-    if not history:
-        st.info(
-            "Calibrator did not log any iteration callbacks "
-            "(closed-form solver?) — animation skipped."
-        )
+    # Model picker: multi-select pills (was a single-choice menu). Several models
+    # animate together in one figure — surfaces share the 3D scene, each model
+    # keeps its own column of parameter panels.
+    models = list(by_model)
+    chosen_models = st.pills(
+        "Animate models",
+        options=models,
+        selection_mode="multi",
+        format_func=MODEL_DISPLAY_NAMES.get,
+        key="setup_anim_models",
+        default=[models[0]],
+    )
+    chosen_models = list(chosen_models) if chosen_models else []
+    if not chosen_models:
+        st.caption("No model selected — pick at least one above to animate.")
         return
 
-    st.caption(
-        f"Animating **{series.label}**. Each frame re-prices the surface from "
-        "the parameters logged at an iteration callback. Drag to rotate."
-    )
-    max_frames = st.slider(
-        "Animation frames", 4, 30, 12, step=2, key="setup_anim_frames"
-    )
-    with st.spinner("Pricing intermediate surfaces…"):
-        frames = iv_grid_animation_frames(
-            series.model, history, market_data, meta, max_frames=max_frames
+    if len(chosen_models) > 1:
+        st.caption(
+            "Every model's surfaces are overlaid on the same 3D scene, but each "
+            "model gets its own column of parameter panels on the right: their "
+            "parameter spaces are not comparable, so same-named parameters are "
+            "never merged onto one axis. Drag to rotate."
         )
-    if not frames:
-        st.info("No usable frames — every snapshot raised during pricing.")
+    else:
+        st.caption(
+            f"Animating **{MODEL_DISPLAY_NAMES.get(chosen_models[0], chosen_models[0])}**"
+            " — every selected variation (solver / objective) is overlaid: each "
+            "morphing 3D surface and its parameter paths share a colour, and the "
+            "legend toggles a variation on or off. Drag to rotate."
+        )
+
+    # Presentation-only visual settings for the animation (mirrors the "Surface
+    # visual settings" expander): all cosmetic except "Animation frames", which
+    # re-prices the intermediate surfaces. Applied to the whole figure.
+    with st.expander("🎨 Animation visual settings", expanded=False):
+        _ac = st.columns(4, vertical_alignment="center")
+        with _ac[0]:
+            max_frames = st.slider(
+                "Animation frames",
+                4,
+                30,
+                12,
+                step=2,
+                key="setup_anim_frames",
+                help=(
+                    "Re-prices the intermediate surfaces — unlike the other "
+                    "settings here, this one is not purely cosmetic."
+                ),
+            )
+        with _ac[1]:
+            st.slider(
+                "Ghost trajectory opacity",
+                0.1,
+                1.0,
+                0.55,
+                0.05,
+                key="calib_vis_ghost_opacity",
+            )
+        with _ac[2]:
+            st.slider(
+                "Model surface opacity",
+                0.2,
+                1.0,
+                0.8,
+                0.05,
+                key="calib_vis_model_surf_opacity",
+            )
+        with _ac[3]:
+            st.slider(
+                "Frame duration (ms)",
+                100,
+                1500,
+                400,
+                50,
+                key="calib_vis_frame_duration_ms",
+            )
+
+    # Per-model "Variations to overlay" pickers — rendered side by side (widgets
+    # only, no chart duplication). The key is namespaced per model so each keeps
+    # its own selection.
+    picker_cols = (
+        st.columns(len(chosen_models)) if len(chosen_models) > 1 else [st.container()]
+    )
+    selected_series: dict[str, list[Series]] = {}
+    for ctx, model in zip(picker_cols, chosen_models):
+        model_series = by_model[model]
+        with ctx:
+            if len(model_series) > 1:
+                label_by_key = {s.key: s.label for s in model_series}
+                picked = st.pills(
+                    f"Variations to overlay — {MODEL_DISPLAY_NAMES.get(model, model)}"
+                    if len(chosen_models) > 1
+                    else "Variations to overlay",
+                    options=list(label_by_key),
+                    default=list(label_by_key),
+                    selection_mode="multi",
+                    format_func=lambda k, _lbk=label_by_key: _lbk.get(k, str(k)),
+                    key=f"setup_anim_runs_{model}",
+                )
+                picked_set = set(picked) if picked else set()
+                if not picked_set:
+                    st.caption(
+                        "No variation selected — re-enable at least one to animate."
+                    )
+                    model_series = []
+                else:
+                    model_series = [s for s in model_series if s.key in picked_set]
+        selected_series[model] = model_series
+
+    # Price each selected model's intermediate surfaces and assemble the groups.
+    with st.spinner("Pricing intermediate surfaces…"):
+        model_groups = []
+        for model in chosen_models:
+            runs = []
+            for s in selected_series.get(model, []):
+                history = _pick_animation_history(s.summary.result)
+                if not history:
+                    continue
+                frames = iv_grid_animation_frames(
+                    s.model, history, market_data, meta, max_frames=max_frames
+                )
+                if frames:
+                    runs.append((s.label, s.solver, frames))
+            if not runs:
+                continue
+            # True-value reference lines only when the animated model IS the
+            # synthetic generator (its params share the generator's truth).
+            tp = (
+                true_params
+                if (
+                    data_source == "synthetic"
+                    and gen_model is not None
+                    and model == gen_model
+                )
+                else None
+            )
+            model_groups.append(
+                (model, MODEL_DISPLAY_NAMES.get(model, model), runs, tp)
+            )
+    if not model_groups:
+        st.info(
+            "No usable frames — the selected solvers logged no callbacks, or every "
+            "snapshot raised during pricing."
+        )
         return
     st.plotly_chart(
-        render_iv_surface_animation(
-            frames,
+        render_surface_fit_anatomy_animated(
+            model_groups,
             meta["iv_grid"],
             meta["strikes"],
             meta["maturities"],
-            solver_name=series.solver,
+            **resolve_display_axis(meta).kwargs(),
             spot=meta["spot"],
+            reference_label=reference_surface_label(data_source, gen_model),
         ),
         width="stretch",
         key="setup_fit_animation",

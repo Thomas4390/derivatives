@@ -25,6 +25,10 @@ from backend.models.merton import MertonModel
 
 # Backend imports
 from backend.simulation.base import SimulationResult
+from backend.utils.logging import get_logger
+from services import model_adapter
+
+logger = get_logger(__name__)
 
 
 @dataclass
@@ -190,6 +194,50 @@ def price_from_terminals(
     }
 
 
+from streamlit_app.simulation.utils.exotic_loader import (
+    get_exotic_payoff_vec_fn as _get_exotic_payoff_vec_fn,
+)
+
+
+def price_exotic_from_terminals(
+    terminal_prices: np.ndarray,
+    leg: dict,
+    time_to_maturity: float,
+    risk_free_rate: float,
+    confidence_level: float = 0.95,
+) -> dict[str, float]:
+    """
+    Price exotic option from terminal prices using Monte Carlo.
+
+    Uses the vectorized terminal exotic payoff over all paths at once,
+    then discounts and computes statistics.
+    """
+    payoff_vec_fn = _get_exotic_payoff_vec_fn()
+    exotic_params = leg.get("exotic_params") or leg
+    payoffs = payoff_vec_fn(np.asarray(terminal_prices, dtype=np.float64), exotic_params)
+
+    discount_factor = np.exp(-risk_free_rate * time_to_maturity)
+    discounted = payoffs * discount_factor
+
+    n_paths = len(terminal_prices)
+    price = np.mean(discounted)
+    std = np.std(discounted, ddof=1)
+    std_error = std / np.sqrt(n_paths)
+
+    from scipy import stats
+
+    z = stats.norm.ppf((1 + confidence_level) / 2)
+    ci_lower = price - z * std_error
+    ci_upper = price + z * std_error
+
+    return {
+        "price": price,
+        "std_error": std_error,
+        "confidence_interval": (ci_lower, ci_upper),
+        "n_paths": n_paths,
+    }
+
+
 def price_with_analytical(
     model_key: str,
     params: dict[str, Any],
@@ -213,7 +261,7 @@ def price_with_analytical(
         engine = BSAnalyticEngine()
         option = _create_vanilla_option(strike, time_to_maturity, is_call)
         model = GBMModel(sigma=params.get("sigma", 0.20))
-        market = _create_market(spot, risk_free_rate)
+        market = _create_market(spot, risk_free_rate, params.get("dividend_yield", 0.0))
 
         # Check if engine can price this
         if not engine.can_price(option, model):
@@ -233,8 +281,8 @@ def price_with_analytical(
             "theta": greeks_result.theta,
             "rho": greeks_result.rho,
         }
-    except Exception as e:
-        print(f"Analytical pricing failed: {e}")
+    except Exception:
+        logger.warning("Analytical pricing failed", exc_info=True)
         return None
 
 
@@ -267,7 +315,7 @@ def price_with_fft(
 
         engine = FFTEngine(config=FFTConfig(alpha=1.5, n_fft=4096, eta=0.25))
         option = _create_vanilla_option(strike, time_to_maturity, is_call)
-        market = _create_market(spot, risk_free_rate)
+        market = _create_market(spot, risk_free_rate, params.get("dividend_yield", 0.0))
 
         # Check if engine can price this
         if not engine.can_price(option, model):
@@ -439,7 +487,7 @@ def price_multiple_strikes(
             if model is not None:
                 engine = FFTEngine()
                 option = _create_vanilla_option(strikes[0], time_to_maturity, is_call)
-                market = _create_market(spot, risk_free_rate)
+                market = _create_market(spot, risk_free_rate, params.get("dividend_yield", 0.0))
                 fft_prices = engine.price_strikes(option, model, market, strikes)
                 result["fft_prices"] = fft_prices
         except Exception:
@@ -453,24 +501,17 @@ def price_multiple_strikes(
 
 
 def get_available_pricing_methods(model_key: str) -> list[str]:
-    """Get available pricing methods for a model."""
-    model_lower = model_key.lower()
+    """Available pricing methods for a model.
 
-    if model_lower == "gbm":
-        return ["analytical", "fft", "monte_carlo"]
-    if model_lower in ["heston", "merton", "bates"]:
-        return ["fft", "monte_carlo"]
-    if model_lower in ["garch", "ngarch", "gjr_garch"]:
-        return ["monte_carlo"]
-    # Custom model: read from supported_engines
-    from services.custom_model_service import (
-        get_custom_model_class,
-        is_custom_model,
-    )
-
-    from backend.core.result_types import PricingCapability
+    The 7 registered models read straight from the registry
+    (:mod:`services.model_adapter`); custom models keep their engine-capability
+    probe.
+    """
+    from services.custom_model_service import get_custom_model_class, is_custom_model
 
     if is_custom_model(model_key):
+        from backend.core.result_types import PricingCapability
+
         cls = get_custom_model_class()
         if cls is not None:
             instance = cls(**{s["name"]: s["default"] for s in cls.PARAMETER_SPECS})
@@ -479,4 +520,5 @@ def get_available_pricing_methods(model_key: str) -> list[str]:
                 methods.append("fft")
             methods.append("monte_carlo")
             return methods
-    return ["monte_carlo"]
+        return ["monte_carlo"]
+    return model_adapter.available_pricing_methods(model_key)

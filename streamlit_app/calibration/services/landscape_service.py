@@ -1,27 +1,44 @@
 """Loss-landscape computation for the Loss Landscape tab.
 
-Given a surface model and two of its parameters, sweep a 2-D meshgrid
-fixing every other parameter at the user-provided base point. At each
-``(p_x, p_y)`` cell, re-price the model on the market grid and record
-the loss under the **chosen calibration objective** (the same
-``ObjectiveStrategy`` minimised by the solver). The result is rendered
-as a contour plot with the optimiser's trajectory overlaid.
+Given a model and two of its parameters, sweep a 2-D meshgrid fixing every
+other parameter at the user-provided base point and record the calibration
+loss at each ``(p_x, p_y)`` cell. The cell evaluation dispatches per family
+(:func:`loss_backend`):
 
-Only surface models are supported — GARCH MLE has a different objective
-(needs the variance filter), so the tab degrades gracefully there.
+- ``"fft"`` — affine surface models + FFT-capable custom models: closed-form
+  pricing, loss under the **chosen calibration objective** (the same
+  ``ObjectiveStrategy`` minimised by the solver).
+- ``"mc"`` — the risk-neutral GARCH-Q trio + MC-only custom models: same
+  objective, but Monte-Carlo pricing at a reduced ``LANDSCAPE_MC_PATHS``
+  budget. The fixed ``MC_SEED`` gives common random numbers, so the sweep is
+  smooth and deterministic (only the loss *level* shifts slightly vs the
+  full-path calibration objective, never the basin shape).
+- ``"nll"`` — the physical returns-GARCH family: the MLE negative
+  log-likelihood itself (the very objective the calibrator minimises),
+  evaluated by the jitted JAX closures in
+  ``backend.engines.aad.calibration.garch_nll``. All axes are per-period
+  (daily) units — the same scale as the calibrator's search vector and the
+  overlaid solver trajectories. A ``jax.jit(jax.vmap(...))`` batch over the
+  whole grid would be a further speed-up, but at ~2-5 ms per jitted call the
+  plain loop already matches the FFT route.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 
 from backend.calibration.objectives import ObjectiveStrategy
 from backend.calibration.pricing_loop import price_surface
-from config.constants import SURFACE_FAMILY
+from config.constants import (
+    GARCH_FAMILY,
+    LANDSCAPE_MC_PATHS,
+    MC_SEED,
+    RN_GARCH_SURFACE_MODELS,
+)
 from config.model_registry import get_spec
-from services.post_calibration import _engine, rebuild_model
+from services.post_calibration import _engine, rebuild_model, surface_model_prices
 
 
 @dataclass(frozen=True)
@@ -30,51 +47,176 @@ class LandscapeResult:
     param_y: str
     x_values: np.ndarray
     y_values: np.ndarray
-    loss_grid: np.ndarray            # shape (n_y, n_x), NaN for failures
-    base_params: dict[str, float]    # frozen at compute time
+    loss_grid: np.ndarray  # shape (n_y, n_x), NaN for failures
+    base_params: dict[str, float]  # frozen at compute time
+
+
+def loss_backend(model_key: str) -> str:
+    """How a model's landscape cell-loss is evaluated: ``fft``/``mc``/``nll``.
+
+    The registered custom model is ``"fft"`` when its class exposes a
+    characteristic function (the registration metadata lists the FFT engine),
+    ``"mc"`` otherwise. Import is lazy so tests can patch the custom-model
+    service without a Streamlit runtime.
+    """
+    if model_key in GARCH_FAMILY:
+        return "nll"
+    if model_key in RN_GARCH_SURFACE_MODELS:
+        return "mc"
+    if model_key == "custom":
+        from services.custom_model_service import get_custom_meta
+
+        meta = get_custom_meta()
+        engines = (meta or {}).get("engines") or ()
+        return "fft" if "FFT" in engines else "mc"
+    return "fft"
 
 
 def is_supported(model_key: str) -> tuple[bool, str | None]:
-    """Return ``(ok, reason_if_not)``. The tab uses this to short-circuit."""
-    if model_key not in SURFACE_FAMILY:
-        return False, (
-            "Loss-landscape view is only available for surface models. "
-            "GARCH-family losses depend on the variance filter and don't "
-            "decompose cleanly into a (p_x, p_y) slice."
-        )
-    if model_key in ("ngarch_q", "garch_q", "gjr_q"):
-        return False, (
-            "Nonaffine risk-neutral GARCH models price by Monte-Carlo — re-pricing "
-            "the whole surface by MC at every one of the ~900 grid cells is too "
-            "costly for an interactive landscape (the affine Heston-Nandi has one "
-            "because it prices in closed form)."
-        )
+    """Return ``(ok, reason_if_not)``. The tab uses this to short-circuit.
+
+    Every calibratable model family now has a landscape backend (FFT, MC, or
+    returns-NLL); the only exclusions left are structural — fewer than two
+    parameters means there is no 2-D slice to draw.
+    """
     if model_key == "iv_gbm":
-        return False, "iv_gbm has a single parameter — nothing to slice."
+        return False, (
+            "iv_gbm has a single parameter (σ) — a 2-D slice needs two "
+            "parameters to vary, so there is no landscape to draw."
+        )
+    if model_key == "custom":
+        from services.custom_model_service import is_registered
+
+        if not is_registered():
+            return False, "register a custom model in the 🧪 Custom Model tab first."
     spec = get_spec(model_key)
     if spec.n_params < 2:
         return False, "Need ≥ 2 parameters to render a 2-D slice."
     return True, None
 
 
-def _objective_loss(
-    model_key: str,
-    params: dict[str, float],
-    market_data,
-    objective: ObjectiveStrategy,
-) -> float:
-    """Loss of the model at ``params`` under the chosen objective.
+# Parameter order each NLL closure expects — mirrors GARCHCalibrator._param_names.
+_NLL_ORDER: dict[str, tuple[str, ...]] = {
+    "garch": ("omega", "alpha", "beta"),
+    "ngarch": ("omega", "alpha", "beta", "gamma"),
+    "gjr_garch": ("omega", "alpha", "beta", "gamma"),
+}
 
-    Prices the surface once, then delegates the residual shaping /
-    weighting to ``objective.compute_loss`` so the contour reflects the
-    very quantity the solver minimised (price MSE, IV MSE, vega-weighted,
-    Huber, …).
+
+def _nll_fn(model_key: str):
+    """The jitted NLL closure for one returns-GARCH variant (lazy import)."""
+    from backend.engines.aad.calibration.garch_nll import (
+        nll_garch_jit,
+        nll_gjr_jit,
+        nll_ngarch_jit,
+    )
+
+    return {
+        "garch": nll_garch_jit,
+        "ngarch": nll_ngarch_jit,
+        "gjr_garch": nll_gjr_jit,
+    }[model_key]
+
+
+def _make_cell_loss(
+    model_key: str,
+    market_data,
+    objective: ObjectiveStrategy | None,
+    n_paths_mc: int | None,
+):
+    """Build the per-cell loss callable for one grid sweep.
+
+    Hoists everything reusable (jitted NLL closure, returns array, MC budget)
+    out of the cell loop; the returned callable maps a full natural-scale
+    parameter dict to a scalar loss.
     """
-    model = rebuild_model(model_key, params)
-    if model is None:
-        return float("nan")
-    prices = price_surface(model, market_data, _engine())
-    return float(objective.compute_loss(prices, market_data))
+    backend = loss_backend(model_key)
+
+    if backend == "nll":
+        import jax.numpy as jnp
+
+        nll = _nll_fn(model_key)
+        order = _NLL_ORDER[model_key]
+        returns = jnp.asarray(np.asarray(market_data.log_returns, dtype=np.float64))
+
+        def _cell_nll(params: dict[str, float]) -> float:
+            vec = jnp.asarray([float(params[name]) for name in order])
+            return float(nll(vec, returns))
+
+        return _cell_nll
+
+    if objective is None:
+        raise ValueError(
+            f"model '{model_key}' needs an ObjectiveStrategy for its landscape"
+        )
+
+    if backend == "mc":
+        paths = int(n_paths_mc or LANDSCAPE_MC_PATHS)
+
+        # Deliberately NO stationarity penalty here, unlike the GARCH-Q
+        # calibrator's objective: the SOFT penalty is zero everywhere inside
+        # the stationary region and the non-stationary region is masked for
+        # display (mask_nonstationary), so adding it would only change hidden
+        # cells while dragging the user's constraint settings into the grid
+        # cache key. The remaining loss-LEVEL shift vs the solver (reduced
+        # path budget) is surfaced in the slice-diagnostics card instead.
+        def _cell_mc(params: dict[str, float]) -> float:
+            model = rebuild_model(model_key, params)
+            if model is None:
+                return float("nan")
+            prices = surface_model_prices(
+                model, market_data, n_paths=paths, mc_seed=MC_SEED
+            )
+            return float(objective.compute_loss(prices, market_data))
+
+        return _cell_mc
+
+    def _cell_fft(params: dict[str, float]) -> float:
+        model = rebuild_model(model_key, params)
+        if model is None:
+            return float("nan")
+        prices = price_surface(model, market_data, _engine())
+        return float(objective.compute_loss(prices, market_data))
+
+    return _cell_fft
+
+
+def evaluate_slice_points(
+    model_key: str,
+    market_data,
+    meta: dict,
+    base_params: dict[str, float],
+    param_x: str,
+    param_y: str,
+    points: tuple[tuple[float, float], ...],
+    objective: ObjectiveStrategy | None,
+    objective_key: str | None = None,
+    n_paths_mc: int | None = None,
+) -> np.ndarray:
+    """Exact slice loss at arbitrary ``(x, y)`` points — the same cell loss
+    the grid sweeps, with every other parameter frozen at ``base_params``.
+
+    Used for the 3-D overlay markers (trajectory endpoints, x₀, ground
+    truth): a nearest-cell grid lookup snaps a converged point onto the
+    valley wall when the basin is narrower than a cell — for the GARCH
+    families that snapped height can even land beyond the stationarity
+    boundary, drawing the *final* fit above the *seed*. Evaluating the loss
+    at the marker's own coordinates removes the quantization entirely.
+    ``meta`` / ``objective_key`` mirror :func:`compute_loss_grid`'s cache
+    contract (consumed by the cached wrapper, ignored here).
+    """
+    cell_loss = _make_cell_loss(model_key, market_data, objective, n_paths_mc)
+    base = dict(base_params)
+    out = np.full(len(points), np.nan, dtype=np.float64)
+    for k, (xv, yv) in enumerate(points):
+        params = dict(base)
+        params[param_x] = float(xv)
+        params[param_y] = float(yv)
+        try:
+            out[k] = cell_loss(params)
+        except (ValueError, RuntimeError, FloatingPointError):
+            out[k] = float("nan")
+    return out
 
 
 def compute_loss_grid(
@@ -86,9 +228,10 @@ def compute_loss_grid(
     param_y: str,
     x_range: tuple[float, float],
     y_range: tuple[float, float],
-    objective: ObjectiveStrategy,
+    objective: ObjectiveStrategy | None,
     resolution: int = 30,
     objective_key: str | None = None,
+    n_paths_mc: int | None = None,
 ) -> LandscapeResult:
     """Sweep a ``resolution × resolution`` grid of ``(p_x, p_y)`` values.
 
@@ -96,7 +239,10 @@ def compute_loss_grid(
     ``y_range`` set the slice extents. ``objective`` is the
     ``ObjectiveStrategy`` whose loss is evaluated at every cell — pass the
     same strategy the user selected so the landscape matches the solver's
-    target. NaN cells correspond to model invocations that failed (e.g.
+    target. It is ignored (pass ``None``) for the returns-GARCH family, whose
+    cell loss is the MLE negative log-likelihood itself. ``n_paths_mc``
+    overrides the ``LANDSCAPE_MC_PATHS`` budget for the MC backend (tests).
+    NaN cells correspond to model invocations that failed (e.g.
     Feller-violating Heston configurations). ``meta`` is retained for call
     compatibility with the cached wrapper; ``objective_key`` is a cache-key
     hint consumed by that wrapper and ignored by the direct computation.
@@ -107,6 +253,7 @@ def compute_loss_grid(
     y_values = np.linspace(float(y_range[0]), float(y_range[1]), int(resolution))
 
     base = dict(base_params)
+    cell_loss = _make_cell_loss(model_key, market_data, objective, n_paths_mc)
 
     loss = np.full((len(y_values), len(x_values)), np.nan, dtype=np.float64)
     for j, yv in enumerate(y_values):
@@ -115,7 +262,7 @@ def compute_loss_grid(
             params[param_x] = float(xv)
             params[param_y] = float(yv)
             try:
-                loss[j, i] = _objective_loss(model_key, params, market_data, objective)
+                loss[j, i] = cell_loss(params)
             except (ValueError, RuntimeError, FloatingPointError):
                 loss[j, i] = float("nan")
 
@@ -130,7 +277,9 @@ def compute_loss_grid(
 
 
 def trajectory_points(
-    history, param_x: str, param_y: str,
+    history,
+    param_x: str,
+    param_y: str,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Extract the ``(p_x, p_y)`` optimiser path from an iteration history.
 
@@ -158,7 +307,7 @@ def trajectory_points(
             (s for s in history if getattr(s, "source", None) == "evaluation"),
             None,
         )
-        snaps = ([first_eval, *cb] if first_eval is not None else list(cb))
+        snaps = [first_eval, *cb] if first_eval is not None else list(cb)
     else:
         snaps = list(history)
     xs: list[float] = []
@@ -172,7 +321,9 @@ def trajectory_points(
 
 
 def initial_point_from_history(
-    history, param_x: str, param_y: str,
+    history,
+    param_x: str,
+    param_y: str,
 ) -> tuple[float, float] | None:
     """Return the *first evaluation* snapshot's natural (p_x, p_y).
 
@@ -242,13 +393,15 @@ def basin_curvature(
     # Step sizes in natural units
     dx = float(result.x_values[1] - result.x_values[0])
     dy = float(result.y_values[1] - result.y_values[0])
-    stencil = grid[j - 1: j + 2, i - 1: i + 2]
+    stencil = grid[j - 1 : j + 2, i - 1 : i + 2]
     if not np.isfinite(stencil).all():
         return None
     # Central finite differences for the Hessian of f(x, y)
     fxx = (stencil[1, 2] - 2 * stencil[1, 1] + stencil[1, 0]) / (dx * dx)
     fyy = (stencil[2, 1] - 2 * stencil[1, 1] + stencil[0, 1]) / (dy * dy)
-    fxy = (stencil[2, 2] - stencil[2, 0] - stencil[0, 2] + stencil[0, 0]) / (4.0 * dx * dy)
+    fxy = (stencil[2, 2] - stencil[2, 0] - stencil[0, 2] + stencil[0, 0]) / (
+        4.0 * dx * dy
+    )
     H = np.array([[fxx, fxy], [fxy, fyy]], dtype=np.float64)
     try:
         eigs = np.linalg.eigvalsh(H)
@@ -283,8 +436,8 @@ def feller_boundary_segments(
     x_range: tuple[float, float] | None = None,
     y_range: tuple[float, float] | None = None,
 ) -> dict[str, np.ndarray] | None:
-    """Return ``(x_curve, y_curve)`` for the 2κθ = ξ² boundary in
-    (κ, θ) / (κ, ξ) / (θ, ξ) slices. Returns ``None`` when the slice does
+    """Return ``(x_curve, y_curve)`` for the 2κθ = α² boundary in
+    (κ, θ) / (κ, α) / (θ, α) slices. Returns ``None`` when the slice does
     not contain the relevant pair.
 
     When ``x_range`` / ``y_range`` are given (the visible slice window),
@@ -367,3 +520,180 @@ def feller_feasible_window(
         return None
     fx, fy = grid_x[feasible], grid_y[feasible]
     return float(fx.min()), float(fx.max()), float(fy.min()), float(fy.max())
+
+
+# Per-family persistence as a function of (alpha, beta, gamma) — the
+# stationarity boundary is the persistence = 1 level set. P- and Q-measure
+# variants share the same algebra (verified against garch_calibrator's
+# stationarity penalty, the _GARCHRiskNeutralMixin caps, garch_nll's soft
+# barrier, and HestonNandiGARCHModel's β + αγ² constraint).
+_PERSISTENCE: dict[str, str] = {
+    "garch": "garch",
+    "garch_q": "garch",
+    "ngarch": "ngarch",
+    "ngarch_q": "ngarch",
+    "gjr_garch": "gjr",
+    "gjr_q": "gjr",
+    "heston_nandi": "heston_nandi",
+}
+
+# LaTeX-ish legend label per persistence form (UI strings, English).
+STATIONARITY_LABELS: dict[str, str] = {
+    "garch": "stationarity boundary  α + β = 1",
+    "ngarch": "stationarity boundary  β + α(1+γ²) = 1",
+    "gjr": "stationarity boundary  α + β + γ/2 = 1",
+    "heston_nandi": "stationarity boundary  β + αγ² = 1",
+}
+
+
+def stationarity_label(model_key: str) -> str | None:
+    """Legend label of the model's stationarity boundary, or ``None``."""
+    form = _PERSISTENCE.get(model_key)
+    return STATIONARITY_LABELS[form] if form else None
+
+
+def _persistence_terms(form: str, alpha, beta, gamma):
+    """Persistence value for arrays/scalars of (α, β, γ) under one form."""
+    if form == "garch":
+        return alpha + beta
+    if form == "ngarch":
+        return beta + alpha * (1.0 + gamma**2)
+    if form == "gjr":
+        return alpha + beta + 0.5 * gamma
+    return beta + alpha * gamma**2  # heston_nandi
+
+
+def mask_nonstationary(
+    result: LandscapeResult,
+    model_key: str,
+    *,
+    threshold: float = 1.0,
+) -> LandscapeResult:
+    """Copy of ``result`` with cells at persistence ≥ ``threshold`` set to NaN.
+
+    The NLL's stationarity soft barrier makes non-stationary cells reach
+    10⁶-10⁷ while the basin sits around −6500 — one wall cell crushes the
+    whole colour/z scale into a flat sheet (the NLL view cannot log-scale:
+    the likelihood is negative). Masking the infeasible region — the GARCH
+    analogue of the Feller-infeasible crop for Heston/Bates — restores the
+    basin. α/β/γ come from the slice axes when swept, else from the frozen
+    ``base_params``, so hidden-parameter slices (e.g. ω, β) mask correctly.
+
+    :func:`compute_loss_grid` deliberately stays unmasked (its unit-level
+    contract and the app cache key don't know about constraints); callers
+    mask for display. Models without a persistence form pass through.
+    """
+    form = _PERSISTENCE.get(model_key)
+    if form is None:
+        return result
+    grid_x, grid_y = np.meshgrid(result.x_values, result.y_values)
+    axes = {result.param_x: grid_x, result.param_y: grid_y}
+
+    def _coord(name: str):
+        return axes.get(name, float(result.base_params.get(name, 0.0)))
+
+    persistence = np.broadcast_to(
+        np.asarray(
+            _persistence_terms(form, _coord("alpha"), _coord("beta"), _coord("gamma")),
+            dtype=float,
+        ),
+        result.loss_grid.shape,
+    )
+    return replace(
+        result,
+        loss_grid=np.where(persistence >= threshold, np.nan, result.loss_grid),
+    )
+
+
+def stationarity_boundary_segments(
+    model_key: str,
+    spec_lookup: dict[str, tuple[float, float]],
+    param_x: str,
+    param_y: str,
+    base_params: dict[str, float],
+    n: int = 400,
+    x_range: tuple[float, float] | None = None,
+    y_range: tuple[float, float] | None = None,
+) -> dict[str, np.ndarray] | None:
+    """``(x, y)`` polyline of the persistence = 1 boundary in an (α, β, γ) slice.
+
+    The GARCH analogue of :func:`feller_boundary_segments` — same window
+    clipping contract. The third persistence parameter (if any) is frozen at
+    ``base_params``; ω / h₀ never enter persistence, so slices involving them
+    get no curve (the boundary would be a constant line in a direction the
+    pedagogy panel already explains). Returns ``None`` when the model has no
+    persistence constraint, the pair isn't persistence-bound, or no point of
+    the curve falls inside the window.
+    """
+    form = _PERSISTENCE.get(model_key)
+    if form is None:
+        return None
+    persistence_vars = (
+        {"alpha", "beta"} if form == "garch" else {"alpha", "beta", "gamma"}
+    )
+    pair = {param_x, param_y}
+    if not pair.issubset(persistence_vars):
+        return None
+
+    clip = x_range is not None and y_range is not None
+    n_gen = max(n, 400) if clip else n
+
+    if param_x in spec_lookup:
+        x_lo, x_hi = spec_lookup[param_x]
+    else:
+        return None
+    x_arr = np.linspace(float(x_lo), float(x_hi), n_gen)
+
+    def _solve_other(x_vals: np.ndarray) -> np.ndarray:
+        """Solve persistence(α, β, γ) = 1 for ``param_y`` given ``param_x``."""
+        fixed = {
+            name: float(base_params.get(name, 0.0))
+            for name in ("alpha", "beta", "gamma")
+        }
+        coords = dict(fixed)
+        coords[param_x] = x_vals
+        if param_y == "beta":
+            # persistence is linear in β with unit coefficient in every form.
+            return 1.0 - (
+                _persistence_terms(form, coords["alpha"], 0.0, coords["gamma"])
+            )
+        if param_y == "alpha":
+            denom = {
+                "garch": 1.0,
+                "ngarch": 1.0 + coords["gamma"] ** 2,
+                "gjr": 1.0,
+                "heston_nandi": max(coords["gamma"] ** 2, 1e-12),
+            }[form]
+            extra = 0.5 * coords["gamma"] if form == "gjr" else 0.0
+            return (1.0 - coords["beta"] - extra) / denom
+        # param_y == "gamma"
+        alpha = np.maximum(np.asarray(coords["alpha"], dtype=float), 1e-12)
+        if form == "ngarch":
+            return np.sqrt(np.clip((1.0 - coords["beta"]) / alpha - 1.0, 0.0, None))
+        if form == "gjr":
+            return 2.0 * (1.0 - coords["alpha"] - coords["beta"])
+        # heston_nandi
+        return np.sqrt(np.clip((1.0 - coords["beta"]) / alpha, 0.0, None))
+
+    with np.errstate(invalid="ignore", divide="ignore"):
+        y_arr = np.broadcast_to(
+            np.asarray(_solve_other(x_arr), dtype=float), x_arr.shape
+        ).copy()
+
+    finite = np.isfinite(y_arr)
+    if not np.any(finite):
+        return None
+    x_arr, y_arr = x_arr[finite], y_arr[finite]
+
+    if clip:
+        mask = (
+            (x_arr >= x_range[0])
+            & (x_arr <= x_range[1])
+            & (y_arr >= y_range[0])
+            & (y_arr <= y_range[1])
+        )
+        if not np.any(mask):
+            return None
+        x_arr, y_arr = x_arr[mask], y_arr[mask]
+
+    return {"x": x_arr, "y": y_arr}

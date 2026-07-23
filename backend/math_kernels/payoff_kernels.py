@@ -132,7 +132,9 @@ def digital_call_payoff(spot: float, strike: float, payout: float = 1.0) -> floa
     float
         Digital call payoff
     """
-    return payout if spot > strike else 0.0
+    # Cash-or-nothing standard: pay at S >= K (matches the N(d2) limit and
+    # instruments/payoffs.py); the two implementations previously disagreed at S==K.
+    return payout if spot >= strike else 0.0
 
 
 @njit(fastmath=True, cache=True)
@@ -165,7 +167,7 @@ def digital_call_payoff_vec(
     n = len(spots)
     result = np.empty(n, dtype=np.float64)
     for i in prange(n):
-        result[i] = payout if spots[i] > strike else 0.0
+        result[i] = payout if spots[i] >= strike else 0.0  # S>=K (see scalar variant)
     return result
 
 
@@ -442,6 +444,335 @@ def barrier_down_out_put_payoff(
 
     # Not knocked out, return put payoff
     return max(strike - path[-1], 0.0)
+
+
+# =============================================================================
+# Batch (vectorized) Path-Dependent Payoffs
+# =============================================================================
+#
+# These operate on the full ``(n_paths, n_steps)`` array in a single
+# ``prange`` loop, computing the *identical* per-path reduction as their
+# scalar counterparts above. They exist to replace the Python-level
+# ``for i in range(n_paths): scalar_kernel(path[i], ...)`` loops in
+# ``instruments/payoffs.py``: that idiom pays the Python→Numba dispatch cost
+# once per path (≈ n_paths interpreter round-trips) and is single-threaded.
+# A batch kernel pays the dispatch once and runs the rows across all cores.
+# Results are bit-identical to the scalar loop (each row's reduction is
+# computed sequentially within one thread; ``prange`` only splits across rows).
+
+
+@njit(parallel=True, fastmath=True, cache=True)
+def asian_arithmetic_payoff_batch(
+    paths: np.ndarray, strike: float, is_call: bool
+) -> np.ndarray:
+    """Arithmetic-average Asian payoff for a batch of paths.
+
+    Parameters
+    ----------
+    paths : np.ndarray
+        2-D price paths, shape ``(n_paths, n_steps)``.
+    strike : float
+        Strike price.
+    is_call : bool
+        True for call, False for put.
+
+    Returns
+    -------
+    np.ndarray
+        1-D payoffs, shape ``(n_paths,)``.
+    """
+    n = paths.shape[0]
+    out = np.empty(n, dtype=np.float64)
+    for i in prange(n):
+        avg = np.mean(paths[i])
+        out[i] = max(avg - strike, 0.0) if is_call else max(strike - avg, 0.0)
+    return out
+
+
+@njit(parallel=True, fastmath=True, cache=True)
+def lookback_floating_payoff_batch(paths: np.ndarray, is_call: bool) -> np.ndarray:
+    """Floating-strike lookback payoff for a batch of paths.
+
+    Call: ``S_T - min(S_t)``; Put: ``max(S_t) - S_T``.
+
+    Parameters
+    ----------
+    paths : np.ndarray
+        2-D price paths, shape ``(n_paths, n_steps)``.
+    is_call : bool
+        True for call, False for put.
+
+    Returns
+    -------
+    np.ndarray
+        1-D payoffs, shape ``(n_paths,)``.
+    """
+    n = paths.shape[0]
+    out = np.empty(n, dtype=np.float64)
+    for i in prange(n):
+        terminal = paths[i, -1]
+        if is_call:
+            out[i] = terminal - np.min(paths[i])
+        else:
+            out[i] = np.max(paths[i]) - terminal
+    return out
+
+
+@njit(parallel=True, fastmath=True, cache=True)
+def barrier_up_out_call_payoff_batch(
+    paths: np.ndarray, strike: float, barrier: float
+) -> np.ndarray:
+    """Up-and-out call payoff for a batch of paths.
+
+    Call payoff if the barrier is never breached over the path, else 0.
+
+    Parameters
+    ----------
+    paths : np.ndarray
+        2-D price paths, shape ``(n_paths, n_steps)``.
+    strike : float
+        Strike price.
+    barrier : float
+        Upper barrier level.
+
+    Returns
+    -------
+    np.ndarray
+        1-D payoffs, shape ``(n_paths,)``.
+    """
+    n, n_steps = paths.shape
+    out = np.empty(n, dtype=np.float64)
+    for i in prange(n):
+        knocked_out = False
+        for j in range(n_steps):
+            if paths[i, j] >= barrier:
+                knocked_out = True
+                break
+        out[i] = 0.0 if knocked_out else max(paths[i, n_steps - 1] - strike, 0.0)
+    return out
+
+
+@njit(parallel=True, fastmath=True, cache=True)
+def barrier_down_out_put_payoff_batch(
+    paths: np.ndarray, strike: float, barrier: float
+) -> np.ndarray:
+    """Down-and-out put payoff for a batch of paths.
+
+    Put payoff if the barrier is never breached over the path, else 0.
+
+    Parameters
+    ----------
+    paths : np.ndarray
+        2-D price paths, shape ``(n_paths, n_steps)``.
+    strike : float
+        Strike price.
+    barrier : float
+        Lower barrier level.
+
+    Returns
+    -------
+    np.ndarray
+        1-D payoffs, shape ``(n_paths,)``.
+    """
+    n, n_steps = paths.shape
+    out = np.empty(n, dtype=np.float64)
+    for i in prange(n):
+        knocked_out = False
+        for j in range(n_steps):
+            if paths[i, j] <= barrier:
+                knocked_out = True
+                break
+        out[i] = 0.0 if knocked_out else max(strike - paths[i, n_steps - 1], 0.0)
+    return out
+
+
+@njit(parallel=True, fastmath=True, cache=True)
+def lookback_discounted_call_payoff_batch(paths: np.ndarray) -> np.ndarray:
+    """Discounted floating-strike lookback call (Globe Trotter) for a batch.
+
+    Payoff: ``max(S_T - min(S), 0) * (S_0 / min(S))``, with the divisor floored
+    at 1e-10. One ``prange`` pass with a single per-row min scan (no
+    ``np.min(axis=1)`` temporary), bit-identical to the NumPy version.
+
+    Parameters
+    ----------
+    paths : np.ndarray
+        2-D price paths, shape ``(n_paths, n_steps)``.
+
+    Returns
+    -------
+    np.ndarray
+        1-D payoffs, shape ``(n_paths,)``.
+    """
+    n = paths.shape[0]
+    out = np.empty(n, dtype=np.float64)
+    for i in prange(n):
+        row = paths[i]
+        s0 = row[0]
+        s_t = row[-1]
+        path_min = np.min(row)
+        path_min_safe = path_min if path_min > 1e-10 else 1e-10
+        lookback = s_t - path_min
+        if lookback < 0.0:
+            lookback = 0.0
+        out[i] = lookback * (s0 / path_min_safe)
+    return out
+
+
+@njit(parallel=True, fastmath=True, cache=True)
+def asian_geometric_payoff_batch(
+    paths: np.ndarray, strike: float, is_call: bool
+) -> np.ndarray:
+    """Geometric-average Asian payoff for a batch of paths.
+
+    Mirrors the scalar ``asian_geometric_payoff``: the geometric average is
+    ``exp(mean(log(S)))`` over every column of the row (including the initial
+    spot), then a vanilla payoff against ``strike``.
+
+    Parameters
+    ----------
+    paths : np.ndarray
+        2-D price paths, shape ``(n_paths, n_steps + 1)``.
+    strike : float
+        Strike price.
+    is_call : bool
+        True for call, False for put.
+
+    Returns
+    -------
+    np.ndarray
+        1-D payoffs, shape ``(n_paths,)``.
+    """
+    n = paths.shape[0]
+    out = np.empty(n, dtype=np.float64)
+    for i in prange(n):
+        geo = np.exp(np.mean(np.log(paths[i])))
+        out[i] = max(geo - strike, 0.0) if is_call else max(strike - geo, 0.0)
+    return out
+
+
+@njit(parallel=True, fastmath=True, cache=True)
+def lookback_fixed_payoff_batch(
+    paths: np.ndarray, strike: float, is_call: bool
+) -> np.ndarray:
+    """Fixed-strike lookback payoff for a batch of paths.
+
+    Call: ``max(max(S_t) - K, 0)``; Put: ``max(K - min(S_t), 0)``.
+
+    Parameters
+    ----------
+    paths : np.ndarray
+        2-D price paths, shape ``(n_paths, n_steps + 1)``.
+    strike : float
+        Fixed strike price.
+    is_call : bool
+        True for call, False for put.
+
+    Returns
+    -------
+    np.ndarray
+        1-D payoffs, shape ``(n_paths,)``.
+    """
+    n = paths.shape[0]
+    out = np.empty(n, dtype=np.float64)
+    for i in prange(n):
+        if is_call:
+            out[i] = max(np.max(paths[i]) - strike, 0.0)
+        else:
+            out[i] = max(strike - np.min(paths[i]), 0.0)
+    return out
+
+
+@njit(parallel=True, fastmath=True, cache=True)
+def barrier_payoff_batch(
+    paths: np.ndarray,
+    strike: float,
+    barrier: float,
+    is_call: bool,
+    is_up: bool,
+    is_knock_in: bool,
+    rebate: float,
+) -> np.ndarray:
+    """Single-barrier knock-in/out call/put payoff for a batch of paths.
+
+    Discretely monitored on the simulation grid: the barrier is "breached" if
+    any column of the row lies on the trigger side (``>= barrier`` for an up
+    barrier, ``<= barrier`` for a down barrier). A knock-out pays the vanilla
+    payoff unless breached (then ``rebate``); a knock-in pays the vanilla payoff
+    only if breached (else ``rebate``). The rebate is paid at expiry (the engine
+    applies the discount factor); the closed-form pays an at-hit rebate, so use
+    ``rebate == 0`` for an apples-to-apples cross-check.
+
+    Note
+    ----
+    Discrete monitoring under-counts breaches versus a continuously-monitored
+    closed form; pass a fine ``n_steps`` (or a Broadie-Glasserman-Kou barrier
+    shift upstream) to control the bias.
+
+    Parameters
+    ----------
+    paths : np.ndarray
+        2-D price paths, shape ``(n_paths, n_steps + 1)``.
+    strike : float
+        Strike price.
+    barrier : float
+        Barrier level.
+    is_call, is_up, is_knock_in : bool
+        Call/put, up/down barrier, knock-in/knock-out flags.
+    rebate : float
+        Cash paid (at expiry) when the option expires without value.
+
+    Returns
+    -------
+    np.ndarray
+        1-D payoffs, shape ``(n_paths,)``.
+    """
+    n, n_cols = paths.shape
+    out = np.empty(n, dtype=np.float64)
+    for i in prange(n):
+        breached = False
+        for j in range(n_cols):
+            s = paths[i, j]
+            if (is_up and s >= barrier) or ((not is_up) and s <= barrier):
+                breached = True
+                break
+        s_t = paths[i, n_cols - 1]
+        vanilla = max(s_t - strike, 0.0) if is_call else max(strike - s_t, 0.0)
+        if is_knock_in:
+            out[i] = vanilla if breached else rebate
+        else:
+            out[i] = rebate if breached else vanilla
+    return out
+
+
+@njit(parallel=True, fastmath=True, cache=True)
+def low_point_forward_payoff_batch(paths: np.ndarray) -> np.ndarray:
+    """Low-point forward (MALP) payoff for a batch of paths.
+
+    Payoff: ``S_0 * (S_T / min(S) - 1)``, with the divisor floored at 1e-10.
+    One ``prange`` pass with a single per-row min scan, bit-identical to the
+    NumPy version.
+
+    Parameters
+    ----------
+    paths : np.ndarray
+        2-D price paths, shape ``(n_paths, n_steps)``.
+
+    Returns
+    -------
+    np.ndarray
+        1-D payoffs, shape ``(n_paths,)``.
+    """
+    n = paths.shape[0]
+    out = np.empty(n, dtype=np.float64)
+    for i in prange(n):
+        row = paths[i]
+        s0 = row[0]
+        s_t = row[-1]
+        path_min = np.min(row)
+        path_min_safe = path_min if path_min > 1e-10 else 1e-10
+        out[i] = s0 * (s_t / path_min_safe - 1.0)
+    return out
 
 
 # =============================================================================

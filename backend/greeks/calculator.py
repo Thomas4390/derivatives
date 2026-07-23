@@ -452,6 +452,18 @@ class GreeksCalculator:
                 f"Unknown Greek '{greek}'. Valid values: {sorted(VALID_GREEKS)}"
             )
 
+        # Exotic analytic fast path: first-order Greeks over the whole spot range
+        # in one parallel exotic_greeks_surface sweep instead of a per-spot
+        # finite-difference repricing. greeks_surface() returns None for
+        # registry-dispatched (Haug) exotics and unsupported cases, which then
+        # keep the per-spot loop below.
+        if greek in {"delta", "gamma", "vega", "theta", "rho"} and hasattr(
+            engine, "greeks_surface"
+        ):
+            surface = engine.greeks_surface(instrument, model, market, spot_range)
+            if surface is not None and greek in surface:
+                return surface[greek]
+
         results = np.zeros(len(spot_range))
 
         higher_order_greeks = {

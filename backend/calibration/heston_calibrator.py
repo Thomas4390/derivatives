@@ -24,27 +24,31 @@ from __future__ import annotations
 
 import logging
 import time
-from dataclasses import dataclass
 
 import jax
 import jax.numpy as jnp
 import numpy as np
 
+from backend.calibration._reparam import (
+    _CompiledResiduals,
+    build_cf_residual_fn,
+    logit,
+)
 from backend.calibration.base import BaseCalibrator, CalibrationResult
 from backend.calibration.feller import (
     DEFAULT_FELLER_WEIGHT,
     FELLER_STRICT_FACTOR,
     FellerMode,
-    feller_capped_xi,
-    feller_xi_to_unit,
+    feller_capped_alpha,
+    feller_alpha_to_unit,
     penalty_weight,
 )
 from backend.calibration.lm_helpers import make_multi_starts
 from backend.calibration.market_data import OptionMarketData
+from backend.calibration.search_space import HESTON_SEARCH_BOUNDS
 from backend.calibration.objectives import (
     ObjectiveStrategy,
     PriceMSEObjective,
-    VegaWeightedObjective,
 )
 from backend.calibration.optimizers import (
     CalibrationProblem,
@@ -79,63 +83,79 @@ logger = logging.getLogger(__name__)
 # Reparametrization — JAX-compatible sigmoid bijections
 # --------------------------------------------------------------------------- #
 
-_V0_LO, _V0_HI = 1e-5, 1.0
-_KAPPA_LO, _KAPPA_HI = 0.01, 20.0
-_THETA_LO, _THETA_HI = 1e-5, 1.0
-_XI_LO, _XI_HI = 1e-3, 2.0
-_RHO_LO, _RHO_HI = -0.999, 0.999
+# Canonical (default) admissible box, in HESTON_PARAM_NAMES order. The search
+# universe is configurable per-run (see ``param_bounds``); these are the
+# defaults consumed when the UI supplies no override. Sourced from the single
+# source of truth in ``backend.calibration.search_space``.
+Bounds = tuple[tuple[float, float], ...]
+_HESTON_BOUNDS: Bounds = tuple(HESTON_SEARCH_BOUNDS[n] for n in HESTON_PARAM_NAMES)
+
+
+def _resolve_bounds(param_bounds: dict[str, tuple[float, float]] | None) -> Bounds:
+    """Map a ``{param: (lo, hi)}`` override onto the ordered Heston box.
+
+    Missing / ``None`` falls back to :data:`_HESTON_BOUNDS`; a partial dict
+    overrides only the named parameters. Result is in HESTON_PARAM_NAMES order.
+    """
+    if not param_bounds:
+        return _HESTON_BOUNDS
+    return tuple(
+        (float(param_bounds[n][0]), float(param_bounds[n][1]))
+        if n in param_bounds
+        else _HESTON_BOUNDS[i]
+        for i, n in enumerate(HESTON_PARAM_NAMES)
+    )
 
 
 def _heston_theta_to_params(
     theta: jnp.ndarray,
     feller_mode: FellerMode = FellerMode.SOFT,
+    bounds: Bounds = _HESTON_BOUNDS,
 ) -> tuple[float, float, float, float, float]:
     """Unconstrained R^5 -> (v0, kappa, theta, alpha, rho) in the admissible region.
 
     In :attr:`FellerMode.HARD` the vol-of-vol is reparametrised so that
     ``alpha <= sqrt(2*kappa*theta)`` holds by construction (Feller guaranteed).
     """
+    (v0_lo, v0_hi), (k_lo, k_hi), (t_lo, t_hi), (alpha_lo, alpha_hi), (r_lo, r_hi) = bounds
     sg = jax.nn.sigmoid(theta)
-    v0 = _V0_LO + (_V0_HI - _V0_LO) * sg[0]
-    kappa = _KAPPA_LO + (_KAPPA_HI - _KAPPA_LO) * sg[1]
-    theta_h = _THETA_LO + (_THETA_HI - _THETA_LO) * sg[2]
+    v0 = v0_lo + (v0_hi - v0_lo) * sg[0]
+    kappa = k_lo + (k_hi - k_lo) * sg[1]
+    theta_h = t_lo + (t_hi - t_lo) * sg[2]
     if feller_mode is FellerMode.HARD:
-        alpha = feller_capped_xi(kappa, theta_h, sg[3], _XI_LO, _XI_HI, xp=jnp)
+        alpha = feller_capped_alpha(kappa, theta_h, sg[3], alpha_lo, alpha_hi, xp=jnp)
     else:
-        alpha = _XI_LO + (_XI_HI - _XI_LO) * sg[3]
-    rho = _RHO_LO + (_RHO_HI - _RHO_LO) * sg[4]
+        alpha = alpha_lo + (alpha_hi - alpha_lo) * sg[3]
+    rho = r_lo + (r_hi - r_lo) * sg[4]
     return v0, kappa, theta_h, alpha, rho
 
 
 def _params_to_theta(
     params: np.ndarray,
     feller_mode: FellerMode = FellerMode.SOFT,
+    bounds: Bounds = _HESTON_BOUNDS,
 ) -> np.ndarray:
     """Inverse: constrained params -> unconstrained R^5.
 
     For :attr:`FellerMode.HARD` the alpha coordinate is seeded through the
     capped reparametrisation so the start point matches the forward map.
     """
+    (v0_lo, v0_hi), (k_lo, k_hi), (t_lo, t_hi), (alpha_lo, alpha_hi), (r_lo, r_hi) = bounds
     v0, kappa, theta_h, alpha, rho = [float(x) for x in params]
 
-    def logit(x: float, lo: float, hi: float) -> float:
-        frac = (x - lo) / (hi - lo)
-        frac = float(np.clip(frac, 1e-8, 1.0 - 1e-8))
-        return float(np.log(frac / (1.0 - frac)))
-
     if feller_mode is FellerMode.HARD:
-        xi_unit = feller_xi_to_unit(kappa, theta_h, alpha, _XI_LO, _XI_HI)
-        xi_theta = logit(xi_unit, 0.0, 1.0)
+        alpha_unit = feller_alpha_to_unit(kappa, theta_h, alpha, alpha_lo, alpha_hi)
+        alpha_theta = logit(alpha_unit, 0.0, 1.0)
     else:
-        xi_theta = logit(alpha, _XI_LO, _XI_HI)
+        alpha_theta = logit(alpha, alpha_lo, alpha_hi)
 
     return np.array(
         [
-            logit(v0, _V0_LO, _V0_HI),
-            logit(kappa, _KAPPA_LO, _KAPPA_HI),
-            logit(theta_h, _THETA_LO, _THETA_HI),
-            xi_theta,
-            logit(rho, _RHO_LO, _RHO_HI),
+            logit(v0, v0_lo, v0_hi),
+            logit(kappa, k_lo, k_hi),
+            logit(theta_h, t_lo, t_hi),
+            alpha_theta,
+            logit(rho, r_lo, r_hi),
         ]
     )
 
@@ -145,98 +165,60 @@ def _params_to_theta(
 # --------------------------------------------------------------------------- #
 
 
-@dataclass
-class _CompiledResiduals:
-    """Bundle of JIT-compiled residual and Jacobian callables."""
-
-    residual: callable
-    jacobian: callable
-    n_quote_residuals: int  # excludes the final Feller penalty element
-
-
 def _build_residual_fn(
     market_data: OptionMarketData,
     grids: JaxFFTGrids,
     feller_weight: float,
     objective: ObjectiveStrategy,
     feller_mode: FellerMode = FellerMode.SOFT,
+    bounds: Bounds = _HESTON_BOUNDS,
 ) -> _CompiledResiduals:
     """JIT-compile the residual function for a fixed surface + grid config.
 
     The per-quote residual transformation is delegated to ``objective``
-    via :meth:`ObjectiveStrategy.make_jax_residual_fn`, which closes over
-    any precomputed weights (vegas, spreads, market prices, ...). The
-    final residual vector is ``[obj.transform(model_prices), feller_pen]``
-    where the optimizer minimises ``½‖r‖²``.
+    via :meth:`ObjectiveStrategy.make_jax_residual_fn`. The final residual
+    vector is ``[obj.transform(model_prices), feller_pen]`` where the
+    optimizer minimises ``½‖r‖²``. The surface boilerplate lives in
+    :func:`backend.calibration._reparam.build_cf_residual_fn`; only the
+    Heston reparametrisation, CF pricing and Feller penalty are supplied
+    here.
     """
     spot = float(market_data.spot)
     rate = float(market_data.rate)
     q = float(market_data.dividend_yield)
-    unique_mats = [float(T) for T in market_data.unique_maturities]
-
-    strikes_per_T: list[jnp.ndarray] = []
-    is_calls_per_T: list[jnp.ndarray] = []
-    quote_offsets: list[tuple[int, int]] = []
-    running = 0
-    for T in unique_mats:
-        quotes = market_data.quotes_for_maturity(T)
-        n = len(quotes)
-        strikes_per_T.append(jnp.asarray([q.strike for q in quotes], dtype=jnp.float64))
-        is_calls_per_T.append(jnp.asarray([q.is_call for q in quotes], dtype=jnp.bool_))
-        quote_offsets.append((running, running + n))
-        running += n
-    n_quotes = running
-
-    # Strategy-driven residual closure : sqrt(w_i) * (model - market) for
-    # linear-weight objectives, custom logic for Huber/relative.
-    objective_residual_fn = objective.make_jax_residual_fn(market_data)
 
     # OFF -> 0 (no penalty); SOFT -> feller_weight; HARD -> 0 (Feller is
     # guaranteed by the capped reparametrisation, the residual stays 0 and
     # is kept only to keep the vector shape constant across modes).
     eff_feller_weight = penalty_weight(feller_mode, feller_weight)
 
-    def _residual_untraced(theta: jnp.ndarray) -> jnp.ndarray:
-        v0, kappa, theta_h, alpha, rho = _heston_theta_to_params(theta, feller_mode)
+    def theta_to_params(theta: jnp.ndarray) -> tuple:
+        return _heston_theta_to_params(theta, feller_mode, bounds)
 
-        model_prices_blocks: list[jnp.ndarray] = []
-        for i, tau in enumerate(unique_mats):
-            strikes_T = strikes_per_T[i]
-            is_calls_T = is_calls_per_T[i]
+    def price_calls(params: tuple, strikes_T: jnp.ndarray, tau: float) -> jnp.ndarray:
+        v0, kappa, theta_h, alpha, rho = params
 
-            def cf(u):
-                return heston_cf_jax(u, v0, kappa, theta_h, alpha, rho, tau, rate, q)
+        def cf(u):
+            return heston_cf_jax(u, v0, kappa, theta_h, alpha, rho, tau, rate, q)
 
-            call_prices = price_call_strikes_jax(cf, spot, strikes_T, tau, rate, grids)
+        return price_call_strikes_jax(cf, spot, strikes_T, tau, rate, grids)
 
-            # Put via parity: P = C - S*exp(-qT) + K*exp(-rT)
-            disc_spot = spot * jnp.exp(-q * tau)
-            disc_k = strikes_T * jnp.exp(-rate * tau)
-            put_prices = call_prices - disc_spot + disc_k
-
-            prices_T = jnp.where(is_calls_T, call_prices, put_prices)
-            prices_T = jnp.maximum(prices_T, 0.0)
-            model_prices_blocks.append(prices_T)
-
-        model_prices = jnp.concatenate(model_prices_blocks)
-        quote_residuals = objective_residual_fn(model_prices)
-
-        # Soft Feller penalty as an extra residual: sqrt(weight) * (alpha^2 - 2*kappa*theta)_+
+    def penalty_fn(params: tuple) -> jnp.ndarray:
+        _v0, kappa, theta_h, alpha, _rho = params
+        # Soft Feller penalty: sqrt(weight) * (alpha^2 - 2*kappa*theta)_+
         feller = 2.0 * kappa * theta_h - alpha**2
-        feller_res = jnp.where(
+        return jnp.where(
             feller < 0.0,
             jnp.sqrt(eff_feller_weight) * (-feller),
             0.0,
         )
-        return jnp.concatenate([quote_residuals, jnp.array([feller_res])])
 
-    residual_jit = jax.jit(_residual_untraced)
-    jacobian_jit = jax.jit(jax.jacfwd(_residual_untraced))
-
-    return _CompiledResiduals(
-        residual=residual_jit,
-        jacobian=jacobian_jit,
-        n_quote_residuals=n_quotes,
+    return build_cf_residual_fn(
+        market_data,
+        objective,
+        theta_to_params=theta_to_params,
+        price_calls=price_calls,
+        penalty_fn=penalty_fn,
     )
 
 
@@ -290,7 +272,12 @@ class HestonCalibrator(BaseCalibrator):
         log_iterations: bool = False,
         iteration_callback=None,
         feller_mode: FellerMode | str = FellerMode.SOFT,
+        param_bounds: dict[str, tuple[float, float]] | None = None,
     ) -> None:
+        # Per-run search universe (the sigmoid box). ``None`` -> the canonical
+        # default box, so the calibrator is byte-identical to the legacy
+        # behaviour unless the UI supplies an explicit override.
+        self._bounds: Bounds = _resolve_bounds(param_bounds)
         self.n_restarts = max(1, int(n_restarts))
         self.feller_weight = float(feller_weight)
         self.feller_mode = FellerMode.coerce(feller_mode)
@@ -322,40 +309,12 @@ class HestonCalibrator(BaseCalibrator):
         self._grids = fft_grids or JaxFFTGrids.build()
         self._engine = FFTEngine()
 
-    @staticmethod
-    def _resolve_objective(obj: ObjectiveStrategy) -> ObjectiveStrategy:
-        """Coerce JAX-incompatible objectives into a tractable fallback.
-
-        ``LM-JAX`` is the production solver and traces the residual
-        through ``jax.jacfwd``. Objectives requiring scipy IV-inversion
-        (``iv_mse``) cannot be JIT-compiled — we fall back to
-        ``vega_weighted``, whose residuals are the first-order Taylor
-        expansion of IV residuals around the market vega. The warning
-        is logged at INFO level so it shows up in the Streamlit log
-        panel without being noisy.
-        """
-        if obj.jax_compatible:
-            return obj
-        logger.info(
-            "HestonCalibrator: objective '%s' is not JAX-compatible. "
-            "Falling back to 'vega_weighted' (first-order IV approximation, "
-            "Cont & Tankov 2004).",
-            obj.name,
-        )
-        return VegaWeightedObjective()
-
     # ------------------------------------------------------------------ #
     # BaseCalibrator contract
     # ------------------------------------------------------------------ #
 
     def default_bounds(self) -> list[tuple[float, float]]:
-        return [
-            (_V0_LO, _V0_HI),
-            (_KAPPA_LO, _KAPPA_HI),
-            (_THETA_LO, _THETA_HI),
-            (_XI_LO, _XI_HI),
-            (_RHO_LO, _RHO_HI),
-        ]
+        return [(float(lo), float(hi)) for lo, hi in self._bounds]
 
     def objective(self, params: np.ndarray, market_data: OptionMarketData) -> float:
         r = self.residuals(params, market_data)
@@ -371,8 +330,11 @@ class HestonCalibrator(BaseCalibrator):
             self.feller_weight,
             self.objective,
             self.feller_mode,
+            self._bounds,
         )
-        theta = _params_to_theta(np.asarray(params, dtype=float), self.feller_mode)
+        theta = _params_to_theta(
+            np.asarray(params, dtype=float), self.feller_mode, self._bounds
+        )
         return np.asarray(compiled.residual(jnp.asarray(theta)))
 
     # ------------------------------------------------------------------ #
@@ -390,12 +352,20 @@ class HestonCalibrator(BaseCalibrator):
             self.feller_weight,
             self.objective,
             self.feller_mode,
+            self._bounds,
         )
 
         # --- Initial guess from ATM IV ---
+        # Clamp the seed into the (possibly tightened) search box so the start
+        # point is admissible. A no-op for the default box — the ATM-IV seed
+        # already sits well inside it — so default-bounds runs are unchanged.
         atm_iv = get_atm_iv(market_data)
-        seed_params = np.array([atm_iv**2, 2.0, atm_iv**2, 0.3, -0.7])
-        x0_base = _params_to_theta(seed_params, self.feller_mode)
+        _lo = np.array([b[0] for b in self._bounds])
+        _hi = np.array([b[1] for b in self._bounds])
+        seed_params = np.clip(
+            np.array([atm_iv**2, 2.0, atm_iv**2, 0.3, -0.7]), _lo, _hi
+        )
+        x0_base = _params_to_theta(seed_params, self.feller_mode, self._bounds)
         logger.info(
             "Heston calibration | ATM IV=%.2f%% | seed_params=%s",
             atm_iv * 100.0,
@@ -432,7 +402,7 @@ class HestonCalibrator(BaseCalibrator):
             param_mapper=lambda theta_arr: dict(
                 zip(
                     HESTON_PARAM_NAMES,
-                    _np_theta_to_params(theta_arr, self.feller_mode),
+                    _np_theta_to_params(theta_arr, self.feller_mode, self._bounds),
                 )
             ),
         )
@@ -481,7 +451,8 @@ class HestonCalibrator(BaseCalibrator):
 
         # --- Build calibrated model ---
         v0, kappa, theta_h, alpha, rho = (
-            float(x) for x in _np_theta_to_params(best["theta"], self.feller_mode)
+            float(x)
+            for x in _np_theta_to_params(best["theta"], self.feller_mode, self._bounds)
         )
         try:
             model = HestonModel(v0=v0, kappa=kappa, theta=theta_h, alpha=alpha, rho=rho)
@@ -552,7 +523,9 @@ class HestonCalibrator(BaseCalibrator):
                 J_u = np.asarray(best["jac"])[: compiled.n_quote_residuals, :]
                 r_q = np.asarray(best["fun"])[: compiled.n_quote_residuals]
 
-                dpdu = _chain_rule_jacobian(best["theta"], self.feller_mode)
+                dpdu = _chain_rule_jacobian(
+                    best["theta"], self.feller_mode, self._bounds
+                )
                 J_constrained = J_u * dpdu[np.newaxis, :]
 
                 unc = least_squares_covariance(J_constrained, r_q)
@@ -598,23 +571,26 @@ class HestonCalibrator(BaseCalibrator):
 def _np_theta_to_params(
     theta: np.ndarray,
     feller_mode: FellerMode = FellerMode.SOFT,
+    bounds: Bounds = _HESTON_BOUNDS,
 ) -> np.ndarray:
     """Numpy equivalent of _heston_theta_to_params (for post-opt reporting)."""
+    (v0_lo, v0_hi), (k_lo, k_hi), (t_lo, t_hi), (alpha_lo, alpha_hi), (r_lo, r_hi) = bounds
     sg = 1.0 / (1.0 + np.exp(-np.asarray(theta, dtype=float)))
-    v0 = _V0_LO + (_V0_HI - _V0_LO) * sg[0]
-    kappa = _KAPPA_LO + (_KAPPA_HI - _KAPPA_LO) * sg[1]
-    theta_h = _THETA_LO + (_THETA_HI - _THETA_LO) * sg[2]
+    v0 = v0_lo + (v0_hi - v0_lo) * sg[0]
+    kappa = k_lo + (k_hi - k_lo) * sg[1]
+    theta_h = t_lo + (t_hi - t_lo) * sg[2]
     if feller_mode is FellerMode.HARD:
-        alpha = feller_capped_xi(kappa, theta_h, sg[3], _XI_LO, _XI_HI, xp=np)
+        alpha = feller_capped_alpha(kappa, theta_h, sg[3], alpha_lo, alpha_hi, xp=np)
     else:
-        alpha = _XI_LO + (_XI_HI - _XI_LO) * sg[3]
-    rho = _RHO_LO + (_RHO_HI - _RHO_LO) * sg[4]
+        alpha = alpha_lo + (alpha_hi - alpha_lo) * sg[3]
+    rho = r_lo + (r_hi - r_lo) * sg[4]
     return np.array([v0, kappa, theta_h, alpha, rho])
 
 
 def _chain_rule_jacobian(
     theta: np.ndarray,
     feller_mode: FellerMode = FellerMode.SOFT,
+    bounds: Bounds = _HESTON_BOUNDS,
 ) -> np.ndarray:
     """Return dp/dtheta_u for each parameter (size-5 vector).
 
@@ -622,29 +598,30 @@ def _chain_rule_jacobian(
     dp_i/dtheta_i = (hi_i - lo_i) * sigmoid(theta_i) * (1 - sigmoid(theta_i))
 
     In :attr:`FellerMode.HARD` the alpha span is the capped interval width
-    ``min(xi_hi, factor*sqrt(2*kappa*theta)) - min(xi_lo, ...)``. Only the
-    diagonal term ``dxi/dtheta_3`` is kept; the (small) cross-coupling of the
+    ``min(alpha_hi, factor*sqrt(2*kappa*theta)) - min(alpha_lo, ...)``. Only the
+    diagonal term ``dalpha/dtheta_3`` is kept; the (small) cross-coupling of the
     cap on ``kappa``/``theta`` is neglected, so the reported alpha std-error is a
     first-order approximation in HARD mode.
     """
+    (v0_lo, v0_hi), (k_lo, k_hi), (t_lo, t_hi), (alpha_lo, alpha_hi), (r_lo, r_hi) = bounds
     sg = 1.0 / (1.0 + np.exp(-np.asarray(theta, dtype=float)))
     deriv = sg * (1.0 - sg)
     if feller_mode is FellerMode.HARD:
-        kappa = _KAPPA_LO + (_KAPPA_HI - _KAPPA_LO) * sg[1]
-        theta_h = _THETA_LO + (_THETA_HI - _THETA_LO) * sg[2]
-        xi_feller_max = FELLER_STRICT_FACTOR * float((2.0 * kappa * theta_h) ** 0.5)
-        xi_upper = min(_XI_HI, xi_feller_max)
-        xi_lower = min(_XI_LO, xi_upper)
-        xi_span = xi_upper - xi_lower
+        kappa = k_lo + (k_hi - k_lo) * sg[1]
+        theta_h = t_lo + (t_hi - t_lo) * sg[2]
+        alpha_feller_max = FELLER_STRICT_FACTOR * float((2.0 * kappa * theta_h) ** 0.5)
+        alpha_upper = min(alpha_hi, alpha_feller_max)
+        alpha_lower = min(alpha_lo, alpha_upper)
+        alpha_span = alpha_upper - alpha_lower
     else:
-        xi_span = _XI_HI - _XI_LO
+        alpha_span = alpha_hi - alpha_lo
     spans = np.array(
         [
-            _V0_HI - _V0_LO,
-            _KAPPA_HI - _KAPPA_LO,
-            _THETA_HI - _THETA_LO,
-            xi_span,
-            _RHO_HI - _RHO_LO,
+            v0_hi - v0_lo,
+            k_hi - k_lo,
+            t_hi - t_lo,
+            alpha_span,
+            r_hi - r_lo,
         ]
     )
     return spans * deriv

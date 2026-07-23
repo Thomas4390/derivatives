@@ -17,6 +17,8 @@ from typing import Any
 
 import streamlit as st
 
+from config.constants import DEFAULT_X_AXIS, FALLBACK_IV, HUBER_DELTA_DEFAULT
+
 # Keys we own under st.session_state — kept minimal to avoid collisions
 # with other Streamlit pages.
 
@@ -39,6 +41,10 @@ DEFAULT_STATE: dict[str, Any] = {
     # ground-truth surface from the user's chosen parameters, which is
     # the most pedagogically useful starting view for a fresh session.
     "calib_data_source": "synthetic",
+    # Display-only choice for the IV-surface x-axis (ln(K/F) by default).
+    # Kept separate from calib_data_config so changing it never invalidates
+    # the surface cache / triggers a regeneration — it is pure relabelling.
+    "calib_x_axis": DEFAULT_X_AXIS,
     "calib_solver_selection": ("LM-JAX",),
     "calib_solver_settings": {
         "max_nfev": 200,
@@ -54,28 +60,35 @@ DEFAULT_STATE: dict[str, Any] = {
     # Objective function multi-selection (mirrors solver selection).
     "calib_objective_selection": ("price_mse",),
     "calib_objective_settings": {
-        "huber_delta": 0.05,
+        "huber_delta": HUBER_DELTA_DEFAULT,
         "relative_use_log": False,
-        "fallback_iv": 0.20,
+        "fallback_iv": FALLBACK_IV,
     },
     # Optimisation constraints. ``feller_mode`` ∈ {off, soft, hard} decides how
-    # the Feller condition 2κθ > ξ² is enforced for Heston/Bates; ``feller_weight``
+    # the Feller condition 2κθ > α² is enforced for Heston/Bates; ``feller_weight``
     # is the soft-penalty weight (only used in soft mode). Default = legacy soft@1000.
     "calib_constraint_settings": {
         "feller_mode": "soft",
         "feller_weight": 1000.0,
     },
+    # Search universe (per-parameter ``(lo, hi)`` box the optimiser explores).
+    # ``calib_search_space_mode`` ∈ {default, tight, custom} drives how the box
+    # is resolved; ``calib_search_bounds`` is the resolved override keyed by
+    # model -> {param: (lo, hi)}. Empty / "default" -> each calibrator's
+    # canonical box, so the default session is unchanged.
+    "calib_search_space_mode": "default",
+    "calib_search_bounds": {},
     # ── Derived data ──
-    "calib_market_data": None,           # OptionMarketData | HistoricalReturns
-    "calib_market_data_meta": {},        # auxiliary info: ivs, true model
+    "calib_market_data": None,  # OptionMarketData | HistoricalReturns
+    "calib_market_data_meta": {},  # auxiliary info: ivs, true model
     # Nested results: dict[model_key, dict[solver_name, CalibrationRunSummary]]
     # (post multi-model refactor). Empty when no run has executed yet.
     "calib_results": {},
-    "calib_active_model": None,          # which model the inspection tabs focus on
-    "calib_active_solver": None,         # within active_model
-    "calib_active_objective": None,      # within active_model × active_solver
-    "calib_data_hash": None,             # hash of the current data config
-    "calib_results_hash": None,          # hash of the calibration config
+    "calib_active_model": None,  # which model the inspection tabs focus on
+    "calib_active_solver": None,  # within active_model
+    "calib_active_objective": None,  # within active_model × active_solver
+    "calib_data_hash": None,  # hash of the current data config
+    "calib_results_hash": None,  # hash of the calibration config
     # Wall-clock timestamp (UTC) of the last completed multi-model run.
     # Surfaced as a small caption in the Compare tab so students can tell
     # at a glance whether sidebar tweaks have invalidated the on-screen
@@ -150,3 +163,36 @@ def mark_run_complete(run_config: dict[str, Any]) -> None:
     """
     st.session_state["calib_last_run_ts"] = datetime.now(timezone.utc)
     st.session_state["calib_results_hash"] = hash_config(run_config)
+
+
+def commit_results(results: dict, *, run_config: dict[str, Any] | None = None) -> None:
+    """Persist a (possibly partial) multi-model result set + focus pointers.
+
+    Centralises the post-run state writes the entry point used to do inline so
+    the **live runner's Stop handler** can reuse them: when the user presses ⏹
+    Stop, Streamlit tears the synchronous run loop down via a rerun, and the
+    runner calls this to keep the interrupted run's best-so-far point (plus every
+    already-completed run) before the local ``results`` is discarded.
+
+    Only ``st.session_state`` is written (no Streamlit *element* API), so this is
+    safe to call while Streamlit is unwinding to a rerun. ``run_config`` stamps a
+    full completion (timestamp + config hash) for a clean finish; omit it for an
+    interrupted run, which still timestamps the partial result.
+    """
+    first_model = next(iter(results), None)
+    first_solver = (
+        next(iter(results[first_model]), None) if first_model is not None else None
+    )
+    first_objective: Any = None
+    if first_model is not None and first_solver is not None:
+        slot = results[first_model][first_solver]
+        if isinstance(slot, dict):
+            first_objective = next(iter(slot), None)
+    st.session_state["calib_results"] = results
+    st.session_state["calib_active_model"] = first_model
+    st.session_state["calib_active_solver"] = first_solver
+    st.session_state["calib_active_objective"] = first_objective
+    if run_config is not None:
+        mark_run_complete(run_config)
+    else:
+        st.session_state["calib_last_run_ts"] = datetime.now(timezone.utc)

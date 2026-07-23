@@ -9,11 +9,12 @@ Thin orchestrator that delegates to sub-modules:
 
 import streamlit as st
 from components.sidebar_market import render_market_params
+from components.sidebar_portfolio_io import render_portfolio_io
 from components.sidebar_positions import render_positions_section
 from components.sidebar_strategy import render_strategy_builder
 
 
-def render_sidebar(positions: list, stock_position) -> tuple[float, float]:
+def render_sidebar(positions: list, stock_position) -> tuple[float, float, float]:
     """
     Render the complete sidebar with all controls.
 
@@ -22,7 +23,7 @@ def render_sidebar(positions: list, stock_position) -> tuple[float, float]:
         stock_position: Stock position dict or None
 
     Returns:
-        Tuple of (spot_price, risk_free_rate)
+        Tuple of (spot_price, risk_free_rate, dividend_yield)
     """
     with st.sidebar:
         # Logo/Brand section
@@ -38,12 +39,23 @@ def render_sidebar(positions: list, stock_position) -> tuple[float, float]:
         )
 
         # Market Parameters
-        spot_price, risk_free_rate = render_market_params()
+        spot_price, risk_free_rate, dividend_yield = render_market_params()
 
         # Strategy Builder
-        render_strategy_builder(spot_price, risk_free_rate)
+        render_strategy_builder(spot_price, risk_free_rate, dividend_yield)
 
         # Current Positions
         render_positions_section(positions, stock_position)
 
-    return spot_price, risk_free_rate
+        # Save / Load setup (copy-paste a previous-session setup)
+        render_portfolio_io(
+            positions,
+            stock_position,
+            {
+                "spot": spot_price,
+                "rate": risk_free_rate,
+                "dividend_yield": dividend_yield,
+            },
+        )
+
+    return spot_price, risk_free_rate, dividend_yield

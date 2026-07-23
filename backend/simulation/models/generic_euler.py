@@ -83,8 +83,9 @@ class GenericEulerSimulator(BaseSimulator):
     ) -> SimulationResult:
         self.validate_inputs(s0, mu, t, n_paths, n_steps)
 
-        if seed is not None:
-            np.random.seed(seed)
+        # Local Generator (PCG64): reproducible for a fixed seed and thread-safe,
+        # unlike np.random.seed() which mutates global legacy MT state.
+        rng = np.random.default_rng(seed)
 
         start_time = time.perf_counter()
 
@@ -119,7 +120,7 @@ class GenericEulerSimulator(BaseSimulator):
         for j in range(n_steps):
             s = paths[:, j]
             t_j = j * dt
-            z1 = np.random.standard_normal(n_paths)
+            z1 = rng.standard_normal(n_paths)
 
             # Price SDE
             try:
@@ -145,7 +146,7 @@ class GenericEulerSimulator(BaseSimulator):
 
             # Variance SDE (correlated with price)
             if has_stoch_vol:
-                z_indep = np.random.standard_normal(n_paths)
+                z_indep = rng.standard_normal(n_paths)
                 z2 = rho * z1 + sqrt_1mrho2 * z_indep
 
                 vd = var_drift_fn(v, s, t_j)
@@ -183,8 +184,8 @@ class GenericEulerSimulator(BaseSimulator):
     ) -> np.ndarray:
         self.validate_inputs(s0, mu, t, n_paths, n_steps)
 
-        if seed is not None:
-            np.random.seed(seed)
+        # Local Generator (see simulate_paths): reproducible and thread-safe.
+        rng = np.random.default_rng(seed)
 
         dt = t / n_steps
         sqrt_dt = np.sqrt(dt)
@@ -210,7 +211,7 @@ class GenericEulerSimulator(BaseSimulator):
 
         for j in range(n_steps):
             t_j = j * dt
-            z1 = np.random.standard_normal(n_paths)
+            z1 = rng.standard_normal(n_paths)
 
             try:
                 drift_val = drift_fn(s, v, t_j, mu, 0.0)
@@ -233,7 +234,7 @@ class GenericEulerSimulator(BaseSimulator):
             np.maximum(s, 1e-10, out=s)
 
             if has_stoch_vol:
-                z_indep = np.random.standard_normal(n_paths)
+                z_indep = rng.standard_normal(n_paths)
                 z2 = rho * z1 + sqrt_1mrho2 * z_indep
 
                 vd = var_drift_fn(v, s, t_j)

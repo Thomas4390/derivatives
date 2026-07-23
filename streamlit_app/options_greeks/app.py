@@ -43,6 +43,7 @@ from config.constants import (
 from config.styles import inject_styles
 from config.templates import footer_html, render_header
 from guide_formula import render_guide_section
+from services.exotic_pricing_adapter import calculate_exotic_all_greeks
 from services.portfolio_calculator import calculate_all_surfaces, prepare_portfolio_data
 
 # Pricing functions (using backend architecture, no classes)
@@ -57,7 +58,7 @@ from services.pricing_adapter import (
 from services.pricing_adapter import (
     calculate_pnl_at_expiry_arrays as calculate_portfolio_pnl_at_expiry,
 )
-from services.state_manager import init_session_state
+from services.state_manager import consume_pending_snapshot, init_session_state
 from services.structured_pricing_adapter import (
     calculate_structured_greeks_3d_dte,
     calculate_structured_greeks_3d_iv,
@@ -81,12 +82,16 @@ inject_styles()
 # Initialize session state
 init_session_state()
 
+# Apply a queued "Load setup" snapshot before the sidebar widgets render
+# (Streamlit forbids mutating a widget's value after it has been instantiated).
+consume_pending_snapshot()
+
 
 # =============================================================================
 # SIDEBAR
 # =============================================================================
 
-spot_price, risk_free_rate = render_sidebar(
+spot_price, risk_free_rate, dividend_yield = render_sidebar(
     positions=st.session_state.positions, stock_position=st.session_state.stock_position
 )
 
@@ -116,6 +121,7 @@ def get_default_premium() -> float:
         risk_free_rate=risk_free_rate,
         volatility=DEFAULT_IV / 100,  # Convert from percentage
         option_type="call",
+        dividend_yield=dividend_yield,
     )
 
 
@@ -234,9 +240,14 @@ else:
             _calculate_pnl_at_expiry_func=calculate_portfolio_pnl_at_expiry,
             _find_breakeven_func=find_breakeven_points,
             has_positions=has_positions,
+            _calculate_exotic_greeks_func=calculate_exotic_all_greeks,
+            dividend_yield=dividend_yield,
         )
 
-    has_exotic_legs = False
+    has_exotic_legs = any(
+        pos.get("instrument_class", "vanilla") != "vanilla"
+        for pos in st.session_state.positions
+    )
 
     greeks_3d_dte_func = calculate_portfolio_greeks_3d_dte
     greeks_3d_iv_func = calculate_portfolio_greeks_3d_iv
@@ -244,7 +255,7 @@ else:
     calculate_all_greeks_func = calculate_all_greeks
     calculate_pnl_at_expiry_func = calculate_portfolio_pnl_at_expiry
     find_breakeven_func = find_breakeven_points
-    calculate_exotic_greeks_func = None
+    calculate_exotic_greeks_func = calculate_exotic_all_greeks
     positions_for_tabs = st.session_state.positions
     stock_position_for_tabs = st.session_state.stock_position
 
@@ -275,8 +286,8 @@ sp_iv_range = all_data.get("iv_range")
 with tab1:
     if sp_mode:
         st.info(
-            "P&L Profile pour produits structurés — en cours de développement. "
-            "Cette fonctionnalité sera disponible dans une prochaine mise à jour."
+            "P&L Profile for structured products — under development. "
+            "This feature will be available in a future update."
         )
     else:
         default_premium = get_default_premium() if not has_positions else 10.0
@@ -295,14 +306,15 @@ with tab1:
             sp_mode=sp_mode,
             dte_range=sp_dte_range,
             iv_range=sp_iv_range,
+            dividend_yield=dividend_yield,
         )
 
 # Tab 2: First-Order Greeks
 with tab2:
     if sp_mode:
         st.info(
-            "Greeks pour produits structurés — en cours de développement. "
-            "Cette fonctionnalité sera disponible dans une prochaine mise à jour."
+            "Greeks for structured products — under development. "
+            "This feature will be available in a future update."
         )
     else:
         render_first_order_greeks(
@@ -319,14 +331,15 @@ with tab2:
             sp_mode=sp_mode,
             dte_range=sp_dte_range,
             iv_range=sp_iv_range,
+            dividend_yield=dividend_yield,
         )
 
 # Tab 3: Second-Order Greeks
 with tab3:
     if sp_mode:
         st.info(
-            "Greeks pour produits structurés — en cours de développement. "
-            "Cette fonctionnalité sera disponible dans une prochaine mise à jour."
+            "Greeks for structured products — under development. "
+            "This feature will be available in a future update."
         )
     else:
         render_second_order_greeks(
@@ -344,14 +357,15 @@ with tab3:
             sp_mode=sp_mode,
             dte_range=sp_dte_range,
             iv_range=sp_iv_range,
+            dividend_yield=dividend_yield,
         )
 
 # Tab 4: Third-Order Greeks
 with tab4:
     if sp_mode:
         st.info(
-            "Greeks pour produits structurés — en cours de développement. "
-            "Cette fonctionnalité sera disponible dans une prochaine mise à jour."
+            "Greeks for structured products — under development. "
+            "This feature will be available in a future update."
         )
     else:
         render_third_order_greeks(
@@ -369,14 +383,15 @@ with tab4:
             sp_mode=sp_mode,
             dte_range=sp_dte_range,
             iv_range=sp_iv_range,
+            dividend_yield=dividend_yield,
         )
 
 # Tab 5: 3D Surface
 with tab5:
     if sp_mode:
         st.info(
-            "Greeks pour produits structurés — en cours de développement. "
-            "Cette fonctionnalité sera disponible dans une prochaine mise à jour."
+            "Greeks for structured products — under development. "
+            "This feature will be available in a future update."
         )
     else:
         render_3d_tab(
@@ -390,6 +405,7 @@ with tab5:
             _calculate_greeks_3d_dte_func=greeks_3d_dte_func,
             _calculate_greeks_3d_iv_func=greeks_3d_iv_func,
             _calculate_greeks_3d_strike_func=calculate_greeks_3d_strike_func,
+            dividend_yield=dividend_yield,
         )
 
 # Tab 6: Reference Guide

@@ -15,6 +15,8 @@ from typing import Any
 import streamlit as st
 
 from config.constants import (
+    GARCH_FAMILY,
+    HUBER_DELTA_DEFAULT,
     OBJECTIVE_DISPLAY_NAMES,
     OBJECTIVE_GROUP_HELP,
     OBJECTIVE_HOVER,
@@ -56,7 +58,7 @@ def render(candidates: tuple[str, ...]) -> tuple[tuple[str, ...], dict[str, Any]
     if not inter:
         if not candidates:
             st.info("Pick at least one candidate model to enable objective selection.")
-        elif all(c in ("garch", "ngarch", "gjr_garch") for c in candidates):
+        elif all(c in GARCH_FAMILY for c in candidates):
             st.info(
                 "GARCH-family calibration uses maximum-likelihood on log-returns — "
                 "the loss is the log-likelihood, not a price-error norm."
@@ -99,7 +101,7 @@ def render(candidates: tuple[str, ...]) -> tuple[tuple[str, ...], dict[str, Any]
                         "Huber threshold δ (price units)",
                         min_value=0.001,
                         max_value=1.0,
-                        value=float(settings.get("huber_delta", 0.05)),
+                        value=float(settings.get("huber_delta", HUBER_DELTA_DEFAULT)),
                         step=0.005,
                         format="%.3f",
                         help=(

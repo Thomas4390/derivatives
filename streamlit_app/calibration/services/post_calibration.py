@@ -10,7 +10,7 @@ the fit progression.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 
@@ -19,11 +19,13 @@ from backend.calibration.utils import model_prices_to_ivs
 from backend.core.result_types import PricingCapability
 from backend.engines.fft_engine import FFTEngine
 
+from config.constants import MC_PATHS_SURFACE, MC_SEED
+
 # Monte-Carlo defaults for the nonaffine / risk-neutral-GARCH pricing path
-# (Duan NGARCH-Q surface model + physical-GARCH model-implied surfaces). A fixed
-# seed gives common random numbers, so repeated re-pricing is reproducible.
-_MC_PATHS_DEFAULT = 30_000
-_MC_SEED_DEFAULT = 12_345
+# (Duan NGARCH-Q surface model + physical-GARCH model-implied surfaces). Sourced
+# from config.constants so the MC knobs live in one place.
+_MC_PATHS_DEFAULT = MC_PATHS_SURFACE
+_MC_SEED_DEFAULT = MC_SEED
 
 _ENGINE: FFTEngine | None = None
 
@@ -79,7 +81,11 @@ def _risk_neutral_simulator(model):
 
 
 def surface_model_prices(
-    model, market_data, *, n_paths: int = _MC_PATHS_DEFAULT, mc_seed: int = _MC_SEED_DEFAULT
+    model,
+    market_data,
+    *,
+    n_paths: int = _MC_PATHS_DEFAULT,
+    mc_seed: int = _MC_SEED_DEFAULT,
 ) -> np.ndarray:
     """Model prices aligned to ``market_data.quotes`` — FFT for affine models,
     Monte-Carlo for the nonaffine / risk-neutral-GARCH family.
@@ -93,7 +99,19 @@ def surface_model_prices(
         return price_surface(model, market_data, _engine())
     sim = _risk_neutral_simulator(model)
     if sim is None:
-        raise ValueError(f"No surface-pricing path for model {type(model).__name__}")
+        # Generic SDE model (e.g. a user-defined custom model with no GARCH MC
+        # mapping): Euler-price it via the same terminal simulator the custom
+        # calibrator uses.
+        if callable(getattr(model, "drift", None)) and callable(
+            getattr(model, "diffusion", None)
+        ):
+            from backend.calibration.custom_calibrator import CustomTerminalSimulator
+
+            sim = CustomTerminalSimulator(model)
+        else:
+            raise ValueError(
+                f"No surface-pricing path for model {type(model).__name__}"
+            )
     return price_surface_mc(sim, market_data, n_paths=n_paths, mc_seed=mc_seed)
 
 
@@ -103,6 +121,16 @@ def model_iv_grid(model, market_data, meta: dict) -> np.ndarray:
     Shape: ``(n_maturities, n_strikes)``. Cells without a matching quote
     stay NaN — same convention as ``meta["iv_grid"]``. Affine models price by
     FFT; nonaffine / risk-neutral-GARCH models price by Monte-Carlo.
+
+    Inversion policy — LOAD-BEARING PRECONDITION: this inverts each quote with
+    its own ``is_call`` flag, including deep-ITM quotes. That is only safe
+    because every quote source here is **OTM by construction** (synthetic
+    surfaces set ``is_call = strike >= forward``; the real-data loader picks the
+    OTM side per strike). Deep-ITM inversion of an MC-priced surface is noisy —
+    if a future quote source ever emits deep-ITM quotes, switch to the OTM-only
+    rule used by :func:`iv_grid_from_simulator` (see its docstring). The two
+    inversion policies are kept separate on purpose; do NOT unify them without
+    revisiting this precondition.
     """
     model_prices = surface_model_prices(model, market_data)
     is_calls = np.array([qt.is_call for qt in market_data.quotes])
@@ -115,32 +143,35 @@ def model_iv_grid(model, market_data, meta: dict) -> np.ndarray:
         is_calls=is_calls,
         dividend_yield=market_data.dividend_yield,
     )
-    # implied_volatility() returns NaN for non-invertible prices; this filter
-    # also clips any degenerate near-zero IV (<= 1e-4) to NaN so the heatmap
-    # shows empty cells instead of 0% / -100% artefacts.
+    # implied_volatility() returns -1.0 as a non-convergence sentinel rather
+    # than raising — without this filter the heatmap shows -100% IV cells.
     flat_ivs = np.where(flat_ivs <= 1e-4, np.nan, flat_ivs)
 
-    grid_strikes = np.asarray(meta["strikes"], dtype=np.float64)
+    grid_strikes = np.asarray(meta["strikes"], dtype=np.float64)  # (n_T, n_K)
     grid_maturities = np.asarray(meta["maturities"], dtype=np.float64)
-    n_T, n_K = grid_maturities.shape[0], grid_strikes.shape[0]
+    n_T, n_K = grid_strikes.shape
     grid = np.full((n_T, n_K), np.nan, dtype=np.float64)
     quote_T = market_data.maturities
     quote_K = market_data.strikes
     for q in range(flat_ivs.shape[0]):
         i_T = int(np.argmin(np.abs(grid_maturities - quote_T[q])))
-        i_K = int(np.argmin(np.abs(grid_strikes - quote_K[q])))
+        # strikes are per-maturity (adaptive moneyness grid) → match within the row.
+        i_K = int(np.argmin(np.abs(grid_strikes[i_T] - quote_K[q])))
         grid[i_T, i_K] = flat_ivs[q]
     return grid
 
 
 def rebuild_model(model_key: str, params_natural: dict):
-    """Rebuild a Fourier-pricable model from its natural-scale parameters.
+    """Rebuild a surface-pricable model from its natural-scale parameters.
 
-    Returns ``None`` for model keys that do not produce a surface (GARCH
-    family, IV/GBM closed-form) so the caller can short-circuit.
+    Covers the affine FFT models, the MC-priced risk-neutral GARCH-Q trio,
+    and the registered custom model. Returns ``None`` for model keys that do
+    not price a surface from a parameter dict (physical GARCH family, IV/GBM
+    closed-form) so the caller can short-circuit.
     """
     if model_key == "heston":
         from backend.models.heston import HestonModel
+
         return HestonModel(
             v0=float(params_natural["v0"]),
             kappa=float(params_natural["kappa"]),
@@ -150,6 +181,7 @@ def rebuild_model(model_key: str, params_natural: dict):
         )
     if model_key == "merton":
         from backend.models.merton import MertonModel
+
         return MertonModel(
             sigma=float(params_natural["sigma"]),
             lam=float(params_natural["lam"]),
@@ -158,6 +190,7 @@ def rebuild_model(model_key: str, params_natural: dict):
         )
     if model_key == "bates":
         from backend.models.bates import BatesModel
+
         return BatesModel(
             v0=float(params_natural["v0"]),
             kappa=float(params_natural["kappa"]),
@@ -170,6 +203,7 @@ def rebuild_model(model_key: str, params_natural: dict):
         )
     if model_key == "heston_nandi":
         from backend.models.heston_nandi import HestonNandiGARCHModel
+
         # steps_per_year defaults to HESTON_NANDI_STEPS_PER_YEAR (252) — the same
         # default the calibrator uses to build the final model, so re-pricing a
         # snapshot here matches the fitted surface exactly.
@@ -180,6 +214,31 @@ def rebuild_model(model_key: str, params_natural: dict):
             gamma=float(params_natural["gamma"]),
             h0=float(params_natural["h0"]),
         )
+    if model_key in ("ngarch_q", "garch_q", "gjr_q"):
+        from backend.models.ngarch_q import (
+            GARCHRiskNeutralModel,
+            GJRGARCHRiskNeutralModel,
+            NGARCHRiskNeutralModel,
+        )
+
+        cls = {
+            "ngarch_q": NGARCHRiskNeutralModel,
+            "garch_q": GARCHRiskNeutralModel,
+            "gjr_q": GJRGARCHRiskNeutralModel,
+        }[model_key]
+        # garch_q is symmetric — its model has no gamma even though the
+        # calibrator's search vector pins one at (0, 0); filter to the
+        # constructor's own parameter names.
+        allowed = set(cls._PARAM_NAMES)
+        return cls(**{k: float(v) for k, v in params_natural.items() if k in allowed})
+    if model_key == "custom":
+        # Rebuild the user-defined model from the registered class (session-scoped).
+        from services.custom_model_service import get_custom_model_class
+
+        cls = get_custom_model_class()
+        if cls is None:
+            return None
+        return cls(**{k: float(v) for k, v in params_natural.items()})
     return None
 
 
@@ -198,6 +257,12 @@ def iv_grid_from_simulator(
     and invert each cell to Black-Scholes implied vol.
 
     Returns shape ``(n_maturities, n_strikes)`` with NaN where inversion fails.
+
+    Inversion policy: OTM-only by forward (a call above the forward, a put
+    below), which avoids the deep-ITM MC noise. This deliberately differs from
+    :func:`model_iv_grid`'s per-quote ``is_call`` inversion — the two coincide
+    today only because both consumers feed OTM quotes; see ``model_iv_grid``'s
+    precondition. Kept separate on purpose.
     """
     strikes = np.asarray(strikes, dtype=float)
     maturities = np.asarray(maturities, dtype=float)
@@ -207,14 +272,12 @@ def iv_grid_from_simulator(
     # OTM prices are pure time value, so the BS inversion is well-conditioned;
     # pricing calls everywhere instead makes deep-ITM cells almost all intrinsic,
     # where MC noise swamps the tiny time value and the inverted IV is garbage
-    # (the spikes/holes that made these surfaces look strange). Calls and puts
-    # share one seed -> identical terminals -> put-call parity holds exactly.
-    calls = sim.price_surface(
-        spot, strikes, maturities, rate, n_paths=n_paths, seed=mc_seed, is_call=True
-    )  # (n_T, n_K)
-    puts = sim.price_surface(
-        spot, strikes, maturities, rate, n_paths=n_paths, seed=mc_seed, is_call=False
-    )  # (n_T, n_K)
+    # (the spikes/holes that made these surfaces look strange). One simulation
+    # feeds both payoff grids -> identical terminals -> put-call parity holds
+    # exactly (and the MC cost is half that of two price_surface passes).
+    calls, puts = sim.price_surface_call_put(
+        spot, strikes, maturities, rate, n_paths=n_paths, seed=mc_seed
+    )  # each (n_T, n_K)
     use_call = k_mesh >= spot * np.exp(rate * t_mesh)  # call OTM iff K >= forward
     price_grid = np.where(use_call, calls, puts)
     flat_ivs = model_prices_to_ivs(
@@ -251,16 +314,25 @@ def garch_implied_iv_grid(
     if sim is None:
         raise ValueError(f"No GARCH MC mapping for model {type(model).__name__}")
     return iv_grid_from_simulator(
-        sim, spot=spot, rate=rate, strikes=strikes, maturities=maturities,
-        dividend_yield=dividend_yield, n_paths=n_paths, mc_seed=mc_seed,
+        sim,
+        spot=spot,
+        rate=rate,
+        strikes=strikes,
+        maturities=maturities,
+        dividend_yield=dividend_yield,
+        n_paths=n_paths,
+        mc_seed=mc_seed,
     )
 
 
 @dataclass(frozen=True)
 class IVAnimationFrame:
-    iter_index: int      # position within the source history
-    objective: float     # objective at this snapshot
+    iter_index: int  # position within the source history
+    objective: float  # objective at this snapshot
     iv_grid: np.ndarray  # (n_T, n_K), NaN for missing cells
+    # Natural-scale parameters that priced this grid — lets a combined chart
+    # show the parameter trajectory in lock-step with the morphing surface.
+    params_natural: dict = field(default_factory=dict)
 
 
 def iv_grid_animation_frames(
@@ -316,11 +388,14 @@ def iv_grid_animation_frames(
             grid = model_iv_grid(model, market_data, meta)
         except (ValueError, RuntimeError, FloatingPointError):
             continue
-        frames.append(IVAnimationFrame(
-            iter_index=idx,
-            objective=float(snap.objective),
-            iv_grid=grid,
-        ))
+        frames.append(
+            IVAnimationFrame(
+                iter_index=idx,
+                objective=float(snap.objective),
+                iv_grid=grid,
+                params_natural=dict(snap.params_natural),
+            )
+        )
     return frames
 
 

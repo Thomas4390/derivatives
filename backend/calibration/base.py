@@ -10,13 +10,17 @@ Created: 2026
 
 from __future__ import annotations
 
+import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 import numpy as np
 
 from backend.core.interfaces import Model
+
+if TYPE_CHECKING:
+    from backend.calibration.objectives import ObjectiveStrategy
 
 
 @dataclass(frozen=True)
@@ -97,6 +101,33 @@ class BaseCalibrator(ABC):
             f"{type(self).__name__} does not expose a residual vector; "
             "override residuals() to enable Levenberg-Marquardt."
         )
+
+    # --------------------------------------------------------------------- #
+    # Objective resolution (JAX-compatibility fallback)
+    # --------------------------------------------------------------------- #
+
+    def _resolve_objective(self, obj: "ObjectiveStrategy") -> "ObjectiveStrategy":
+        """Coerce a JAX-incompatible objective into a tractable fallback.
+
+        ``LM-JAX`` is the production solver and traces residuals through
+        ``jax.jacfwd``; objectives requiring scipy IV-inversion
+        (``iv_mse``) cannot be JIT-compiled and fall back to
+        ``vega_weighted`` — the first-order Taylor expansion of the IV
+        residuals around the market vega (Cont & Tankov 2004). The notice
+        is logged at INFO via the concrete calibrator's own module logger
+        so it surfaces in the Streamlit panel without being noisy.
+        """
+        if obj.jax_compatible:
+            return obj
+        from backend.calibration.objectives import VegaWeightedObjective
+
+        logging.getLogger(type(self).__module__).info(
+            "%s: objective '%s' is not JAX-compatible. Falling back to "
+            "'vega_weighted' (first-order IV approximation, Cont & Tankov 2004).",
+            type(self).__name__,
+            obj.name,
+        )
+        return VegaWeightedObjective()
 
     # --------------------------------------------------------------------- #
     # Shared objective computation

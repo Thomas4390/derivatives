@@ -10,7 +10,7 @@ Created: 2026
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, fields, replace
 
 import numpy as np
 
@@ -51,6 +51,10 @@ class YieldCurve:
             raise ValueError("Yield curve must have at least one tenor")
         if any(t <= 0 for t in self.tenors):
             raise ValueError("All tenors must be positive")
+        # np.interp requires strictly increasing x-coordinates; out-of-order
+        # tenors would otherwise return silently wrong discount factors.
+        if np.any(np.diff(np.asarray(self.tenors, dtype=float)) <= 0):
+            raise ValueError("Tenors must be strictly increasing")
 
     def _interpolate_rate(self, t: float) -> float:
         """Linearly interpolate the zero rate at time t."""
@@ -201,21 +205,20 @@ class MarketEnvironment:
                 "If intentional, use with_dividend() to bypass validation."
             )
 
-    @classmethod
-    def _create_without_validation(
-        cls, spot: float, rate: float, dividend_yield: float, valuation_date: str | None
-    ) -> "MarketEnvironment":
+    def _replace_unvalidated(self, **overrides: object) -> "MarketEnvironment":
         """
-        Create MarketEnvironment bypassing __post_init__ validation.
+        Like ``dataclasses.replace`` but bypassing ``__post_init__`` validation.
 
-        Used internally by with_rate() and with_dividend() to allow
-        extreme values for stress testing.
+        Preserves the concrete subclass and *all* its fields — e.g. an
+        ``EnrichedMarketEnvironment``'s ``yield_curve``/``credit_spread`` — which
+        a hard-coded ``MarketEnvironment(...)`` would silently drop. Used by the
+        bump_*/with_* helpers when validation is bypassed for extreme stress
+        scenarios.
         """
-        obj = object.__new__(cls)
-        object.__setattr__(obj, "spot", spot)
-        object.__setattr__(obj, "rate", rate)
-        object.__setattr__(obj, "dividend_yield", dividend_yield)
-        object.__setattr__(obj, "valuation_date", valuation_date)
+        obj = object.__new__(type(self))
+        for f in fields(self):
+            value = overrides[f.name] if f.name in overrides else getattr(self, f.name)
+            object.__setattr__(obj, f.name, value)
         return obj
 
     def bump_spot(self, delta: float) -> "MarketEnvironment":
@@ -232,12 +235,7 @@ class MarketEnvironment:
         MarketEnvironment
             New environment with spot = spot + delta
         """
-        return MarketEnvironment(
-            spot=self.spot + delta,
-            rate=self.rate,
-            dividend_yield=self.dividend_yield,
-            valuation_date=self.valuation_date,
-        )
+        return replace(self, spot=self.spot + delta)
 
     def bump_rate(self, delta: float, validate: bool = True) -> "MarketEnvironment":
         """
@@ -258,18 +256,8 @@ class MarketEnvironment:
         """
         new_rate = self.rate + delta
         if validate:
-            return MarketEnvironment(
-                spot=self.spot,
-                rate=new_rate,
-                dividend_yield=self.dividend_yield,
-                valuation_date=self.valuation_date,
-            )
-        return self._create_without_validation(
-            spot=self.spot,
-            rate=new_rate,
-            dividend_yield=self.dividend_yield,
-            valuation_date=self.valuation_date,
-        )
+            return replace(self, rate=new_rate)
+        return self._replace_unvalidated(rate=new_rate)
 
     def bump_dividend(self, delta: float, validate: bool = True) -> "MarketEnvironment":
         """
@@ -290,18 +278,8 @@ class MarketEnvironment:
         """
         new_dividend = self.dividend_yield + delta
         if validate:
-            return MarketEnvironment(
-                spot=self.spot,
-                rate=self.rate,
-                dividend_yield=new_dividend,
-                valuation_date=self.valuation_date,
-            )
-        return self._create_without_validation(
-            spot=self.spot,
-            rate=self.rate,
-            dividend_yield=new_dividend,
-            valuation_date=self.valuation_date,
-        )
+            return replace(self, dividend_yield=new_dividend)
+        return self._replace_unvalidated(dividend_yield=new_dividend)
 
     def with_spot(self, spot: float) -> "MarketEnvironment":
         """
@@ -317,12 +295,7 @@ class MarketEnvironment:
         MarketEnvironment
             New environment with the given spot
         """
-        return MarketEnvironment(
-            spot=spot,
-            rate=self.rate,
-            dividend_yield=self.dividend_yield,
-            valuation_date=self.valuation_date,
-        )
+        return replace(self, spot=spot)
 
     def with_rate(self, rate: float, validate: bool = False) -> "MarketEnvironment":
         """
@@ -344,19 +317,9 @@ class MarketEnvironment:
             New environment with the given rate
         """
         if validate:
-            return MarketEnvironment(
-                spot=self.spot,
-                rate=rate,
-                dividend_yield=self.dividend_yield,
-                valuation_date=self.valuation_date,
-            )
+            return replace(self, rate=rate)
         # Bypass validation for extreme scenario analysis
-        return self._create_without_validation(
-            spot=self.spot,
-            rate=rate,
-            dividend_yield=self.dividend_yield,
-            valuation_date=self.valuation_date,
-        )
+        return self._replace_unvalidated(rate=rate)
 
     def with_dividend(
         self, dividend_yield: float, validate: bool = False
@@ -380,19 +343,9 @@ class MarketEnvironment:
             New environment with the given dividend yield
         """
         if validate:
-            return MarketEnvironment(
-                spot=self.spot,
-                rate=self.rate,
-                dividend_yield=dividend_yield,
-                valuation_date=self.valuation_date,
-            )
+            return replace(self, dividend_yield=dividend_yield)
         # Bypass validation for extreme scenario analysis
-        return self._create_without_validation(
-            spot=self.spot,
-            rate=self.rate,
-            dividend_yield=dividend_yield,
-            valuation_date=self.valuation_date,
-        )
+        return self._replace_unvalidated(dividend_yield=dividend_yield)
 
 
 # =============================================================================

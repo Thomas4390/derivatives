@@ -21,6 +21,11 @@ DAYS_PER_YEAR: Final[float] = CALENDAR_DAYS_PER_YEAR
 # Trading days per year (used for annualization, MC step sizing)
 TRADING_DAYS_PER_YEAR: Final[int] = 252
 
+# Floor for time-to-expiry when bumping time in finite-difference theta-family
+# Greeks: the realized step (time - max(time - h, MIN_TIME_TO_EXPIRY)) is what
+# the divisor must use near expiry, not the nominal bump.
+MIN_TIME_TO_EXPIRY: Final[float] = 1e-3
+
 # Observation period mappings (fraction of year)
 OBSERVATION_PERIODS: Final[dict[str, float]] = {
     "monthly": 1 / 12,

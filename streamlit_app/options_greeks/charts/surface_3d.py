@@ -107,6 +107,7 @@ def calculate_3d_surface(
     risk_free_rate: float,
     _calculate_greeks_3d_dte_func,
     _calculate_greeks_3d_iv_func,
+    dividend_yield: float = 0.0,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, str]:
     """
     Calculate 3D surface data for a Greek (DTE or IV mode).
@@ -146,6 +147,7 @@ def calculate_3d_surface(
             risk_free_rate,
             0.25,  # base_iv
             greek_idx,
+            dividend_yield,
         )
         return spot_range, dte_range, matrix_2d.T, "DTE (days)"
     iv_range = np.linspace(0.05, 0.50, 100)
@@ -157,6 +159,7 @@ def calculate_3d_surface(
         risk_free_rate,
         30.0,  # base_dte
         greek_idx,
+        dividend_yield,
     )
     return spot_range, iv_range * 100, matrix_2d.T, "IV (%)"
 
@@ -172,6 +175,7 @@ def calculate_3d_surface_strike(
     risk_free_rate: float,
     volatility: float,
     _calculate_greeks_3d_strike_func,
+    dividend_yield: float = 0.0,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, str]:
     """
     Calculate 3D surface data for a Greek varying by Strike (single-leg only).
@@ -219,6 +223,7 @@ def calculate_3d_surface_strike(
         volatility,
         dte,
         greek_idx,
+        dividend_yield,
     )
 
     # Convert strike range to percentage of spot for better visualization
@@ -238,6 +243,7 @@ def render_3d_tab(
     _calculate_greeks_3d_dte_func,
     _calculate_greeks_3d_iv_func,
     _calculate_greeks_3d_strike_func=None,
+    dividend_yield: float = 0.0,
 ) -> None:
     """
     Render the complete 3D surface tab.
@@ -409,6 +415,7 @@ def render_3d_tab(
                 risk_free_rate,
                 volatility,
                 _calculate_greeks_3d_strike_func,
+                dividend_yield,
             )
         else:
             X, Y, Z, y_label = calculate_3d_surface(
@@ -418,6 +425,7 @@ def render_3d_tab(
                 risk_free_rate,
                 _calculate_greeks_3d_dte_func,
                 _calculate_greeks_3d_iv_func,
+                dividend_yield,
             )
 
     # Create and display figure

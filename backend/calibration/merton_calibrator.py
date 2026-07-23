@@ -23,19 +23,23 @@ from __future__ import annotations
 
 import logging
 import time
-from dataclasses import dataclass
 
 import jax
 import jax.numpy as jnp
 import numpy as np
 
+from backend.calibration._reparam import (
+    _CompiledResiduals,
+    build_cf_residual_fn,
+    logit,
+)
 from backend.calibration.base import BaseCalibrator, CalibrationResult
 from backend.calibration.lm_helpers import make_multi_starts
 from backend.calibration.market_data import OptionMarketData
+from backend.calibration.search_space import MERTON_SEARCH_BOUNDS
 from backend.calibration.objectives import (
     ObjectiveStrategy,
     PriceMSEObjective,
-    VegaWeightedObjective,
 )
 from backend.calibration.optimizers import (
     CalibrationProblem,
@@ -70,63 +74,71 @@ logger = logging.getLogger(__name__)
 # Reparametrization for Merton [sigma, lam, alpha_j, sigma_j]
 # --------------------------------------------------------------------------- #
 
-# Bounds aligned with backend.utils.constants.calibration.MERTON_BOUNDS —
-# chosen to match realistic equity-index jump regimes and to prevent the
-# jump compensator k = exp(alpha_j + 0.5*sigma_j^2) - 1 from exploding at
-# extreme far-field multi-start points.
-_SIGMA_LO, _SIGMA_HI = 0.01, 1.0  # diffusion vol
-_LAMBDA_LO, _LAMBDA_HI = 1e-3, 5.0  # jump intensity
-_MUJ_LO, _MUJ_HI = -0.5, 0.1  # mean log-jump (equities: negative)
-_SIGMAJ_LO, _SIGMAJ_HI = 0.01, 0.5  # std of log-jump
+# Canonical (default) admissible box in MERTON_PARAM_NAMES order. Chosen to
+# match realistic equity-index jump regimes and to prevent the jump
+# compensator k = exp(alpha_j + 0.5*sigma_j^2) - 1 from exploding at extreme
+# far-field multi-start points. The search universe is configurable per-run
+# (see ``param_bounds``); sourced from ``backend.calibration.search_space``.
+Bounds = tuple[tuple[float, float], ...]
+_MERTON_BOUNDS: Bounds = tuple(MERTON_SEARCH_BOUNDS[n] for n in MERTON_PARAM_NAMES)
 
 
-def _merton_theta_to_params(theta: jnp.ndarray) -> tuple[float, float, float, float]:
+def _resolve_bounds(param_bounds: dict[str, tuple[float, float]] | None) -> Bounds:
+    """Map a ``{param: (lo, hi)}`` override onto the ordered Merton box."""
+    if not param_bounds:
+        return _MERTON_BOUNDS
+    return tuple(
+        (float(param_bounds[n][0]), float(param_bounds[n][1]))
+        if n in param_bounds
+        else _MERTON_BOUNDS[i]
+        for i, n in enumerate(MERTON_PARAM_NAMES)
+    )
+
+
+def _merton_theta_to_params(
+    theta: jnp.ndarray, bounds: Bounds = _MERTON_BOUNDS
+) -> tuple[float, float, float, float]:
+    (s_lo, s_hi), (l_lo, l_hi), (m_lo, m_hi), (j_lo, j_hi) = bounds
     sg = jax.nn.sigmoid(theta)
-    sigma = _SIGMA_LO + (_SIGMA_HI - _SIGMA_LO) * sg[0]
-    lam = _LAMBDA_LO + (_LAMBDA_HI - _LAMBDA_LO) * sg[1]
-    alpha_j = _MUJ_LO + (_MUJ_HI - _MUJ_LO) * sg[2]
-    sigma_j = _SIGMAJ_LO + (_SIGMAJ_HI - _SIGMAJ_LO) * sg[3]
+    sigma = s_lo + (s_hi - s_lo) * sg[0]
+    lam = l_lo + (l_hi - l_lo) * sg[1]
+    alpha_j = m_lo + (m_hi - m_lo) * sg[2]
+    sigma_j = j_lo + (j_hi - j_lo) * sg[3]
     return sigma, lam, alpha_j, sigma_j
 
 
-def _np_theta_to_params(theta: np.ndarray) -> np.ndarray:
+def _np_theta_to_params(
+    theta: np.ndarray, bounds: Bounds = _MERTON_BOUNDS
+) -> np.ndarray:
+    (s_lo, s_hi), (l_lo, l_hi), (m_lo, m_hi), (j_lo, j_hi) = bounds
     sg = 1.0 / (1.0 + np.exp(-np.asarray(theta, dtype=float)))
-    sigma = _SIGMA_LO + (_SIGMA_HI - _SIGMA_LO) * sg[0]
-    lam = _LAMBDA_LO + (_LAMBDA_HI - _LAMBDA_LO) * sg[1]
-    alpha_j = _MUJ_LO + (_MUJ_HI - _MUJ_LO) * sg[2]
-    sigma_j = _SIGMAJ_LO + (_SIGMAJ_HI - _SIGMAJ_LO) * sg[3]
+    sigma = s_lo + (s_hi - s_lo) * sg[0]
+    lam = l_lo + (l_hi - l_lo) * sg[1]
+    alpha_j = m_lo + (m_hi - m_lo) * sg[2]
+    sigma_j = j_lo + (j_hi - j_lo) * sg[3]
     return np.array([sigma, lam, alpha_j, sigma_j])
 
 
-def _params_to_theta(params: np.ndarray) -> np.ndarray:
+def _params_to_theta(params: np.ndarray, bounds: Bounds = _MERTON_BOUNDS) -> np.ndarray:
+    (s_lo, s_hi), (l_lo, l_hi), (m_lo, m_hi), (j_lo, j_hi) = bounds
     sigma, lam, alpha_j, sigma_j = [float(x) for x in params]
-
-    def logit(x: float, lo: float, hi: float) -> float:
-        frac = (x - lo) / (hi - lo)
-        frac = float(np.clip(frac, 1e-8, 1.0 - 1e-8))
-        return float(np.log(frac / (1.0 - frac)))
 
     return np.array(
         [
-            logit(sigma, _SIGMA_LO, _SIGMA_HI),
-            logit(lam, _LAMBDA_LO, _LAMBDA_HI),
-            logit(alpha_j, _MUJ_LO, _MUJ_HI),
-            logit(sigma_j, _SIGMAJ_LO, _SIGMAJ_HI),
+            logit(sigma, s_lo, s_hi),
+            logit(lam, l_lo, l_hi),
+            logit(alpha_j, m_lo, m_hi),
+            logit(sigma_j, j_lo, j_hi),
         ]
     )
 
 
-def _chain_rule_jacobian(theta: np.ndarray) -> np.ndarray:
+def _chain_rule_jacobian(
+    theta: np.ndarray, bounds: Bounds = _MERTON_BOUNDS
+) -> np.ndarray:
     sg = 1.0 / (1.0 + np.exp(-np.asarray(theta, dtype=float)))
     deriv = sg * (1.0 - sg)
-    spans = np.array(
-        [
-            _SIGMA_HI - _SIGMA_LO,
-            _LAMBDA_HI - _LAMBDA_LO,
-            _MUJ_HI - _MUJ_LO,
-            _SIGMAJ_HI - _SIGMAJ_LO,
-        ]
-    )
+    spans = np.array([hi - lo for (lo, hi) in bounds])
     return spans * deriv
 
 
@@ -135,71 +147,48 @@ def _chain_rule_jacobian(theta: np.ndarray) -> np.ndarray:
 # --------------------------------------------------------------------------- #
 
 
-@dataclass
-class _CompiledResiduals:
-    residual: callable
-    jacobian: callable
-    n_quote_residuals: int
-
-
 def _build_residual_fn(
     market_data: OptionMarketData,
     grids: JaxFFTGrids,
     sigma_prior: float,
     reg_weight: float,
     objective: ObjectiveStrategy,
+    bounds: Bounds = _MERTON_BOUNDS,
 ) -> _CompiledResiduals:
+    """JIT-compile the Merton residual for a fixed surface + grid config.
+
+    Surface boilerplate lives in
+    :func:`backend.calibration._reparam.build_cf_residual_fn`; only the
+    Merton reparametrisation, CF pricing and Tikhonov penalty on sigma
+    are supplied here.
+    """
     spot = float(market_data.spot)
     rate = float(market_data.rate)
     q = float(market_data.dividend_yield)
-    unique_mats = [float(T) for T in market_data.unique_maturities]
 
-    strikes_per_T: list[jnp.ndarray] = []
-    is_calls_per_T: list[jnp.ndarray] = []
-    running = 0
-    for T in unique_mats:
-        quotes = market_data.quotes_for_maturity(T)
-        strikes_per_T.append(jnp.asarray([q.strike for q in quotes], dtype=jnp.float64))
-        is_calls_per_T.append(jnp.asarray([q.is_call for q in quotes], dtype=jnp.bool_))
-        running += len(quotes)
-    n_quotes = running
+    def theta_to_params(theta: jnp.ndarray) -> tuple:
+        return _merton_theta_to_params(theta, bounds)
 
-    objective_residual_fn = objective.make_jax_residual_fn(market_data)
+    def price_calls(params: tuple, strikes_T: jnp.ndarray, tau: float) -> jnp.ndarray:
+        sigma, lam, alpha_j, sigma_j = params
 
-    def _residual_untraced(theta: jnp.ndarray) -> jnp.ndarray:
-        sigma, lam, alpha_j, sigma_j = _merton_theta_to_params(theta)
+        def cf(u):
+            return merton_cf_jax(u, sigma, lam, alpha_j, sigma_j, tau, rate, q)
 
-        model_prices_blocks: list[jnp.ndarray] = []
-        for i, tau in enumerate(unique_mats):
-            strikes_T = strikes_per_T[i]
-            is_calls_T = is_calls_per_T[i]
+        return price_call_strikes_jax(cf, spot, strikes_T, tau, rate, grids)
 
-            def cf(u):
-                return merton_cf_jax(u, sigma, lam, alpha_j, sigma_j, tau, rate, q)
-
-            call_prices = price_call_strikes_jax(cf, spot, strikes_T, tau, rate, grids)
-
-            disc_spot = spot * jnp.exp(-q * tau)
-            disc_k = strikes_T * jnp.exp(-rate * tau)
-            put_prices = call_prices - disc_spot + disc_k
-
-            prices_T = jnp.where(is_calls_T, call_prices, put_prices)
-            prices_T = jnp.maximum(prices_T, 0.0)
-            model_prices_blocks.append(prices_T)
-
-        model_prices = jnp.concatenate(model_prices_blocks)
-        quote_residuals = objective_residual_fn(model_prices)
-
+    def penalty_fn(params: tuple) -> jnp.ndarray:
+        sigma, _lam, _alpha_j, _sigma_j = params
         # Tikhonov regularization on sigma: sqrt(reg) * (sigma - prior)
         # (absorbs into the LM RSS as reg * (sigma - prior)^2)
-        reg_res = jnp.sqrt(reg_weight) * (sigma - sigma_prior)
+        return jnp.sqrt(reg_weight) * (sigma - sigma_prior)
 
-        return jnp.concatenate([quote_residuals, jnp.array([reg_res])])
-
-    return _CompiledResiduals(
-        residual=jax.jit(_residual_untraced),
-        jacobian=jax.jit(jax.jacfwd(_residual_untraced)),
-        n_quote_residuals=n_quotes,
+    return build_cf_residual_fn(
+        market_data,
+        objective,
+        theta_to_params=theta_to_params,
+        price_calls=price_calls,
+        penalty_fn=penalty_fn,
     )
 
 
@@ -247,7 +236,12 @@ class MertonCalibrator(BaseCalibrator):
         objective: ObjectiveStrategy | None = None,
         log_iterations: bool = False,
         iteration_callback=None,
+        param_bounds: dict[str, tuple[float, float]] | None = None,
     ) -> None:
+        # Per-run search universe (the sigmoid box). ``None`` -> canonical
+        # default box, so default-bounds runs are byte-identical to the legacy
+        # behaviour.
+        self._bounds: Bounds = _resolve_bounds(param_bounds)
         self.n_restarts = max(1, int(n_restarts))
         self.reg_weight = float(reg_weight)
         self.sigma_prior = sigma_prior
@@ -263,15 +257,9 @@ class MertonCalibrator(BaseCalibrator):
             ftol=ftol, xtol=xtol, gtol=gtol
         )
         # JAX-compatibility fallback (iv_mse → vega_weighted approximation)
-        chosen = objective or PriceMSEObjective()
-        if not chosen.jax_compatible:
-            logger.info(
-                "MertonCalibrator: objective '%s' not JAX-compatible; "
-                "falling back to 'vega_weighted'.",
-                chosen.name,
-            )
-            chosen = VegaWeightedObjective()
-        self.objective: ObjectiveStrategy = chosen
+        self.objective: ObjectiveStrategy = self._resolve_objective(
+            objective or PriceMSEObjective()
+        )
         self.objective_type = self.objective.name
         self.log_iterations = bool(log_iterations)
         self.iteration_callback = iteration_callback
@@ -280,12 +268,7 @@ class MertonCalibrator(BaseCalibrator):
         self._engine = FFTEngine()
 
     def default_bounds(self) -> list[tuple[float, float]]:
-        return [
-            (_SIGMA_LO, _SIGMA_HI),
-            (_LAMBDA_LO, _LAMBDA_HI),
-            (_MUJ_LO, _MUJ_HI),
-            (_SIGMAJ_LO, _SIGMAJ_HI),
-        ]
+        return [(float(lo), float(hi)) for lo, hi in self._bounds]
 
     def objective(self, params: np.ndarray, market_data: OptionMarketData) -> float:
         r = self.residuals(params, market_data)
@@ -300,9 +283,14 @@ class MertonCalibrator(BaseCalibrator):
             else get_atm_iv(market_data)
         )
         compiled = _build_residual_fn(
-            market_data, self._grids, prior, self.reg_weight, self.objective
+            market_data,
+            self._grids,
+            prior,
+            self.reg_weight,
+            self.objective,
+            self._bounds,
         )
-        theta = _params_to_theta(np.asarray(params, dtype=float))
+        theta = _params_to_theta(np.asarray(params, dtype=float), self._bounds)
         return np.asarray(compiled.residual(jnp.asarray(theta)))
 
     def calibrate(self, market_data: OptionMarketData) -> CalibrationResult:
@@ -314,11 +302,20 @@ class MertonCalibrator(BaseCalibrator):
         prior = self.sigma_prior if self.sigma_prior is not None else atm_iv
 
         compiled = _build_residual_fn(
-            market_data, self._grids, prior, self.reg_weight, self.objective
+            market_data,
+            self._grids,
+            prior,
+            self.reg_weight,
+            self.objective,
+            self._bounds,
         )
 
-        seed_params = np.array([atm_iv, 0.5, -0.1, 0.15])
-        x0_base = _params_to_theta(seed_params)
+        # Clamp the seed into the (possibly tightened) box — a no-op for the
+        # default box, so default-bounds runs are unchanged.
+        _lo = np.array([b[0] for b in self._bounds])
+        _hi = np.array([b[1] for b in self._bounds])
+        seed_params = np.clip(np.array([atm_iv, 0.5, -0.1, 0.15]), _lo, _hi)
+        x0_base = _params_to_theta(seed_params, self._bounds)
         logger.info(
             "Merton calibration | ATM IV=%.2f%% | seed_params=%s",
             atm_iv * 100.0,
@@ -348,7 +345,7 @@ class MertonCalibrator(BaseCalibrator):
             residual_fn=_residual_np,
             jacobian_fn=_jacobian_np,
             param_mapper=lambda theta_arr: dict(
-                zip(MERTON_PARAM_NAMES, _np_theta_to_params(theta_arr))
+                zip(MERTON_PARAM_NAMES, _np_theta_to_params(theta_arr, self._bounds))
             ),
         )
 
@@ -393,12 +390,10 @@ class MertonCalibrator(BaseCalibrator):
                 }
 
         sigma, lam, alpha_j, sigma_j = (
-            float(x) for x in _np_theta_to_params(best["theta"])
+            float(x) for x in _np_theta_to_params(best["theta"], self._bounds)
         )
         try:
-            model = MertonModel(
-                sigma=sigma, lam=lam, alpha_j=alpha_j, sigma_j=sigma_j
-            )
+            model = MertonModel(sigma=sigma, lam=lam, alpha_j=alpha_j, sigma_j=sigma_j)
         except ValueError as exc:
             logger.error("Invalid Merton params: %s", exc)
             err_diag = {"error": str(exc), "lm_runs": lm_infos}
@@ -462,7 +457,7 @@ class MertonCalibrator(BaseCalibrator):
                 # Strip the regularization row (last) from the Jacobian
                 J_u = np.asarray(best["jac"])[: compiled.n_quote_residuals, :]
                 r_q = np.asarray(best["fun"])[: compiled.n_quote_residuals]
-                dpdu = _chain_rule_jacobian(best["theta"])
+                dpdu = _chain_rule_jacobian(best["theta"], self._bounds)
                 J_constrained = J_u * dpdu[np.newaxis, :]
 
                 unc = least_squares_covariance(J_constrained, r_q)

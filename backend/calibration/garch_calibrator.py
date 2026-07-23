@@ -125,7 +125,12 @@ class GARCHCalibrator(BaseCalibrator):
         log_iterations: bool = False,
         iteration_callback=None,
         max_nfev: int = 500,
+        param_bounds: dict[str, tuple[float, float]] | None = None,
     ) -> None:
+        # Per-run search box override ({param: (lo, hi)}). ``None`` -> the
+        # canonical default box, so default-bounds runs are unchanged. Bounds
+        # are in the same per-period (daily) scale the MLE searches.
+        self._param_bounds = param_bounds
         if garch_type not in _VALID_TYPES:
             raise ValueError(
                 f"garch_type must be one of {_VALID_TYPES}, got '{garch_type}'"
@@ -155,11 +160,22 @@ class GARCHCalibrator(BaseCalibrator):
 
     def default_bounds(self) -> list[tuple[float, float]]:
         if self._garch_type == "garch":
-            return list(GARCH_BOUNDS)
+            base = GARCH_BOUNDS
         elif self._garch_type == "ngarch":
-            return list(NGARCH_BOUNDS)
+            base = NGARCH_BOUNDS
         else:
-            return list(GJR_BOUNDS)
+            base = GJR_BOUNDS
+        names = self._param_names()
+        box = dict(zip(names, base))
+        if self._param_bounds:
+            box.update(
+                {
+                    k: (float(v[0]), float(v[1]))
+                    for k, v in self._param_bounds.items()
+                    if k in box
+                }
+            )
+        return [box[n] for n in names]
 
     def objective(self, params: np.ndarray, market_data: HistoricalReturns) -> float:
         return float(

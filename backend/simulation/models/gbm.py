@@ -32,20 +32,27 @@ from backend.simulation.base import BaseSimulator, SimulationResult
 # =============================================================================
 
 
+# Innovations ``z`` are pre-drawn by the caller from a seeded NumPy
+# ``Generator`` so the kernels are pure deterministic arithmetic — the
+# previous in-kernel ``np.random.standard_normal()`` used Numba's thread-local
+# RNG states, which ``np.random.seed`` cannot reach in a parallel region, so a
+# fixed seed did NOT reproduce paths. ``z`` is laid out ``(n_base, n_steps)``;
+# antithetic mirroring happens in-kernel: paths ``i >= n_base`` consume
+# ``-z[i - n_base]`` (IEEE negation is exact).
+
+
 @njit(parallel=True, cache=True, fastmath=True)
 def _simulate_gbm_paths(
     s0: float,
     mu: float,
     sigma: float,
     t: float,
-    n_paths: int,
+    n_out: int,
     n_steps: int,
-    antithetic: bool = True,
+    z: np.ndarray,
 ) -> np.ndarray:
     """
-    Numba kernel for GBM path simulation.
-
-    Uses exact solution with antithetic variates for variance reduction.
+    Numba kernel for GBM path simulation (exact log-normal solution).
     """
     dt = t / n_steps
     sqrt_dt = np.sqrt(dt)
@@ -54,36 +61,24 @@ def _simulate_gbm_paths(
     drift = (mu - 0.5 * sigma * sigma) * dt
     diffusion = sigma * sqrt_dt
 
-    if antithetic:
-        half_paths = n_paths // 2
-        paths = np.empty((n_paths, n_steps + 1), dtype=np.float64)
+    n_base = z.shape[0]
+    paths = np.empty((n_out, n_steps + 1), dtype=np.float64)
 
-        for i in prange(half_paths):
-            paths[i, 0] = s0
-            paths[i + half_paths, 0] = s0
-
-            for j in range(n_steps):
-                z = np.random.standard_normal()
-
-                # Original path
-                log_return = drift + diffusion * z
-                paths[i, j + 1] = paths[i, j] * np.exp(log_return)
-
-                # Antithetic path (use -z)
-                log_return_anti = drift - diffusion * z
-                paths[i + half_paths, j + 1] = paths[i + half_paths, j] * np.exp(
-                    log_return_anti
-                )
-    else:
-        paths = np.empty((n_paths, n_steps + 1), dtype=np.float64)
-
-        for i in prange(n_paths):
-            paths[i, 0] = s0
-
-            for j in range(n_steps):
-                z = np.random.standard_normal()
-                log_return = drift + diffusion * z
-                paths[i, j + 1] = paths[i, j] * np.exp(log_return)
+    for i in prange(n_out):
+        # np.int64 casts: the parfor index is unsigned, and mixing it with
+        # signed n_base would promote `row` to float64 (NumPy promotion rule).
+        if i >= n_base:
+            mirror = True
+            row = np.int64(i) - n_base
+        else:
+            mirror = False
+            row = np.int64(i)
+        paths[i, 0] = s0
+        for j in range(n_steps):
+            zz = z[row, j]
+            if mirror:
+                zz = -zz
+            paths[i, j + 1] = paths[i, j] * np.exp(drift + diffusion * zz)
 
     return paths
 
@@ -94,9 +89,9 @@ def _simulate_gbm_terminal(
     mu: float,
     sigma: float,
     t: float,
-    n_paths: int,
+    n_out: int,
     n_steps: int,
-    antithetic: bool = True,
+    z: np.ndarray,
 ) -> np.ndarray:
     """
     Numba kernel for terminal-only GBM simulation.
@@ -109,31 +104,38 @@ def _simulate_gbm_terminal(
     drift = (mu - 0.5 * sigma * sigma) * dt
     diffusion = sigma * sqrt_dt
 
-    terminals = np.empty(n_paths, dtype=np.float64)
+    n_base = z.shape[0]
+    terminals = np.empty(n_out, dtype=np.float64)
 
-    if antithetic:
-        half_paths = n_paths // 2
-
-        for i in prange(half_paths):
-            s = s0
-            s_anti = s0
-
-            for j in range(n_steps):
-                z = np.random.standard_normal()
-                s = s * np.exp(drift + diffusion * z)
-                s_anti = s_anti * np.exp(drift - diffusion * z)
-
-            terminals[i] = s
-            terminals[i + half_paths] = s_anti
-    else:
-        for i in prange(n_paths):
-            s = s0
-            for j in range(n_steps):
-                z = np.random.standard_normal()
-                s = s * np.exp(drift + diffusion * z)
-            terminals[i] = s
+    for i in prange(n_out):
+        if i >= n_base:
+            mirror = True
+            row = np.int64(i) - n_base
+        else:
+            mirror = False
+            row = np.int64(i)
+        s = s0
+        for j in range(n_steps):
+            zz = z[row, j]
+            if mirror:
+                zz = -zz
+            s = s * np.exp(drift + diffusion * zz)
+        terminals[i] = s
 
     return terminals
+
+
+def _draw_innovations(
+    rng: np.random.Generator, n_paths: int, n_steps: int, antithetic: bool
+) -> np.ndarray:
+    """Innovations consumed by the GBM kernels.
+
+    Shape is ``(n_paths // 2, n_steps)`` when antithetic mirroring applies
+    (the kernels mirror in-kernel) and ``(n_paths, n_steps)`` otherwise.
+    """
+    if antithetic and n_paths % 2 == 0:
+        return rng.standard_normal((n_paths // 2, n_steps))
+    return rng.standard_normal((n_paths, n_steps))
 
 
 # =============================================================================
@@ -233,14 +235,12 @@ class GBMSimulator(BaseSimulator):
                 )
                 n_paths = adjusted_paths
 
-        if seed is not None:
-            np.random.seed(seed)
+        rng = np.random.default_rng(seed)
+        z = _draw_innovations(rng, n_paths, n_steps, self._antithetic)
 
         start_time = time.perf_counter()
 
-        paths = _simulate_gbm_paths(
-            s0, mu, self._sigma, t, n_paths, n_steps, self._antithetic
-        )
+        paths = _simulate_gbm_paths(s0, mu, self._sigma, t, n_paths, n_steps, z)
 
         computation_time = time.perf_counter() - start_time
         time_grid = np.linspace(0, t, n_steps + 1)
@@ -303,12 +303,14 @@ class GBMSimulator(BaseSimulator):
                 )
                 n_paths = adjusted_paths
 
-        if seed is not None:
-            np.random.seed(seed)
+        # GBM has an exact log-normal terminal law: the sum of n_steps
+        # Gaussian log-increments is one Gaussian log-increment of the same
+        # total variance, so S(T) is simulated in a single exact step — the
+        # distribution is identical and the draw is n_steps times smaller.
+        rng = np.random.default_rng(seed)
+        z = _draw_innovations(rng, n_paths, 1, self._antithetic)
 
-        return _simulate_gbm_terminal(
-            s0, mu, self._sigma, t, n_paths, n_steps, self._antithetic
-        )
+        return _simulate_gbm_terminal(s0, mu, self._sigma, t, n_paths, 1, z)
 
 
 # =============================================================================

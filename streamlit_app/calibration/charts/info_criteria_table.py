@@ -62,7 +62,7 @@ def render_info_criteria_table(rows: list[ModelSelectionRow]) -> None:
             "k": r.k,
             "N": r.n,
             "RMSE IV (bps)": (
-                r.rmse_iv * 1e4 if r.rmse_iv is not None else np.nan
+                r.rmse_iv if r.rmse_iv is not None else np.nan
             ),
             "log L": r.log_likelihood,
             "AIC": r.aic,

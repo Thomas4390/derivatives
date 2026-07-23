@@ -51,17 +51,18 @@ def render_conditional_volatility(
 ) -> go.Figure:
     """Two-pane chart: returns at top, annualised σ_t at bottom."""
     log_returns = np.asarray(log_returns, dtype=np.float64)
-    # variance_series has length T+1 (the recursion stores the t=0 prior
-    # alongside t=1..T). Drop the prior so the x-axis aligns with the
-    # observed return at each step.
-    sigma_series = np.sqrt(np.maximum(variance_series[1:], 0.0))
+    # variance_series has length T+1: index t is the conditional variance for
+    # r_t (index T is the one-step forecast). Keep var[:-1] so σ_t aligns with
+    # the return r_t it generated — var[1:] would plot h_{t+1} against r_t.
+    sigma_series = np.sqrt(np.maximum(variance_series[:-1], 0.0))
     sigma_ann = sigma_series * np.sqrt(annualization_factor) * 100.0
 
     t = np.arange(log_returns.size)
     fig = go.Figure()
     fig.add_trace(
         go.Scatter(
-            x=t, y=log_returns * 100.0,
+            x=t,
+            y=log_returns * 100.0,
             mode="lines",
             line=dict(color=COLORS["text_muted"], width=0.9),
             name="log-returns (%)",
@@ -71,7 +72,8 @@ def render_conditional_volatility(
     )
     fig.add_trace(
         go.Scatter(
-            x=t, y=sigma_ann,
+            x=t,
+            y=sigma_ann,
             mode="lines",
             line=dict(color=COLORS["primary"], width=2.0),
             name="σ_t (annualised, %)",
@@ -80,7 +82,8 @@ def render_conditional_volatility(
         )
     )
     apply_lab_theme(
-        fig, height=380,
+        fig,
+        height=380,
         title="Conditional volatility · model-implied σ_t over the sample",
     )
     fig.update_layout(
@@ -137,7 +140,9 @@ def render_conditional_volatility_overlay(
         )
     )
     for label, variance_series, style in labeled_sigmas:
-        sigma_series = np.sqrt(np.maximum(np.asarray(variance_series, dtype=np.float64)[1:], 0.0))
+        sigma_series = np.sqrt(
+            np.maximum(np.asarray(variance_series, dtype=np.float64)[:-1], 0.0)
+        )
         sigma_ann = sigma_series * np.sqrt(annualization_factor) * 100.0
         fig.add_trace(
             go.Scatter(
@@ -198,24 +203,28 @@ def render_standardised_residuals_qq(z_residuals: np.ndarray) -> go.Figure:
     fig = go.Figure()
     fig.add_trace(
         go.Scatter(
-            x=theoretical, y=z_sorted,
+            x=theoretical,
+            y=z_sorted,
             mode="markers",
-            marker=dict(color=COLORS["info"], size=6,
-                        line=dict(color=COLORS["plot"], width=0.5)),
+            marker=dict(
+                color=COLORS["info"], size=6, line=dict(color=COLORS["plot"], width=0.5)
+            ),
             name="empirical",
             hovertemplate="theory=%{x:.2f}<br>empirical=%{y:.2f}<extra></extra>",
         )
     )
     fig.add_trace(
         go.Scatter(
-            x=[lo, hi], y=[lo, hi],
+            x=[lo, hi],
+            y=[lo, hi],
             mode="lines",
             line=dict(color=COLORS["danger"], dash="dash", width=2),
             name="y = x",
         )
     )
     apply_lab_theme(
-        fig, height=380,
+        fig,
+        height=380,
         title="QQ-plot · standardised residuals z_t = r_t / σ_t vs N(0, 1)",
     )
     fig.update_xaxes(title="Theoretical Quantiles  N(0, 1)")
@@ -253,7 +262,8 @@ def render_squared_residuals_acf(
     fig = go.Figure()
     fig.add_trace(
         go.Bar(
-            x=lags, y=acf,
+            x=lags,
+            y=acf,
             marker_color=bar_colors,
             name="ρ(z², lag)",
             hovertemplate="lag %{x}<br>ρ=%{y:.3f}<extra></extra>",
@@ -264,9 +274,10 @@ def render_squared_residuals_acf(
     fig.add_hline(y=-band, line=dict(color=COLORS["text_muted"], dash="dot", width=1))
     fig.add_hline(y=0.0, line=dict(color=COLORS["axis"], width=1))
     apply_lab_theme(
-        fig, height=320,
+        fig,
+        height=320,
         title="ACF of squared standardised residuals · "
-              "bars outside ±2/√T (dotted) → remaining ARCH effect",
+        "bars outside ±2/√T (dotted) → remaining ARCH effect",
     )
     fig.update_xaxes(title="Lag k  (observations)", tickmode="linear", dtick=1)
     fig.update_yaxes(

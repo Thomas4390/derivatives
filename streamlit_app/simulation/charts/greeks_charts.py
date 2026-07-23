@@ -49,46 +49,84 @@ def render_greeks_with_dte_slider(
     surface_data: dict,
     spot: float,
     selected_greek: str,
+    model_surface: dict | None = None,
+    primary_label: str = "Black-Scholes",
+    model_label: str = "Model-consistent",
 ) -> None:
     """
-    Render a single Greek vs Spot chart with a Plotly DTE slider.
+    Render a Greek vs Spot chart with a Plotly DTE slider.
 
-    Uses visibility toggling: one trace per DTE value, slider shows one at a time.
+    When ``model_surface`` is supplied (and shares the DTE grid), the primary
+    (practitioner-BS) and model-consistent series are overlaid — same colour per
+    Greek, primary solid and model dotted, with a legend — and the DTE slider
+    toggles the visible pair. Otherwise a single series is shown.
     """
     spot_range = surface_data["spot_range"]
     dte_values = surface_data["dte_values"]
-    greeks_by_dte = surface_data["greeks_by_dte"]
-    price_by_dte = surface_data.get("price_by_dte", {})
+    n_dte = len(dte_values)
 
     color = _COLORS.get(selected_greek, "#ffffff")
     greek_title = GREEK_TITLES.get(selected_greek, selected_greek.capitalize())
 
-    # Build traces: one per DTE value
-    fig = go.Figure()
-    n_dte = len(dte_values)
+    overlay = (
+        model_surface is not None
+        and len(model_surface.get("dte_values", [])) == n_dte
+    )
 
-    for idx, dte in enumerate(dte_values):
+    def _curve(sd: dict, dte) -> np.ndarray:
         if selected_greek == "price":
-            values = price_by_dte.get(dte, np.zeros_like(spot_range))
-        else:
-            values = greeks_by_dte[dte][selected_greek]
+            return sd.get("price_by_dte", {}).get(
+                dte, np.zeros_like(sd["spot_range"])
+            )
+        return sd["greeks_by_dte"][dte].get(
+            selected_greek, np.zeros_like(sd["spot_range"])
+        )
 
+    fig = go.Figure()
+
+    # Primary (practitioner Black-Scholes) traces — one per DTE value.
+    for idx, dte in enumerate(dte_values):
         fig.add_trace(
             go.Scatter(
                 x=spot_range,
-                y=values,
+                y=_curve(surface_data, dte),
                 mode="lines",
-                name=f"DTE {dte}",
+                name=primary_label if overlay else f"DTE {dte}",
+                legendgroup="primary",
                 line=dict(color=color, width=2.5),
                 visible=(idx == n_dte - 1),  # show max DTE by default
+                showlegend=overlay,
                 hovertemplate=(
-                    f"<b>{greek_title}</b><br>"
+                    f"<b>{primary_label if overlay else greek_title}</b><br>"
                     "Spot: $%{x:,.2f}<br>"
                     "Value: %{y:.4f}<br>"
                     f"DTE: {dte}<extra></extra>"
                 ),
             )
         )
+
+    # Model-consistent overlay traces — dotted, same colour, aligned by DTE index.
+    if overlay:
+        model_spot = model_surface["spot_range"]
+        for idx, dte in enumerate(model_surface["dte_values"]):
+            fig.add_trace(
+                go.Scatter(
+                    x=model_spot,
+                    y=_curve(model_surface, dte),
+                    mode="lines",
+                    name=model_label,
+                    legendgroup="model",
+                    line=dict(color=color, width=2.0, dash="dot"),
+                    visible=(idx == n_dte - 1),
+                    showlegend=True,
+                    hovertemplate=(
+                        f"<b>{model_label}</b><br>"
+                        "Spot: $%{x:,.2f}<br>"
+                        "Value: %{y:.4f}<br>"
+                        f"DTE: {dte}<extra></extra>"
+                    ),
+                )
+            )
 
     # Spot reference line
     fig.add_vline(
@@ -105,11 +143,14 @@ def render_greeks_with_dte_slider(
         line_width=1,
     )
 
-    # Build slider steps
+    # Build slider steps (toggle the primary [+ model] trace for each DTE).
+    total_traces = 2 * n_dte if overlay else n_dte
     steps = []
     for idx, dte in enumerate(dte_values):
-        visible = [False] * n_dte
+        visible = [False] * total_traces
         visible[idx] = True
+        if overlay:
+            visible[n_dte + idx] = True
         steps.append(
             dict(
                 method="update",
@@ -141,7 +182,15 @@ def render_greeks_with_dte_slider(
         xaxis=dict(title="Underlying Price ($)", **_AXIS_STYLE),
         yaxis=dict(title=greek_title, **_AXIS_STYLE),
         sliders=[slider],
-        showlegend=False,
+        showlegend=overlay,
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1,
+            font=dict(size=11, color=_AXIS_LABEL),
+        ),
         xaxis_showspikes=True,
         xaxis_spikemode="across",
         xaxis_spikesnap="cursor",

@@ -33,6 +33,11 @@ def render_residual_heatmap(
     strikes: np.ndarray,
     maturities: np.ndarray,
     *,
+    moneyness: np.ndarray,
+    x_label: str = "Moneyness  ln(K/F) / (σ√T)",
+    atm_x: float = 0.0,
+    hover_label: str | None = None,
+    hover_fmt: str | None = None,
     spot: float | None = None,
 ) -> go.Figure:
     if (
@@ -46,27 +51,27 @@ def render_residual_heatmap(
     # claim "more red than blue" even though the magnitudes match.
     z_abs = float(np.nanmax(np.abs(np.asarray(residuals, dtype=np.float64))))
     z_clip = z_abs if z_abs > 0.0 else 1e-6
-    # Industry-standard surface convention: moneyness K/S₀ on the strike
-    # axis. Falls back to raw strikes when spot is not provided.
-    if spot is not None and spot > 0.0:
-        x_vals = strikes / float(spot)
-        x_title = "Moneyness K / S₀"
-        x_tickformat = ".2f"
-        x_hover_label = "K/S₀"
-        x_hover_fmt = ".3f"
-    else:
-        x_vals = strikes
-        x_title = "Strike K"
-        x_tickformat = ".0f"
-        x_hover_label = "K"
-        x_hover_fmt = ".2f"
+    # Plot on a shared 1D axis. A heatmap cannot use a per-maturity (2D) x, so the
+    # caller passes the σ√T-moneyness here whenever the display axis is 2D
+    # (synthetic standard units); for real data the chosen 1D axis flows through.
+    # Per-maturity dollar strikes ride along as 2D customdata regardless.
+    x_vals = np.asarray(moneyness, dtype=float)
+    if hover_label is None:
+        is_ratio = float(atm_x) != 0.0
+        hover_label = "K/S₀" if is_ratio else "m"
+        hover_fmt = ".3f" if is_ratio else ".2f"
+    x_hover_label = hover_label
+    x_hover_fmt = hover_fmt or ".2f"
     fig = go.Figure(
         data=go.Heatmap(
             z=residuals,
             x=x_vals,
             y=maturities * 365.0,
+            customdata=np.asarray(strikes, dtype=float),
             colorscale=_diverging_scale(),
-            zmid=0.0, zmin=-z_clip, zmax=z_clip,
+            zmid=0.0,
+            zmin=-z_clip,
+            zmax=z_clip,
             colorbar=dict(
                 title=dict(
                     text="Model − Market<br>(price units)",
@@ -78,13 +83,13 @@ def render_residual_heatmap(
                 outlinewidth=0,
             ),
             hovertemplate=(
-                f"{x_hover_label}=%{{x:{x_hover_fmt}}}<br>T=%{{y:.0f}}d<br>"
-                "residual=%{z:.4f} (price units)<extra></extra>"
+                f"{x_hover_label}=%{{x:{x_hover_fmt}}}<br>K=$%{{customdata:.0f}}<br>"
+                "T=%{y:.0f}d<br>residual=%{z:.4f} (price units)<extra></extra>"
             ),
         )
     )
     apply_lab_theme(fig, height=440, title="Residual heatmap  ·  model − market price")
-    fig.update_xaxes(title=x_title, tickformat=x_tickformat)
+    fig.update_xaxes(title=x_label, tickformat=".2f")
     fig.update_yaxes(title="Maturity T (days)", tickformat=".0f")
     return fig
 
@@ -96,28 +101,37 @@ def render_correlation_matrix(
     if cov_matrix is None or len(param_names) == 0:
         return empty_state_figure("No covariance available for this run.")
     corr = correlation_matrix_from_cov(np.asarray(cov_matrix, dtype=np.float64))
-    text = [[f"{corr[i, j]:.2f}" for j in range(len(param_names))]
-            for i in range(len(param_names))]
+    text = [
+        [f"{corr[i, j]:.2f}" for j in range(len(param_names))]
+        for i in range(len(param_names))
+    ]
     fig = go.Figure(
         data=go.Heatmap(
             z=corr,
             x=param_names,
             y=param_names,
             colorscale=_diverging_scale(),
-            zmid=0.0, zmin=-1.0, zmax=1.0,
+            zmid=0.0,
+            zmin=-1.0,
+            zmax=1.0,
             text=text,
             texttemplate="%{text}",
             textfont=dict(family=FONT_FAMILY, color=COLORS["text"], size=12),
             colorbar=dict(
-                title=dict(text="ρ", font=dict(family=FONT_FAMILY, color=COLORS["axis"])),
+                title=dict(
+                    text="ρ", font=dict(family=FONT_FAMILY, color=COLORS["axis"])
+                ),
                 tickfont=dict(family=FONT_FAMILY, color=COLORS["axis"]),
                 thickness=12,
                 outlinewidth=0,
             ),
         )
     )
-    apply_lab_theme(fig, height=440,
-                     title="Parameter correlation  ·  large |ρ| → identifiability issue")
+    apply_lab_theme(
+        fig,
+        height=440,
+        title="Parameter correlation  ·  large |ρ| → identifiability issue",
+    )
     return fig
 
 
@@ -136,22 +150,27 @@ def render_qq_plot(residuals: np.ndarray) -> go.Figure:
     fig = go.Figure()
     fig.add_trace(
         go.Scatter(
-            x=theoretical, y=z_sorted,
+            x=theoretical,
+            y=z_sorted,
             mode="markers",
-            marker=dict(color=COLORS["info"], size=8,
-                        line=dict(color=COLORS["plot"], width=1)),
+            marker=dict(
+                color=COLORS["info"], size=8, line=dict(color=COLORS["plot"], width=1)
+            ),
             name="empirical",
         )
     )
     fig.add_trace(
         go.Scatter(
-            x=[lo, hi], y=[lo, hi],
+            x=[lo, hi],
+            y=[lo, hi],
             mode="lines",
             line=dict(color=COLORS["danger"], dash="dash", width=2),
             name="y = x",
         )
     )
-    apply_lab_theme(fig, height=420, title="QQ-plot  ·  standardised residuals vs N(0, 1)")
+    apply_lab_theme(
+        fig, height=420, title="QQ-plot  ·  standardised residuals vs N(0, 1)"
+    )
     fig.update_xaxes(title="Theoretical Quantiles  N(0, 1)")
     fig.update_yaxes(title="Empirical Quantiles  (standardised residuals)")
     return fig
@@ -176,8 +195,12 @@ def render_qq_overlay(labeled_series, *, standardise: bool = True) -> go.Figure:
     any_points = False
     for label, values, style in labeled_series:
         v = np.asarray(values, dtype=np.float64)
-        z = standardised_residuals(v) if standardise else v[np.isfinite(v)]
-        z = z[np.isfinite(z)]
+        # Filter finiteness BEFORE standardising: standardised_residuals (njit)
+        # accumulates any NaN into the mean and poisons the whole vector, so a
+        # single NaN residual used to drop the entire run from the QQ overlay
+        # (while its heatmap still rendered). Match the standardise=False path.
+        v = v[np.isfinite(v)]
+        z = standardised_residuals(v) if standardise else v
         if z.size < 2:
             continue
         z_sorted = np.sort(z)
@@ -216,13 +239,17 @@ def render_qq_overlay(labeled_series, *, standardise: bool = True) -> go.Figure:
             name="y = x",
         )
     )
-    apply_lab_theme(fig, height=420, title="QQ-plot  ·  standardised residuals vs N(0, 1)")
+    apply_lab_theme(
+        fig, height=420, title="QQ-plot  ·  standardised residuals vs N(0, 1)"
+    )
     fig.update_xaxes(title="Theoretical Quantiles  N(0, 1)")
     fig.update_yaxes(title="Empirical Quantiles  (standardised residuals)")
     return fig
 
 
-def uncertainty_table(uncertainty_dict: dict, true_params: dict | None = None) -> list[dict]:
+def uncertainty_table(
+    uncertainty_dict: dict, true_params: dict | None = None
+) -> list[dict]:
     rows = []
     for name, stats_dict in uncertainty_dict.items():
         row = {

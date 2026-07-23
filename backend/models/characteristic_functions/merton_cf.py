@@ -30,7 +30,7 @@ from __future__ import annotations
 from typing import Callable
 
 import numpy as np
-from numba import njit
+from numba import njit, prange
 
 
 @njit(cache=True, fastmath=True)
@@ -116,7 +116,7 @@ def merton_characteristic_function(
     return np.exp(diffusion_exponent + jump_exponent)
 
 
-@njit(cache=True, fastmath=True)
+@njit(cache=True, fastmath=True, parallel=True)
 def merton_cf_vectorized(
     u_arr: np.ndarray,
     s0: float,
@@ -160,7 +160,8 @@ def merton_cf_vectorized(
     n = len(u_arr)
     result = np.empty(n, dtype=np.complex128)
 
-    for idx in range(n):
+    # Parallel over the independent frequency grid (matches heston/bates CFs).
+    for idx in prange(n):
         result[idx] = merton_characteristic_function(
             u_arr[idx], s0, t, r, sigma, lam, alpha_j, sigma_j
         )

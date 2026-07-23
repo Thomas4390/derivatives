@@ -3,7 +3,7 @@
 Mirrors :mod:`components.sidebar.objective_panel`. Exposes how variance-positivity
 constraints are enforced during calibration:
 
-- the **Feller** condition ``2κσ² > α²`` for the CIR stochastic-variance models
+- the **Feller** condition ``2κθ > α²`` for the CIR stochastic-variance models
   (Heston, Bates), and
 - the **stationarity** condition ``β + αγ² < 1`` for Heston-Nandi GARCH.
 
@@ -19,6 +19,11 @@ from typing import Any
 
 import streamlit as st
 
+from config.constants import (
+    PENALTY_WEIGHT_DEFAULT,
+    PENALTY_WEIGHT_MAX,
+    PENALTY_WEIGHT_STEP,
+)
 from services import state_manager
 
 # Models whose CIR variance process carries a Feller condition.
@@ -53,15 +58,16 @@ def _format_mode(label: str) -> str:
     """Prefix a constraint-mode label with its status icon."""
     return f"{_MODE_ICONS.get(label, '·')} {label}"
 
+
 _FELLER_HELP = (
-    "How the Feller condition **2κσ² > α²** (strictly positive variance) is "
+    "How the Feller condition **2κθ > α²** (strictly positive variance) is "
     "treated during calibration:\n\n"
     "- **Off** — no constraint; the optimiser is free to land in the "
     "Feller-violating region (the empirically realistic regime for equity "
     "index surfaces).\n"
     "- **Soft penalty** — violations are penalised in the loss with the weight "
     "below; Feller is *discouraged* but still reachable (legacy default).\n"
-    "- **Hard enforce** — α is reparametrised so α ≤ √(2κσ²) always holds; "
+    "- **Hard enforce** — α is reparametrised so α ≤ √(2κθ) always holds; "
     "Feller is *guaranteed* at the cost of fit quality."
 )
 
@@ -113,7 +119,7 @@ def _render_feller(settings: dict[str, Any]) -> None:
         current_mode = "soft"
     options = list(_MODE_LABELS.values())
     picked_label = st.segmented_control(
-        "Feller condition  2κσ² > α²",
+        "Feller condition  2κθ > α²",
         options=options,
         default=_MODE_LABELS[current_mode],
         selection_mode="single",
@@ -133,9 +139,9 @@ def _render_feller(settings: dict[str, Any]) -> None:
             st.slider(
                 "Feller penalty weight",
                 min_value=0.0,
-                max_value=5000.0,
-                value=float(settings.get("feller_weight", 1000.0)),
-                step=100.0,
+                max_value=PENALTY_WEIGHT_MAX,
+                value=float(settings.get("feller_weight", PENALTY_WEIGHT_DEFAULT)),
+                step=PENALTY_WEIGHT_STEP,
                 help=(
                     "Strength of the soft Feller penalty added to the loss. "
                     "0 ≈ Off; higher values push the fit harder toward the "
@@ -147,12 +153,12 @@ def _render_feller(settings: dict[str, Any]) -> None:
 
     if mode == "off":
         st.caption(
-            "ℹ️  Feller free — calibrated κ, σ², α may violate 2κσ² > α² "
+            "ℹ️  Feller free — calibrated κ, θ, α may violate 2κθ > α² "
             "(variance can touch zero)."
         )
     elif mode == "hard":
         st.caption(
-            "✅  Feller guaranteed — α is capped at √(2κσ²) by reparametrisation."
+            "✅  Feller guaranteed — α is capped at √(2κθ) by reparametrisation."
         )
     else:
         st.caption("⚖️  Feller penalised — violations are discouraged, not forbidden.")
@@ -191,9 +197,11 @@ def _render_stationarity(settings: dict[str, Any]) -> None:
             st.slider(
                 "Stationarity penalty weight",
                 min_value=0.0,
-                max_value=5000.0,
-                value=float(settings.get("stationarity_weight", 1000.0)),
-                step=100.0,
+                max_value=PENALTY_WEIGHT_MAX,
+                value=float(
+                    settings.get("stationarity_weight", PENALTY_WEIGHT_DEFAULT)
+                ),
+                step=PENALTY_WEIGHT_STEP,
                 help=(
                     "Strength of the soft stationarity penalty added to the "
                     "loss. 0 ≈ Off; higher values push the fit toward "

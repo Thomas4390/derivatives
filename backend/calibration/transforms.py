@@ -67,9 +67,11 @@ class SigmoidTransform:
             raise ValueError(f"hi ({self.hi}) must exceed lo ({self.lo})")
 
     def forward(self, p: float) -> float:
-        p_clipped = float(np.clip(p, self.lo + self.clip, self.hi - self.clip))
+        # Clip the FRACTION (not the param) so forward/inverse share one clip
+        # space and round-trip to machine precision; clipping the param in
+        # absolute units left a span-dependent ~clip boundary gap vs inverse.
         span = self.hi - self.lo
-        frac = (p_clipped - self.lo) / span
+        frac = float(np.clip((p - self.lo) / span, self.clip, 1.0 - self.clip))
         return float(np.log(frac / (1.0 - frac)))
 
     def inverse(self, u: float) -> float:

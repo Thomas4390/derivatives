@@ -34,7 +34,11 @@ class MCConfig:
     n_steps : int
         Number of time steps per path (default 252, i.e., daily for 1 year)
     antithetic : bool
-        Use antithetic variates for variance reduction (default True)
+        Variance-reduction hint. NOTE: the generic terminal-simulator price path
+        (GenericMCEngine / MonteCarloEngine) does not apply antithetic variates —
+        antithetic sampling is configured on the model's own simulator at
+        construction (e.g. create_gbm(antithetic=...)). This flag is retained for
+        API compatibility and does not by itself alter the generic engine output.
     seed : int, optional
         Random seed for reproducibility
     """
@@ -65,37 +69,39 @@ TerminalSimulator = Callable[[float, float, float, int, int, int | None], np.nda
 
 
 @njit(fastmath=True, cache=True)
-def _compute_payoffs(terminals: np.ndarray, k: float, is_call: bool) -> np.ndarray:
-    """Compute option payoffs from terminal prices."""
+def _price_and_se_from_terminals(
+    terminals: np.ndarray, k: float, discount: float, is_call: bool
+) -> tuple[float, float]:
+    """Discounted price and standard error straight from terminal prices.
+
+    Fuses the payoff computation with the mean/variance passes: the payoff is
+    recomputed on the fly (a max and a subtraction) instead of materialising
+    an ``n_paths`` intermediate array per strike. Accumulation stays
+    sequential so the summation order — and therefore the result — does not
+    depend on the thread count.
+    """
     n = len(terminals)
-    payoffs = np.empty(n, dtype=np.float64)
-
-    for i in range(n):
-        if is_call:
-            payoffs[i] = max(terminals[i] - k, 0.0)
-        else:
-            payoffs[i] = max(k - terminals[i], 0.0)
-
-    return payoffs
-
-
-@njit(fastmath=True, cache=True)
-def _compute_price_and_se(payoffs: np.ndarray, discount: float) -> tuple[float, float]:
-    """Compute discounted price and standard error."""
-    n = len(payoffs)
 
     # Mean payoff
     mean_payoff = 0.0
     for i in range(n):
-        mean_payoff += payoffs[i]
+        if is_call:
+            mean_payoff += max(terminals[i] - k, 0.0)
+        else:
+            mean_payoff += max(k - terminals[i], 0.0)
     mean_payoff = mean_payoff / n
 
     # Variance
     var_payoff = 0.0
     for i in range(n):
-        diff = payoffs[i] - mean_payoff
+        if is_call:
+            payoff = max(terminals[i] - k, 0.0)
+        else:
+            payoff = max(k - terminals[i], 0.0)
+        diff = payoff - mean_payoff
         var_payoff += diff * diff
-    var_payoff = var_payoff / (n - 1)
+    # Sample variance needs n > 1; a single path has no variance estimate.
+    var_payoff = var_payoff / (n - 1) if n > 1 else 0.0
 
     # Discounted price and standard error
     price = discount * mean_payoff
@@ -182,21 +188,18 @@ class GenericMCEngine:
         MCResult
             Named tuple with (price, std_error, n_paths)
         """
-        n_paths = n_paths or self._config.n_paths
-        n_steps = n_steps or self._config.n_steps
+        n_paths = self._config.n_paths if n_paths is None else n_paths
+        n_steps = self._config.n_steps if n_steps is None else n_steps
         seed = seed if seed is not None else self._config.seed
 
         # Simulate terminal prices
         terminals = terminal_simulator(s0, t, r, n_paths, n_steps, seed)
 
-        # Compute payoffs
-        payoffs = _compute_payoffs(terminals, k, is_call)
-
         # Discount factor
         discount = np.exp(-r * t)
 
-        # Compute price and standard error
-        price, std_error = _compute_price_and_se(payoffs, discount)
+        # Compute price and standard error (payoff fused in)
+        price, std_error = _price_and_se_from_terminals(terminals, k, discount, is_call)
 
         return MCResult(price=max(price, 0.0), std_error=std_error, n_paths=n_paths)
 
@@ -245,8 +248,8 @@ class GenericMCEngine:
         std_errors : np.ndarray
             Array of standard errors
         """
-        n_paths = n_paths or self._config.n_paths
-        n_steps = n_steps or self._config.n_steps
+        n_paths = self._config.n_paths if n_paths is None else n_paths
+        n_steps = self._config.n_steps if n_steps is None else n_steps
         seed = seed if seed is not None else self._config.seed
 
         # Single simulation
@@ -261,8 +264,9 @@ class GenericMCEngine:
         std_errors = np.empty(n_k)
 
         for i, k in enumerate(strikes):
-            payoffs = _compute_payoffs(terminals, k, is_call)
-            price, std_error = _compute_price_and_se(payoffs, discount)
+            price, std_error = _price_and_se_from_terminals(
+                terminals, k, discount, is_call
+            )
             prices[i] = max(price, 0.0)
             std_errors[i] = std_error
 

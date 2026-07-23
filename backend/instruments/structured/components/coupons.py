@@ -126,8 +126,10 @@ class ConditionalCoupon(ProductComponent):
             for j in range(ctx.n_obs):
                 perf = ctx.performance_at(j)
                 coupon_j = self.coupon_rate * ctx.obs_dt[j] * self.notional
-                # Accrue for alive paths + paths terminated at this obs (coupon before autocall)
-                eligible = ctx.alive | (ctx.terminated_at_obs == j)
+                # Eligible = paths still in the product at obs j: survived to
+                # maturity (alive) OR autocalled at j or later (so coupons paid
+                # before the autocall observation are not dropped).
+                eligible = ctx.alive | (ctx.terminated_at_obs >= j)
                 unpaid_coupons += np.where(eligible, coupon_j, 0.0)
                 above_barrier = perf >= self.barrier
                 pay_mask = eligible & above_barrier
@@ -137,7 +139,7 @@ class ConditionalCoupon(ProductComponent):
             for j in range(ctx.n_obs):
                 perf = ctx.performance_at(j)
                 coupon_j = self.coupon_rate * ctx.obs_dt[j] * self.notional
-                eligible = ctx.alive | (ctx.terminated_at_obs == j)
+                eligible = ctx.alive | (ctx.terminated_at_obs >= j)
                 above_barrier = perf >= self.barrier
                 pv += np.where(
                     eligible & above_barrier,
@@ -223,7 +225,7 @@ class CMIConditionalCoupon(ProductComponent):
         for j in range(ctx.n_obs):
             perf = ctx.performance_at(j)
             coupon_j = self.coupon_rate * ctx.obs_dt[j] * self.notional
-            eligible = ctx.alive | (ctx.terminated_at_obs == j)
+            eligible = ctx.alive | (ctx.terminated_at_obs >= j)
             above_barrier = perf >= self.barrier
 
             has_misses = ctx.cmi_unpaid_count > 0
@@ -316,7 +318,7 @@ class VariableIncomeCoupon(ProductComponent):
         for j in range(ctx.n_obs):
             perf = ctx.performance_at(j)
             coupon_j = self.coupon_rate * ctx.obs_dt[j] * self.notional
-            eligible = ctx.alive | (ctx.terminated_at_obs == j)
+            eligible = ctx.alive | (ctx.terminated_at_obs >= j)
             above_barrier = perf >= self.barrier
             pv += np.where(
                 eligible & above_barrier, coupon_j * ctx.discount_factors[j], 0.0
@@ -358,16 +360,15 @@ class SnowballCoupon(ProductComponent):
         obs_indices: np.ndarray,
         discount_factors: np.ndarray,
     ) -> np.ndarray:
+        # Snowball pays a fixed (path-independent) coupon at every observation;
+        # the PV is the same scalar for every path. (The previous per-observation
+        # loop built a pv array that was then discarded in favour of this np.sum.)
         n_paths = paths.shape[0]
         obs_times = time_grid[obs_indices]
-        pv = np.zeros(n_paths)
-        for j in range(len(obs_indices)):
-            coupon_j = self.coupon_rate * obs_times[j] * self.notional
-            pv += coupon_j * discount_factors[j]
-        return np.full(
-            n_paths,
-            np.sum(self.coupon_rate * obs_times * self.notional * discount_factors),
+        total_pv = float(
+            np.sum(self.coupon_rate * obs_times * self.notional * discount_factors)
         )
+        return np.full(n_paths, total_pv)
 
     def evaluate_in_context(self, ctx: EvaluationContext) -> np.ndarray:
         """Snowball coupon respecting alive mask."""

@@ -28,6 +28,8 @@ from charts.pnl_analysis import (
     render_3d_pnl_chart,
     render_payoff_with_distribution,
     render_pnl_by_dte,
+    render_vol_pnl_scatter,
+    render_vol_pnl_scatter_by_dte,
 )
 from charts.pricing_comparison import (
     _build_n_paths_grid,
@@ -65,9 +67,15 @@ from config.styles import (
     render_compact_header,
     render_metric_row,
 )
+from services.consistent_pricing import (
+    price_exotic_consistent,
+    price_vanilla_consistent,
+    pricing_method_label,
+)
 from services.pricing_service import get_available_pricing_methods
 from services.greeks_service import (
-    compute_strategy_greeks_surface,
+    compute_strategy_greeks_surface_model,
+    compute_strategy_greeks_surface_practitioner,
 )
 from services.simulation_runner import (
     calculate_pnl_from_paths,
@@ -84,7 +92,61 @@ from services.simulation_service import (
 from services.structured_product_service import evaluate_structured_product_on_paths
 
 from backend.portfolio.pnl import compute_payoff_curve, find_breakeven_points
-from backend.utils.math import bs_price as _backend_bs_price
+
+
+def _model_greeks_cached(model_key, params, position_arrays, spot, rate, q, time_to_expiry):
+    """Session-cached model-consistent Greeks surface.
+
+    Recomputes only when the model / parameters / positions / market fingerprint
+    changes, so toggling the Greek selector does not re-run the FFT/MC surface.
+    Returns ``None`` for exotic strategies (caller falls back to the BS surface).
+    """
+    fingerprint = hashlib.md5(
+        json.dumps(
+            {
+                "model": model_key,
+                "params": {
+                    k: v
+                    for k, v in params.items()
+                    if isinstance(v, (int, float, str, bool))
+                },
+                "strikes": np.asarray(position_arrays.get("strikes", [])).tolist(),
+                "opt_types": np.asarray(position_arrays.get("option_types", [])).tolist(),
+                "pos_types": np.asarray(position_arrays.get("position_types", [])).tolist(),
+                "qtys": np.asarray(position_arrays.get("quantities", [])).tolist(),
+                "stock_qty": float(position_arrays.get("stock_quantity", 0.0)),
+                "exotic": [
+                    (m or {}).get("instrument_class", "vanilla")
+                    for m in position_arrays.get("exotic_metadata", [])
+                ],
+                "spot": round(float(spot), 6),
+                "rate": round(float(rate), 8),
+                "q": round(float(q), 8),
+                "T": round(float(time_to_expiry), 8),
+            },
+            sort_keys=True,
+        ).encode()
+    ).hexdigest()
+
+    cached = st.session_state.get("_model_greeks_cache")
+    if cached and cached[0] == fingerprint:
+        return cached[1]
+
+    with st.spinner(
+        f"Computing model-consistent Greeks under {get_model_display_name(model_key)}…"
+    ):
+        surface = compute_strategy_greeks_surface_model(
+            position_arrays=position_arrays,
+            model_key=model_key,
+            model_params=params,
+            spot=spot,
+            rate=rate,
+            q=q,
+            time_to_expiry=time_to_expiry,
+            n_steps=int(params.get("n_steps", 252)),
+        )
+    st.session_state["_model_greeks_cache"] = (fingerprint, surface)
+    return surface
 
 
 # ═════════════════════════════════════════════════════════════════════════
@@ -230,15 +292,76 @@ with st.sidebar:
         unsafe_allow_html=True,
     )
 
-    def _bs_price(s, k, r, t, sigma, opt_type):
-        return _backend_bs_price(s, k, t, r, sigma, is_call=(opt_type == "call"))
+    # Premiums are priced with the engine consistent with the SELECTED model
+    # (BS for GBM, FFT for Heston/Merton/Bates, risk-neutral MC for the GARCH
+    # family) — not a flat-vol BS proxy. The (s, k, r, t, sigma, opt_type)
+    # signature is preserved for the strategy builder; `sigma` is only the
+    # last-resort Black-Scholes fallback inside price_vanilla_consistent.
+    _div_yield = market_params.get("dividend_yield", 0.0)
+
+    def _model_premium(s, k, r, t, sigma, opt_type):
+        premium, _method = price_vanilla_consistent(
+            model_key,
+            model_params,
+            spot=s,
+            rate=r,
+            q=_div_yield,
+            strike=k,
+            maturity=t,
+            is_call=(opt_type == "call"),
+        )
+        return premium
+
+    def _model_exotic_premium(
+        exotic_type,
+        spot,
+        strike,
+        maturity,
+        rate,
+        sigma,
+        is_call,
+        barrier=0.0,
+        is_knock_in=False,
+        is_up=True,
+        rebate=0.0,
+        payout=1.0,
+        extra1=0.0,
+        cap=0.0,
+        params=None,
+    ):
+        premium, _method = price_exotic_consistent(
+            model_key,
+            model_params,
+            _div_yield,
+            exotic_type=exotic_type,
+            spot=spot,
+            strike=strike,
+            maturity=maturity,
+            rate=rate,
+            sigma=sigma,
+            is_call=is_call,
+            barrier=barrier,
+            is_knock_in=is_knock_in,
+            is_up=is_up,
+            rebate=rebate,
+            payout=payout,
+            extra1=extra1,
+            cap=cap,
+            params=params,
+        )
+        return premium
 
     positions, stock_position = render_strategy_builder(
         spot_price=market_params.get("spot", 100.0),
         risk_free_rate=market_params.get("risk_free_rate", 0.05),
         time_to_expiry=market_params.get("time_horizon", 1.0),
         volatility=get_initial_volatility(model_key, model_params),
-        bs_price_function=_bs_price,
+        bs_price_function=_model_premium,
+        exotic_price_function=_model_exotic_premium,
+    )
+    st.caption(
+        f"Premiums priced under {get_model_display_name(model_key)} "
+        f"· {pricing_method_label(model_key, model_params)}"
     )
     position_arrays = export_positions_for_pnl_engine(
         positions,
@@ -474,13 +597,17 @@ with tabs[0]:
             result=result,
             model_key=sim_model,
             params=sim_params,
-            n_display=viz["n_display"],
+            n_display=viz.get("n_display", 150),
             show_bands=viz["show_bands"],
             pnl_values=pnl_vals,
             breakeven_prices=breakevens if not is_sp_mode else None,
             exotic_metadata=_exotic_meta_viz if _has_exotic_viz else None,
             exotic_viz=viz.get("exotic_viz"),
             overlay_fn=_sp_overlay_fn,
+            path_view=viz.get("path_view", "Lines"),
+            path_alpha=viz.get("path_alpha"),
+            balanced_sampling=viz.get("balanced_sampling", False),
+            sort_vol_pnl=viz.get("sort_vol_pnl", True),
         )
 
         # Empirical statistics
@@ -537,6 +664,16 @@ if has_strategy:
 
             st.markdown("---")
 
+            st.subheader("Realized Volatility vs P&L")
+            render_vol_pnl_scatter(
+                result=result,
+                pnl_values=pnl_vals,
+                time_horizon=sim_params.get("time_horizon", 1.0),
+                sigma0=get_initial_volatility(sim_model, sim_params),
+            )
+
+            st.markdown("---")
+
             st.subheader("Realized Volatility / Terminal Price / P&L")
             render_3d_pnl_chart(
                 result=result,
@@ -565,6 +702,19 @@ if has_strategy:
                     terminal_breakevens=breakevens,
                 )
 
+                st.markdown("---")
+
+                st.subheader("Realized Volatility vs P&L")
+                render_vol_pnl_scatter_by_dte(
+                    result=result,
+                    position_arrays=_pa_pnl,
+                    rate=_pnl_rate,
+                    sigma=_pnl_sigma,
+                    time_to_expiry=_pnl_T,
+                    sigma0=_pnl_sigma,
+                    terminal_pnl=pnl_vals,
+                )
+
             st.markdown("---")
 
             st.subheader("Realized Volatility / Terminal Price / P&L")
@@ -579,8 +729,8 @@ if has_strategy:
     with tabs[2]:
         if is_sp_mode:
             st.info(
-                "Greeks pour produits structurés — en cours de développement. "
-                "Cette fonctionnalité sera disponible dans une prochaine mise à jour."
+                "Greeks for structured products — under development. "
+                "This feature will be available in a future update."
             )
         else:
             _spot = get_spot(sim_params)
@@ -588,31 +738,61 @@ if has_strategy:
             _sigma = get_initial_volatility(sim_model, sim_params)
             _T = sim_params.get("time_horizon", 1.0)
 
-            # Greek selector
-            _sel_col, _cs_col = st.columns([2, 2])
-            with _sel_col:
-                _selected_greek = render_greek_selector()
-            surface_data = compute_strategy_greeks_surface(
-                position_arrays=sim_params.get("position_arrays", {}),
+            _selected_greek = render_greek_selector()
+
+            _pa_greeks = sim_params.get("position_arrays", {})
+            _q_greeks = sim_params.get("dividend_yield", 0.0)
+            _n_steps = int(sim_params.get("n_steps", 252))
+
+            # Model-consistent Greeks under the selected model (None for exotic
+            # legs / unsupported models -> practitioner-BS only).
+            model_surface = _model_greeks_cached(
+                sim_model, sim_params, _pa_greeks, _spot, _rate, _q_greeks, _T
+            )
+            # Practitioner Black-Scholes: each vanilla leg greeked at its OWN
+            # implied vol (backed out from its premium), on the model grid so the
+            # two series overlay on a shared DTE slider.
+            bs_surface = compute_strategy_greeks_surface_practitioner(
+                position_arrays=_pa_greeks,
                 spot=_spot,
                 rate=_rate,
-                sigma=_sigma,
                 time_to_expiry=_T,
+                fallback_sigma=_sigma,
+                q=_q_greeks,
+                n_steps=_n_steps,
             )
+            if model_surface is None:
+                st.caption(
+                    "Model-consistent Greeks are available for vanilla strategies "
+                    "under GBM/Heston/Merton/Bates/GARCH — showing practitioner "
+                    "Black-Scholes Greeks only."
+                )
+            elif sim_model.lower() in ("garch", "ngarch", "gjr_garch"):
+                st.caption(
+                    "Model-consistent GARCH Greeks are Monte-Carlo estimates: "
+                    "delta/gamma are robust; vega/theta/rho carry some MC noise."
+                )
+
             render_greeks_with_dte_slider(
-                surface_data, spot=_spot, selected_greek=_selected_greek
+                bs_surface,
+                spot=_spot,
+                selected_greek=_selected_greek,
+                model_surface=model_surface,
+                primary_label="Black-Scholes (per-leg IV)",
+                model_label="Model-consistent",
             )
 
-            # 3D Surface
+            # 3D Surface — model-consistent when available, else practitioner-BS.
             st.markdown("---")
             st.subheader("3D Greeks Surface")
+            _surface_3d = model_surface if model_surface is not None else bs_surface
             _3d_col1, _3d_col2 = st.columns([2, 2])
             with _3d_col1:
                 _greek_3d = render_greek_selector(key="greeks_3d")
             with _3d_col2:
                 _colorscale = render_colorscale_selector()
             render_greeks_3d_surface(
-                surface_data,
+                _surface_3d,
                 spot=_spot,
                 selected_greek=_greek_3d,
                 colorscale=_colorscale,
@@ -840,12 +1020,27 @@ with tabs[explorer_tab_idx]:
         try:
             explorer_result = run_simulation(sim_model, explorer_params)
 
+            # Seed-sensitivity overlay: run extra seeds (base_seed + i) with the
+            # SAME parameters so the user can see how much the seed alone moves
+            # the path.
+            _n_seeds = int(explorer_params.get("n_seeds", 1))
+            _seed_paths = None
+            if _n_seeds > 1:
+                _base_seed = int(explorer_params.get("seed", 42))
+                _extra = []
+                for _i in range(1, _n_seeds):
+                    _p = dict(explorer_params)
+                    _p["seed"] = _base_seed + _i
+                    _extra.append(run_simulation(sim_model, _p).price_paths[0])
+                _seed_paths = np.asarray(_extra)
+
             explorer_pnl = render_path_explorer_chart(
                 result=explorer_result,
                 model_key=sim_model,
                 params=explorer_params,
                 position_arrays=_pa_explorer if _has_strategy_explorer else None,
                 exotic_metadata=_exotic_meta_explorer if _has_exotic_explorer else None,
+                seed_paths=_seed_paths,
             )
 
             tp = explorer_result.price_paths[0, -1]

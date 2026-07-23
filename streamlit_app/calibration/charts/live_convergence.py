@@ -8,6 +8,9 @@ Live-convergence and parameter-trajectory charts (animated)
 * :func:`render_parameter_trajectories_animated` — small-multiples
   (one sub-plot per parameter) overlaying 1..N runs, animated, same
   open-on-final + replay behaviour.
+* :func:`render_fit_anatomy_animated` — the two above merged into one
+  synchronized figure (loss on top, parameters in a 2-column grid below)
+  so each parameter's role in the fit is legible on a shared x-axis.
 * :func:`render_multi_start_loss` — overlaid restart curves (static).
 * :func:`render_live_progress_chart` — quick non-animated chart used
   during live calibration to show ongoing progress.
@@ -21,8 +24,15 @@ import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
+from charts.iv_surface import _vis
 from utils.numba_kernels import best_per_iteration
-from utils.plotly_theme import COLORS, FONT_FAMILY, PALETTE, apply_lab_theme
+from utils.plotly_theme import (
+    COLORS,
+    FONT_FAMILY,
+    PALETTE,
+    adaptive_loss_axis,
+    apply_lab_theme,
+)
 
 # Unified-hover header (``hovermode="x unified"``). Plotly otherwise shows the
 # bare x value (the iteration index) as an unlabelled header; we label it once
@@ -51,62 +61,16 @@ def _latest_restart_segment(history):
 
 
 def _adaptive_loss_y_axis(objs: np.ndarray, title_hint: str = "Loss") -> dict:
-    """Choose a Plotly ``update_yaxes`` config that fits the objective.
+    """Live-chart wrapper over the shared :func:`adaptive_loss_axis`.
 
-    Log scale is great for surface calibrations (RSS / 2 spans 8+
-    decades from start to optimum), but Plotly silently drops every
-    non-positive sample from a log axis. GARCH-family calibrators
-    minimise the negative log-likelihood, which is **negative** for
-    typical daily returns — so the live convergence chart used to
-    look empty even though ``handle.history`` was full.
-
-    We detect any non-positive sample and fall back to a linear axis
-    with a 3-significant-digit tick format. Both branches now set an
-    explicit ``range`` over the full ``objs`` span so that animated
-    charts (``render_loss_chart_animated``), which initialise the
-    figure with only the first sample, still display every frame —
-    the layout's auto-range used to lock onto ``objs[0]`` and clip
-    every later frame's "best so far" line off-screen.
+    Keeps the ``"{hint}  (log scale)" / "(linear)"`` titling this chart uses;
+    the log/linear decision and the range numerics live in the one shared
+    helper so the Live and Compare charts can never drift apart again.
     """
-    finite = objs[np.isfinite(objs)]
-    if finite.size == 0:
-        return dict(
-            type="linear",
-            title=f"{title_hint}  (linear)",
-            tickformat=".3g",
-        )
-    if (finite <= 0.0).any():
-        ymin = float(finite.min())
-        ymax = float(finite.max())
-        span = ymax - ymin
-        # Padding scales with the span, with floors based on |ymax|
-        # and |ymin| so identical-value or near-zero runs still get a
-        # visible window.
-        pad = max(span * 0.05, abs(ymax) * 0.01, abs(ymin) * 0.01, 0.1)
-        return dict(
-            type="linear",
-            title=f"{title_hint}  (linear)",
-            tickformat=".3g",
-            range=[ymin - pad, ymax + pad],
-        )
-    # Bracket the ACTUAL data min/max. The old ``max(…, 1e-15)`` floor raised
-    # the bottom to 1e-15, so a loss that converged below that (perfect
-    # synthetic fits reach ~1e-16 or smaller) fell *under* the range and the
-    # curve clipped off the bottom of the chart. ``finite`` is strictly
-    # positive here (non-positive samples take the linear branch), so log10 is
-    # well-defined; a 1e-30 guard only caps a pathological denormal without
-    # clipping any real converged loss.
-    lo = float(np.log10(max(finite.min(), 1e-30)))
-    hi = float(np.log10(max(finite.max(), 1e-30)))
-    # Pad BOTH ends (in decades): 5 % of the span, with a 0.15-decade floor so
-    # flat/near-constant series still get a visible margin and the converged
-    # tail + its marker never sit on the edge.
-    pad = max(0.05 * (hi - lo), 0.15)
-    return dict(
-        type="log",
-        title=f"{title_hint}  (log scale)",
-        tickformat=".0e",
-        range=[lo - pad, hi + pad],
+    return adaptive_loss_axis(
+        objs,
+        log_title=f"{title_hint}  (log scale)",
+        linear_title=f"{title_hint}  (linear)",
     )
 
 
@@ -157,7 +121,9 @@ def _frame_step(n: int, max_frames: int = 80) -> int:
     return max(1, n // max_frames)
 
 
-def _animation_buttons(frame_duration: int = 80, *, from_current: bool = True) -> list[dict]:
+def _animation_buttons(
+    frame_duration: int = 80, *, from_current: bool = True
+) -> list[dict]:
     # ``from_current=False`` makes ▶ always restart from the first frame —
     # used by the charts that open on their *final* state so the button
     # replays the path from the start rather than resuming from the end.
@@ -166,8 +132,10 @@ def _animation_buttons(frame_duration: int = 80, *, from_current: bool = True) -
         dict(
             type="buttons",
             direction="left",
-            x=0.0, y=-0.18,
-            xanchor="left", yanchor="top",
+            x=0.0,
+            y=-0.18,
+            xanchor="left",
+            yanchor="top",
             pad=dict(t=4, r=10),
             showactive=False,
             # Teal-on-white call-to-action — matches the iv_surface
@@ -181,20 +149,26 @@ def _animation_buttons(frame_duration: int = 80, *, from_current: bool = True) -
                 dict(
                     label=play_label,
                     method="animate",
-                    args=[None, dict(
-                        frame=dict(duration=frame_duration, redraw=False),
-                        fromcurrent=from_current,
-                        transition=dict(duration=0),
-                    )],
+                    args=[
+                        None,
+                        dict(
+                            frame=dict(duration=frame_duration, redraw=False),
+                            fromcurrent=from_current,
+                            transition=dict(duration=0),
+                        ),
+                    ],
                 ),
                 dict(
                     label="❚❚  Pause",
                     method="animate",
-                    args=[[None], dict(
-                        frame=dict(duration=0, redraw=False),
-                        mode="immediate",
-                        transition=dict(duration=0),
-                    )],
+                    args=[
+                        [None],
+                        dict(
+                            frame=dict(duration=0, redraw=False),
+                            mode="immediate",
+                            transition=dict(duration=0),
+                        ),
+                    ],
                 ),
             ],
         )
@@ -204,9 +178,11 @@ def _animation_buttons(frame_duration: int = 80, *, from_current: bool = True) -
 def _slider_template(steps: list[dict]) -> dict:
     return dict(
         active=0,
-        x=0.12, y=-0.18,
+        x=0.12,
+        y=-0.18,
         len=0.85,
-        xanchor="left", yanchor="top",
+        xanchor="left",
+        yanchor="top",
         currentvalue=dict(
             prefix="iter: ",
             font=dict(family=FONT_FAMILY, color=COLORS["text"], size=12),
@@ -268,19 +244,30 @@ def render_loss_overlay_animated(traces, *, title: str = "Convergence") -> go.Fi
         # always reads on top — same contrast rationale as the live chart.
         fig.add_trace(
             go.Scatter(
-                x=iters, y=objs, mode="markers",
-                marker=dict(color=COLORS["accent"], size=5, opacity=0.45,
-                            line=dict(color=COLORS["plot"], width=0.5)),
+                x=iters,
+                y=objs,
+                mode="markers",
+                marker=dict(
+                    color=COLORS["accent"],
+                    size=5,
+                    opacity=0.45,
+                    line=dict(color=COLORS["plot"], width=0.5),
+                ),
                 name="evaluation",
                 hovertemplate="obj %{y:.4e}<extra></extra>",
             )
         )
         fig.add_trace(
             go.Scatter(
-                x=iters, y=best, mode="lines+markers",
+                x=iters,
+                y=best,
+                mode="lines+markers",
                 line=dict(color=style["color"], width=3),
-                marker=dict(color=style["color"], size=8,
-                            line=dict(color=COLORS["plot"], width=1.2)),
+                marker=dict(
+                    color=style["color"],
+                    size=8,
+                    line=dict(color=COLORS["plot"], width=1.2),
+                ),
                 name="best so far",
                 hovertemplate="best %{y:.4e}<extra></extra>",
             )
@@ -292,12 +279,12 @@ def render_loss_overlay_animated(traces, *, title: str = "Convergence") -> go.Fi
             all_y.extend(best.tolist())
             fig.add_trace(
                 go.Scatter(
-                    x=iters, y=best, mode="lines",
+                    x=iters,
+                    y=best,
+                    mode="lines",
                     line=dict(color=style["color"], dash=style["dash"], width=2.4),
                     name=label,
-                    hovertemplate=(
-                        f"<b>{label}</b><br>best %{{y:.4e}}<extra></extra>"
-                    ),
+                    hovertemplate=(f"<b>{label}</b><br>best %{{y:.4e}}<extra></extra>"),
                 )
             )
             animated.append((i, iters, best))
@@ -316,9 +303,14 @@ def render_loss_overlay_animated(traces, *, title: str = "Convergence") -> go.Fi
     slider_steps = [
         dict(
             method="animate",
-            args=[[str(i)], dict(mode="immediate",
-                                 frame=dict(duration=0, redraw=False),
-                                 transition=dict(duration=0))],
+            args=[
+                [str(i)],
+                dict(
+                    mode="immediate",
+                    frame=dict(duration=0, redraw=False),
+                    transition=dict(duration=0),
+                ),
+            ],
             label=str(i),
         )
         for i in frame_indices
@@ -328,8 +320,9 @@ def render_loss_overlay_animated(traces, *, title: str = "Convergence") -> go.Fi
 
     suffix = f"{max_len} evaluations" if single else f"{len(series)} runs"
     head = f"{title}  ·  {suffix}".strip(" ·")
-    apply_lab_theme(fig, height=460, title=head,
-                    margin=(60, 25, 74, 130), legend_horizontal=True)
+    apply_lab_theme(
+        fig, height=460, title=head, margin=(60, 25, 74, 130), legend_horizontal=True
+    )
     fig.update_layout(
         updatemenus=_animation_buttons(from_current=False),
         sliders=[slider],
@@ -342,54 +335,10 @@ def render_loss_overlay_animated(traces, *, title: str = "Convergence") -> go.Fi
         unifiedhovertitle=_ITER_HOVER_TITLE,
     )
     fig.update_yaxes(
-        **_adaptive_loss_y_axis(np.array(all_y, dtype=np.float64),
-                                title_hint="Objective  ½‖r‖²")
-    )
-    return fig
-
-
-def render_live_progress_chart(history, *, height: int = 240) -> go.Figure:
-    """Non-animated quick chart used while a calibration is RUNNING."""
-    if not history:
-        from utils.plotly_theme import empty_state_figure
-        return empty_state_figure("Waiting for first iteration…")
-    # Only the restart in progress (see _latest_restart_segment), and only its
-    # per-evaluation snapshots, so the curve is one clean descent over a
-    # monotone evaluation index instead of every restart overlaid.
-    segment = _filter_history_for_display(_latest_restart_segment(history))
-    objs = np.array([s.objective for s in segment], dtype=np.float64)
-    iters = np.arange(objs.size, dtype=np.int64)
-    best = best_per_iteration(objs)
-    fig = go.Figure()
-    # See render_loss_chart_animated for the visibility rationale: the
-    # eval markers stay dim so the bold best-so-far overlay reads on top
-    # even when the solver is monotone (L-BFGS-B / GARCH).
-    fig.add_trace(
-        go.Scatter(
-            x=iters, y=objs,
-            mode="markers",
-            marker=dict(color=COLORS["accent"], size=3, opacity=0.4),
-            name="evaluation",
-            showlegend=False,
+        **_adaptive_loss_y_axis(
+            np.array(all_y, dtype=np.float64), title_hint="Objective  ½‖r‖²"
         )
     )
-    fig.add_trace(
-        go.Scatter(
-            x=iters, y=best,
-            mode="lines+markers",
-            line=dict(color=COLORS["primary"], width=2.6),
-            marker=dict(
-                color=COLORS["primary"],
-                size=6,
-                line=dict(color=COLORS["plot"], width=1.0),
-            ),
-            name="best",
-            showlegend=False,
-        )
-    )
-    apply_lab_theme(fig, height=height, margin=(45, 15, 10, 35), legend_horizontal=False)
-    fig.update_yaxes(**_adaptive_loss_y_axis(objs, title_hint="Loss  ½‖r‖²"))
-    fig.update_xaxes(title="Objective Evaluation Count")
     return fig
 
 
@@ -430,8 +379,11 @@ def render_parameter_trajectories_animated(
     cols = 2 if len(names) > 1 else 1
     rows = (len(names) + cols - 1) // cols
     fig = make_subplots(
-        rows=rows, cols=cols, subplot_titles=names,
-        vertical_spacing=0.18, horizontal_spacing=0.10,
+        rows=rows,
+        cols=cols,
+        subplot_titles=names,
+        vertical_spacing=0.18,
+        horizontal_spacing=0.10,
     )
 
     # One (run × parameter) Scatter each; base data = full path (final), and
@@ -448,12 +400,17 @@ def render_parameter_trajectories_animated(
             extents[name].extend(y[np.isfinite(y)].tolist())
             fig.add_trace(
                 go.Scatter(
-                    x=iters, y=y, mode="lines",
+                    x=iters,
+                    y=y,
+                    mode="lines",
                     line=dict(color=style["color"], dash=style["dash"], width=2.2),
-                    name=label, legendgroup=label, showlegend=(p_i == 0),
+                    name=label,
+                    legendgroup=label,
+                    showlegend=(p_i == 0),
                     hovertemplate=f"<b>{label}</b><br>{name} %{{y:.4g}}<extra></extra>",
                 ),
-                row=p_i // cols + 1, col=p_i % cols + 1,
+                row=p_i // cols + 1,
+                col=p_i % cols + 1,
             )
             animated.append((trace_idx, iters, y))
             trace_idx += 1
@@ -471,9 +428,14 @@ def render_parameter_trajectories_animated(
     slider_steps = [
         dict(
             method="animate",
-            args=[[str(i)], dict(mode="immediate",
-                                 frame=dict(duration=0, redraw=False),
-                                 transition=dict(duration=0))],
+            args=[
+                [str(i)],
+                dict(
+                    mode="immediate",
+                    frame=dict(duration=0, redraw=False),
+                    transition=dict(duration=0),
+                ),
+            ],
             label=str(i),
         )
         for i in frame_indices
@@ -495,13 +457,18 @@ def render_parameter_trajectories_animated(
             fig.add_hline(
                 y=float(true_params[name]),
                 line=dict(color=COLORS["danger"], width=1.4, dash="dash"),
-                row=row, col=col,
+                row=row,
+                col=col,
             )
         x_title = "Objective Evaluation Count" if row == last_row else None
-        fig.update_xaxes(range=[0.0, float(max_len - 1)], title=x_title, row=row, col=col)
+        fig.update_xaxes(
+            range=[0.0, float(max_len - 1)], title=x_title, row=row, col=col
+        )
         fig.update_yaxes(
             range=[v_min - pad, v_max + pad],
-            title=f"{name} (natural scale)", row=row, col=col,
+            title=f"{name} (natural scale)",
+            row=row,
+            col=col,
         )
 
     chart_height = min(210 * rows + 160, 900)
@@ -509,8 +476,11 @@ def render_parameter_trajectories_animated(
     if true_params:
         title += "  ·  red dashed line = true value"
     apply_lab_theme(
-        fig, height=chart_height, title=title,
-        margin=(50, 25, 92, 130), legend_horizontal=True,
+        fig,
+        height=chart_height,
+        title=title,
+        margin=(50, 25, 92, 130),
+        legend_horizontal=True,
     )
     fig.update_layout(
         updatemenus=_animation_buttons(from_current=False),
@@ -545,10 +515,11 @@ def render_multi_start_loss(
         objs = np.array([s.objective for s in display_history], dtype=np.float64)
         objs = best_per_iteration(objs)
         iters = np.arange(len(display_history), dtype=np.int64)
-        is_best = (best_index is not None and k == best_index)
+        is_best = best_index is not None and k == best_index
         fig.add_trace(
             go.Scatter(
-                x=iters, y=objs,
+                x=iters,
+                y=objs,
                 mode="lines+markers",
                 line=dict(
                     color=PALETTE[k % len(PALETTE)],
@@ -561,12 +532,371 @@ def render_multi_start_loss(
         )
     if not any_data:
         from utils.plotly_theme import empty_state_figure
+
         return empty_state_figure("No multi-start history captured for this run.")
-    apply_lab_theme(fig, height=460, title="Multi-start convergence  ·  best-so-far per restart")
-    all_objs = np.concatenate([
-        np.array([s.objective for s in _filter_history_for_display(h)], dtype=np.float64)
-        for h in multi_start_history if h
-    ]) if multi_start_history else np.array([1.0])
+    apply_lab_theme(
+        fig, height=460, title="Multi-start convergence  ·  best-so-far per restart"
+    )
+    all_objs = (
+        np.concatenate(
+            [
+                np.array(
+                    [s.objective for s in _filter_history_for_display(h)],
+                    dtype=np.float64,
+                )
+                for h in multi_start_history
+                if h
+            ]
+        )
+        if multi_start_history
+        else np.array([1.0])
+    )
     fig.update_yaxes(**_adaptive_loss_y_axis(all_objs, title_hint="Objective  ½‖r‖²"))
     fig.update_xaxes(title="Objective Evaluation Count")
+    return fig
+
+
+# ──────────────────────────────────────────────── Fit anatomy ──── #
+
+
+def _display_labels(model_key: str | None, names: list[str]) -> dict[str, str]:
+    """Map raw ``params_natural`` keys → human ``ParameterSpec.display_name``.
+
+    Falls back to the raw key for an unknown / custom model or any key the
+    registry doesn't define, so an unregistered model can never crash the chart
+    (same defensive spirit as ``model_color``). The simulation registry is
+    already a calibration dependency (the Live tab imports from
+    ``streamlit_app.simulation.config``).
+    """
+    if not model_key:
+        return {n: n for n in names}
+    try:
+        from streamlit_app.simulation.config.model_registry import get_model
+
+        specs = {p.name: p.display_name for p in get_model(model_key).parameters}
+    except Exception:
+        specs = {}
+    return {n: specs.get(n, n) for n in names}
+
+
+def render_fit_anatomy_animated(
+    traces,
+    *,
+    true_params: dict[str, float] | None = None,
+    model_key: str | None = None,
+) -> go.Figure:
+    """Loss descent + every parameter's path on one synchronized, shared-x figure.
+
+    Merges the convergence chart (:func:`render_loss_overlay_animated`) and the
+    parameter trajectories (:func:`render_parameter_trajectories_animated`) into a
+    single figure: the objective ½‖r‖² spans the full width on top, each parameter
+    sits in a 2-column grid below, and **one** slider / ▶ Replay drives the loss
+    curve and every parameter path together over the shared *Objective Evaluation
+    Count* axis. A muted dotted "play-head" marks the current evaluation in every
+    panel. The pedagogical pay-off: a reader sees *which parameter movement drives
+    the loss down*.
+
+    ``traces`` is the usual ``(label, iteration_history, style)`` triple. All runs
+    must share one model (identical parameter set); the Live tab facets by model
+    before calling this. ``model_key`` resolves Greek display labels (best-effort).
+    Opens on the converged state; ▶ Replay animates from the start.
+    """
+    from utils.plotly_theme import empty_state_figure
+
+    # Per run: best-so-far loss series + running-best parameter path (the same
+    # projection the two source charts use, so the story matches their curves).
+    loss_series: list[tuple] = []
+    traj_runs: list[tuple] = []
+    for label, history, style in traces:
+        if not history:
+            continue
+        disp_hist = _filter_history_for_display(history)
+        objs = np.array([s.objective for s in disp_hist], dtype=np.float64)
+        if objs.size == 0:
+            continue
+        iters = np.arange(objs.size, dtype=np.int64)
+        loss_series.append((label, iters, objs, best_per_iteration(objs), style))
+        _, params_list = _project_to_running_best(disp_hist)
+        traj_runs.append((label, params_list, style))
+    if not loss_series:
+        return empty_state_figure("Run a calibration to see the fit anatomy.")
+
+    single = len(loss_series) == 1
+    names = [k for k in traj_runs[0][1][0] if not k.startswith("_")]
+    disp = _display_labels(model_key, names)
+    n = len(names)
+    max_len = max(len(it) for _l, it, *_ in loss_series)
+
+    # Geometry: loss full-width on row 1, parameters in a 2-column grid below.
+    param_rows = (n + 1) // 2
+    rows = 1 + param_rows
+    specs: list[list] = [[{"colspan": 2}, None]]
+    for r in range(param_rows):
+        right = {} if (2 * r + 1) < n else None
+        specs.append([{}, right])
+    weights = [2.2] + [1.0] * param_rows
+    fig = make_subplots(
+        rows=rows,
+        cols=2,
+        specs=specs,
+        row_heights=[w / sum(weights) for w in weights],
+        vertical_spacing=min(0.08, 0.8 / rows),
+        horizontal_spacing=0.10,
+        subplot_titles=["Objective  ½‖r‖²", *[disp[name] for name in names]],
+    )
+
+    animated: list[tuple[int, np.ndarray, np.ndarray]] = []
+    trace_idx = 0
+    all_loss_y: list[float] = []
+
+    # ── Loss row (full width) ──
+    if single:
+        _label, iters, objs, best, style = loss_series[0]
+        all_loss_y.extend(objs.tolist())
+        fig.add_trace(
+            go.Scatter(
+                x=iters,
+                y=objs,
+                mode="markers",
+                marker=dict(
+                    color=COLORS["accent"],
+                    size=5,
+                    opacity=0.45,
+                    line=dict(color=COLORS["plot"], width=0.5),
+                ),
+                name="evaluation",
+                legendgroup="_loss",
+                showlegend=True,
+                hovertemplate="obj %{y:.4e}<extra></extra>",
+            ),
+            row=1,
+            col=1,
+        )
+        animated.append((trace_idx, iters, objs))
+        trace_idx += 1
+        fig.add_trace(
+            go.Scatter(
+                x=iters,
+                y=best,
+                mode="lines+markers",
+                line=dict(color=style["color"], width=3),
+                marker=dict(
+                    color=style["color"],
+                    size=8,
+                    line=dict(color=COLORS["plot"], width=1.2),
+                ),
+                name="best so far",
+                legendgroup="_loss",
+                showlegend=True,
+                hovertemplate="best %{y:.4e}<extra></extra>",
+            ),
+            row=1,
+            col=1,
+        )
+        animated.append((trace_idx, iters, best))
+        trace_idx += 1
+    else:
+        for label, iters, _objs, best, style in loss_series:
+            all_loss_y.extend(best.tolist())
+            fig.add_trace(
+                go.Scatter(
+                    x=iters,
+                    y=best,
+                    mode="lines",
+                    line=dict(color=style["color"], dash=style["dash"], width=3),
+                    name=label,
+                    legendgroup=label,
+                    showlegend=True,
+                    hovertemplate=f"<b>{label}</b><br>best %{{y:.4e}}<extra></extra>",
+                ),
+                row=1,
+                col=1,
+            )
+            animated.append((trace_idx, iters, best))
+            trace_idx += 1
+
+    # ── Parameter rows (2-column grid); legend is owned by the loss row ──
+    extents: dict[str, list[float]] = {name: [] for name in names}
+    for label, params_list, style in traj_runs:
+        iters = np.arange(len(params_list), dtype=np.int64)
+        for p_i, name in enumerate(names):
+            y = np.array([p.get(name, np.nan) for p in params_list], dtype=np.float64)
+            extents[name].extend(y[np.isfinite(y)].tolist())
+            # Static full-trajectory ghost (thin): always shows the whole
+            # parameter path behind the animated snapshot line. NOT registered in
+            # ``animated``, so the frames never slice it — a more pedagogical replay.
+            fig.add_trace(
+                go.Scatter(
+                    x=iters,
+                    y=y,
+                    mode="lines",
+                    line=dict(color=style["color"], dash=style["dash"], width=1.0),
+                    opacity=_vis("calib_vis_ghost_opacity", 0.55),
+                    name=label,
+                    legendgroup=label,
+                    showlegend=False,
+                    hoverinfo="skip",
+                ),
+                row=p_i // 2 + 2,
+                col=p_i % 2 + 1,
+            )
+            trace_idx += 1
+            fig.add_trace(
+                go.Scatter(
+                    x=iters,
+                    y=y,
+                    mode="lines",
+                    line=dict(color=style["color"], dash=style["dash"], width=2.2),
+                    name=label,
+                    legendgroup=label,
+                    showlegend=False,
+                    hovertemplate=f"<b>{label}</b><br>{disp[name]} %{{y:.4g}}<extra></extra>",
+                ),
+                row=p_i // 2 + 2,
+                col=p_i % 2 + 1,
+            )
+            animated.append((trace_idx, iters, y))
+            trace_idx += 1
+
+    # ── Loss y-axis (adaptive log/linear) + its range for the play-head ──
+    loss_cfg = _adaptive_loss_y_axis(
+        np.array(all_loss_y, dtype=np.float64), title_hint="Objective  ½‖r‖²"
+    )
+    scale_tag = "log scale" if loss_cfg.get("type") == "log" else "linear"
+    fig.update_yaxes(**{**loss_cfg, "title": scale_tag}, row=1, col=1)
+    rng = loss_cfg.get("range")
+    if rng is None:
+        loss_lo = min(all_loss_y, default=0.0)
+        loss_hi = max(all_loss_y, default=1.0)
+    elif loss_cfg.get("type") == "log":
+        loss_lo, loss_hi = 10.0 ** rng[0], 10.0 ** rng[1]
+    else:
+        loss_lo, loss_hi = rng[0], rng[1]
+
+    # ── Per-parameter y-ranges, truth lines, x-axis labels (bottom-of-column) ──
+    x_pad = max(float(max_len - 1) * 0.02, 0.5)
+    x_range = [-x_pad, float(max_len - 1) + x_pad]
+    y_lo: dict[str, float] = {}
+    y_hi: dict[str, float] = {}
+    for p_i, name in enumerate(names):
+        row = p_i // 2 + 2
+        col = p_i % 2 + 1
+        vals = list(extents[name])
+        if true_params and name in true_params:
+            vals.append(float(true_params[name]))
+        v_min = min(vals) if vals else 0.0
+        v_max = max(vals) if vals else 1.0
+        pad = max(abs(v_max - v_min) * 0.1, 1e-6)
+        y_lo[name], y_hi[name] = v_min - pad, v_max + pad
+        if true_params and name in true_params:
+            fig.add_hline(
+                y=float(true_params[name]),
+                line=dict(color=COLORS["danger"], width=1.4, dash="dash"),
+                row=row,
+                col=col,
+            )
+        is_bottom = (p_i + 2) >= n  # bottom-most populated cell of its column
+        fig.update_xaxes(
+            range=x_range,
+            title="Objective Evaluation Count" if is_bottom else None,
+            showticklabels=is_bottom,
+            row=row,
+            col=col,
+        )
+        fig.update_yaxes(range=[y_lo[name], y_hi[name]], row=row, col=col)
+    # Loss row keeps the full x-range but hides its (redundant) tick labels.
+    fig.update_xaxes(range=x_range, showticklabels=(n == 0), row=1, col=1)
+
+    # ── Play-head: a muted dotted vertical at the current evaluation, per cell ──
+    playhead: list[tuple[int, float, float]] = []
+    x0 = float(max_len - 1)
+
+    def _add_playhead(row: int, col: int, lo: float, hi: float) -> None:
+        nonlocal trace_idx
+        fig.add_trace(
+            go.Scatter(
+                x=[x0, x0],
+                y=[lo, hi],
+                mode="lines",
+                line=dict(color=COLORS["text_muted"], width=1.2, dash="dot"),
+                name="_playhead",
+                hoverinfo="skip",
+                showlegend=False,
+            ),
+            row=row,
+            col=col,
+        )
+        playhead.append((trace_idx, lo, hi))
+        trace_idx += 1
+
+    _add_playhead(1, 1, loss_lo, loss_hi)
+    for p_i, name in enumerate(names):
+        _add_playhead(p_i // 2 + 2, p_i % 2 + 1, y_lo[name], y_hi[name])
+
+    # ── One frame set advances loss + every parameter + every play-head ──
+    step = _frame_step(max_len)
+    frame_indices = sorted(set(list(range(0, max_len, step)) + [max_len - 1]))
+    fig.frames = [
+        go.Frame(
+            name=str(idx),
+            data=[go.Scatter(x=x[: idx + 1], y=y[: idx + 1]) for _t, x, y in animated]
+            + [go.Scatter(x=[idx, idx], y=[lo, hi]) for _t, lo, hi in playhead],
+            traces=[t for t, _x, _y in animated] + [t for t, _lo, _hi in playhead],
+        )
+        for idx in frame_indices
+    ]
+    slider_steps = [
+        dict(
+            method="animate",
+            args=[
+                [str(i)],
+                dict(
+                    mode="immediate",
+                    frame=dict(duration=0, redraw=False),
+                    transition=dict(duration=0),
+                ),
+            ],
+            label=str(i),
+        )
+        for i in frame_indices
+    ]
+    slider = _slider_template(slider_steps)
+    slider["active"] = len(frame_indices) - 1  # open on the converged frame
+
+    height = min(300 + 175 * param_rows + 150, 1300)
+    title = "Fit anatomy  ·  loss + parameter roles"
+    if true_params:
+        title += "  ·  red dashed line = true value"
+    apply_lab_theme(
+        fig,
+        height=height,
+        title=title,
+        margin=(60, 25, 92, 130),
+        legend_horizontal=True,
+    )
+    # Tuck the legend into the (empty) top-right corner of the loss panel —
+    # the descent runs top-left → bottom-right, so that corner is clear — and
+    # box it. apply_lab_theme's horizontal legend sits at the top-left, right
+    # under the title, where the two read as one confused block; a vertical
+    # legend anchored top-right keeps the title alone on the left.
+    fig.update_layout(
+        updatemenus=_animation_buttons(from_current=False),
+        sliders=[slider],
+        legend=dict(
+            orientation="v",
+            xanchor="right",
+            x=0.998,
+            yanchor="top",
+            y=0.998,
+            bgcolor="rgba(255,255,255,0.78)",
+            bordercolor=COLORS["grid_strong"],
+            borderwidth=1,
+            font=dict(family=FONT_FAMILY, color=COLORS["text"], size=10),
+        ),
+    )
+    # Label the unified-hover header on every sub-plot's x-axis (no row/col
+    # selector → applies to all) so the bare iteration index is never shown raw.
+    fig.update_xaxes(unifiedhovertitle=_ITER_HOVER_TITLE)
+    for ann in fig.layout.annotations:
+        ann.font = dict(family=FONT_FAMILY, color=COLORS["text"], size=12)
     return fig

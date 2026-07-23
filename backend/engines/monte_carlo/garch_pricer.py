@@ -103,11 +103,16 @@ def _simulate_garch_terminal_rn(
     t: float,
     n_paths: int,
     n_steps: int,
+    z_noise: np.ndarray,
 ) -> np.ndarray:
     """
     GARCH(1,1) terminal simulation under risk-neutral measure (LRNVR).
 
     Variance: σ²_t = ω + α·σ²_{t-1}·z²_{t-1} + β·σ²_{t-1}
+
+    Pre-generated standardized innovations ``z_noise`` (shape (n_paths, n_steps))
+    make this parallel kernel reproducible for a fixed seed and thread-safe;
+    in-kernel ``np.random`` under ``prange`` was neither.
     """
     dt = t / n_steps
     var0 = sigma0 * sigma0
@@ -119,7 +124,7 @@ def _simulate_garch_terminal_rn(
         var_t = var0
 
         for j in range(n_steps):
-            z = np.random.standard_normal()
+            z = z_noise[i, j]
 
             sigma_t = np.sqrt(var_t)
 
@@ -148,6 +153,7 @@ def _simulate_ngarch_terminal_rn(
     t: float,
     n_paths: int,
     n_steps: int,
+    z_noise: np.ndarray,
 ) -> np.ndarray:
     """
     NGARCH terminal simulation under risk-neutral measure.
@@ -164,7 +170,7 @@ def _simulate_ngarch_terminal_rn(
         var_t = var0
 
         for j in range(n_steps):
-            z = np.random.standard_normal()
+            z = z_noise[i, j]
 
             sigma_t = np.sqrt(var_t)
             log_return = (r - 0.5 * var_t) * dt + sigma_t * np.sqrt(dt) * z
@@ -192,6 +198,7 @@ def _simulate_gjr_garch_terminal_rn(
     t: float,
     n_paths: int,
     n_steps: int,
+    z_noise: np.ndarray,
 ) -> np.ndarray:
     """
     GJR-GARCH terminal simulation under risk-neutral measure.
@@ -209,7 +216,7 @@ def _simulate_gjr_garch_terminal_rn(
         var_t = var0
 
         for j in range(n_steps):
-            z = np.random.standard_normal()
+            z = z_noise[i, j]
 
             sigma_t = np.sqrt(var_t)
             log_return = (r - 0.5 * var_t) * dt + sigma_t * np.sqrt(dt) * z
@@ -230,22 +237,22 @@ def _simulate_gjr_garch_terminal_rn(
 def _compute_mc_price_and_se(
     terminals: np.ndarray, k: float, r: float, t: float, is_call: bool
 ) -> tuple[float, float]:
-    """Compute Monte Carlo price and standard error."""
-    n = len(terminals)
+    """Compute Monte Carlo price and standard error.
 
-    # Payoffs
-    payoffs = np.empty(n, dtype=np.float64)
-    for i in range(n):
-        if is_call:
-            payoffs[i] = max(terminals[i] - k, 0.0)
-        else:
-            payoffs[i] = max(k - terminals[i], 0.0)
+    The payoff is fused into the mean/variance passes (recomputed on the fly)
+    instead of materialising an ``n_paths`` intermediate array. Accumulation
+    stays sequential so the result does not depend on the thread count.
+    """
+    n = len(terminals)
 
     # Discounted mean
     discount = np.exp(-r * t)
     mean_payoff = 0.0
     for i in range(n):
-        mean_payoff += payoffs[i]
+        if is_call:
+            mean_payoff += max(terminals[i] - k, 0.0)
+        else:
+            mean_payoff += max(k - terminals[i], 0.0)
     mean_payoff = mean_payoff / n
 
     price = discount * mean_payoff
@@ -253,7 +260,11 @@ def _compute_mc_price_and_se(
     # Standard error
     var_payoff = 0.0
     for i in range(n):
-        diff = payoffs[i] - mean_payoff
+        if is_call:
+            payoff = max(terminals[i] - k, 0.0)
+        else:
+            payoff = max(k - terminals[i], 0.0)
+        diff = payoff - mean_payoff
         var_payoff += diff * diff
     var_payoff = var_payoff / (n - 1)
 
@@ -444,8 +455,10 @@ class GARCHMCPricer:
         **kwargs,
     ) -> np.ndarray:
         """Simulate terminal prices under risk-neutral measure."""
-        if seed is not None:
-            np.random.seed(seed)
+        # Pre-draw all innovations with a local Generator: reproducible for a
+        # fixed seed and thread-safe, unlike in-kernel np.random under prange.
+        rng = np.random.default_rng(seed)
+        z_noise = rng.standard_normal((n_paths, n_steps))
 
         if self._garch_type == GARCHType.GARCH:
             return _simulate_garch_terminal_rn(
@@ -458,6 +471,7 @@ class GARCHMCPricer:
                 t,
                 n_paths,
                 n_steps,
+                z_noise,
             )
         if self._garch_type == GARCHType.NGARCH:
             return _simulate_ngarch_terminal_rn(
@@ -471,6 +485,7 @@ class GARCHMCPricer:
                 t,
                 n_paths,
                 n_steps,
+                z_noise,
             )
         # GJR_GARCH
         return _simulate_gjr_garch_terminal_rn(
@@ -484,6 +499,7 @@ class GARCHMCPricer:
             t,
             n_paths,
             n_steps,
+            z_noise,
         )
 
     def price(
@@ -580,13 +596,15 @@ class GARCHMCPricer:
         option_type: str | OptionType = OptionType.CALL,
         n_paths: int | None = None,
         n_steps: int | None = None,
+        seed: int | None = None,
         **kwargs,
     ) -> np.ndarray:
         """
         Price options across strike-maturity surface.
 
         Note: For efficiency, simulations are reused across strikes
-        for each maturity.
+        for each maturity. Pass ``seed`` for a reproducible surface (each
+        maturity gets a deterministic ``seed + j`` offset).
         """
         if isinstance(option_type, str):
             option_type = OptionType(option_type.lower())
@@ -602,7 +620,10 @@ class GARCHMCPricer:
         for j, t in enumerate(maturities):
             # Single simulation for all strikes at this maturity
             steps_for_t = max(int(n_steps * t), 10)
-            terminals = self.simulate_terminal(s0, t, r, n_paths, steps_for_t)
+            maturity_seed = None if seed is None else seed + j
+            terminals = self.simulate_terminal(
+                s0, t, r, n_paths, steps_for_t, seed=maturity_seed
+            )
 
             for i, k in enumerate(strikes):
                 price, _ = _compute_mc_price_and_se(terminals, k, r, t, is_call)

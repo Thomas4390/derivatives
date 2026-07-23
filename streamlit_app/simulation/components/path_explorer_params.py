@@ -120,6 +120,21 @@ def render_explorer_params(model_key: str) -> dict[str, Any]:
             help="Fixed seed — same random draws across parameter changes",
         )
 
+    # Seed-sensitivity overlay: run this many independent seeds (base_seed + i)
+    # with the SAME parameters to study the effect of the random seed alone.
+    params["n_seeds"] = int(
+        st.number_input(
+            "Seeds to overlay",
+            min_value=1,
+            max_value=20,
+            value=int(st.session_state.get(f"{kp}n_seeds", 1)),
+            step=1,
+            key=f"{kp}n_seeds",
+            help="Overlay this many independent seeds (identical parameters) to "
+            "see how much the random seed alone moves the path.",
+        )
+    )
+
     # Fixed single-path settings; n_steps from sidebar
     params["n_paths"] = 1
     params["n_steps"] = int(st.session_state.get("sim_steps", 252))

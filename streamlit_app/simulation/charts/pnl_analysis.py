@@ -373,7 +373,9 @@ def render_pnl_by_dte(
     stock_entry = position_arrays.get("stock_entry_price", 0.0)
 
     # ── DTE checkpoints (ascending: 0 → T-1, exclude T_days) ─────────
-    T_days = int(round(time_to_expiry * 365))
+    # DTE axis indexes the simulation grid: 1 step = 1 "day", so the maximum
+    # days-to-expiration equals ``n_steps`` (the configured "Time Steps").
+    T_days = n_steps
     if T_days <= 30:
         step_d = max(T_days // n_checkpoints, 1)
     else:
@@ -394,9 +396,8 @@ def render_pnl_by_dte(
     be_spot_grid = np.linspace(spot * 0.5, spot * 1.5, 1000)
 
     for dte in dte_days:
-        tau = dte / 365.0
-        elapsed = time_to_expiry - tau
-        step_idx = min(int(round(elapsed / dt)), n_steps)
+        tau = dte * dt  # dte steps remaining → years to expiry
+        step_idx = n_steps - dte  # exact grid column (dte=0 → terminal)
         S_t = paths[:, step_idx]
 
         # ── At DTE=0, use real MC P&L if provided (exact for exotics) ─
@@ -1003,4 +1004,379 @@ def render_3d_pnl_chart(
         + r"}^{(i)}\,\right)"
         r"\qquad\text{where}\quad "
         r"r_t^{(i)} = \ln\!\frac{S_{t}^{(i)}}{S_{t-1}^{(i)}}"
+    )
+
+
+def _vol_pnl_conditional_mean(
+    rv: np.ndarray, pnl: np.ndarray, n_bins: int
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Binned conditional mean/std of P&L vs realized vol.
+
+    Returns ``(centers, mean, std)`` for bins holding ≥5 paths (noisy tail bins
+    are dropped); empty arrays when there are too few finite samples.
+    """
+    if rv.size < 10:
+        empty = np.empty(0)
+        return empty, empty, empty
+    lo, hi = (float(v) for v in np.percentile(rv, [1, 99]))
+    if hi <= lo:
+        hi = lo + 1e-9
+    edges = np.linspace(lo, hi, n_bins + 1)
+    centers = 0.5 * (edges[:-1] + edges[1:])
+    b = np.clip(np.searchsorted(edges, rv, side="right") - 1, 0, n_bins - 1)
+    counts = np.bincount(b, minlength=n_bins).astype(float)
+    sums = np.bincount(b, weights=pnl, minlength=n_bins)
+    sqs = np.bincount(b, weights=pnl**2, minlength=n_bins)
+    safe = np.maximum(counts, 1.0)
+    mean = sums / safe
+    std = np.sqrt(np.maximum(sqs / safe - mean**2, 0.0))
+    keep = counts >= 5
+    return centers[keep], mean[keep], std[keep]
+
+
+def render_vol_pnl_scatter(
+    result: SimulationResult,
+    pnl_values: np.ndarray,
+    time_horizon: float = 1.0,
+    sigma0: float | None = None,
+    max_points: int = 4000,
+    n_bins: int = 25,
+) -> None:
+    """2D view of the realized-volatility -> P&L relationship.
+
+    A scatter of each path's realized volatility against its terminal P&L
+    (coloured by sign), overlaid with the conditional mean ``E[P&L | realized
+    vol]`` and its ±1σ band — the clearest read of how volatility drives the
+    strategy's outcome (the 3D chart's vol↔P&L plane, isolated). A vertical
+    marker at σ₀ contrasts realized against expected volatility.
+    """
+    pnl_all = np.round(np.asarray(pnl_values, dtype=float), 2)
+    ann_factor = np.sqrt(result.n_steps / time_horizon)
+    rv_all = result.realized_volatility(annualization_factor=ann_factor) * 100.0
+    n = rv_all.size
+    if n == 0:
+        return
+
+    # Conditional mean / std of P&L per realized-vol bin (uses ALL paths).
+    cx, cm, cs = _vol_pnl_conditional_mean(rv_all, pnl_all, n_bins)
+
+    # Scatter cloud (subsampled for performance), split by P&L sign.
+    if n > max_points:
+        sub = np.random.choice(n, max_points, replace=False)
+    else:
+        sub = np.arange(n)
+    rv, pnl = rv_all[sub], pnl_all[sub]
+    prof = pnl >= 0
+
+    fig = go.Figure()
+    fig.add_trace(
+        go.Scatter(
+            x=rv[prof],
+            y=pnl[prof],
+            mode="markers",
+            name="Profit",
+            marker=dict(size=4, color=_GREEN_MARKER),
+            hovertemplate=(
+                "<b>Realized Vol:</b> %{x:.1f}%<br><b>P&L:</b> $%{y:+.2f}<extra></extra>"
+            ),
+        )
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=rv[~prof],
+            y=pnl[~prof],
+            mode="markers",
+            name="Loss",
+            marker=dict(size=4, color=_RED_MARKER),
+            hovertemplate=(
+                "<b>Realized Vol:</b> %{x:.1f}%<br><b>P&L:</b> $%{y:+.2f}<extra></extra>"
+            ),
+        )
+    )
+    # Conditional mean E[P&L | realized vol] with ±1σ band.
+    if cx.size:
+        fig.add_trace(
+            go.Scatter(
+                x=np.concatenate([cx, cx[::-1]]),
+                y=np.concatenate([cm + cs, (cm - cs)[::-1]]),
+                fill="toself",
+                fillcolor="rgba(251, 191, 36, 0.12)",
+                line=dict(width=0),
+                name="±1σ",
+                hoverinfo="skip",
+            )
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=cx,
+                y=cm,
+                mode="lines+markers",
+                name="Mean P&L | vol",
+                line=dict(color="#fbbf24", width=2.5),
+                marker=dict(size=4, color="#fbbf24"),
+                hovertemplate=(
+                    "<b>Realized Vol:</b> %{x:.1f}%<br>"
+                    "<b>Mean P&L:</b> $%{y:+.2f}<extra></extra>"
+                ),
+            )
+        )
+
+    fig.add_hline(y=0, line_dash="dot", line_color=_ZERO_LINE, line_width=1)
+    if sigma0 is not None and sigma0 > 0:
+        fig.add_vline(
+            x=sigma0 * 100.0,
+            line_dash="dash",
+            line_color="#78c8ff",
+            line_width=1.2,
+            annotation_text=f" σ₀ = {sigma0 * 100:.1f}% ",
+            annotation_position="top",
+            **_badge("#78c8ff"),
+        )
+
+    fig.update_layout(
+        height=CHART_HEIGHT_LG,
+        paper_bgcolor=_PAPER_BG,
+        plot_bgcolor=_PLOT_BG,
+        margin=dict(t=30, b=45, l=60, r=20),
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="center",
+            x=0.5,
+            font=dict(size=11, color=_LEGEND_COLOR),
+            bgcolor="rgba(0,0,0,0)",
+        ),
+        hovermode="closest",
+    )
+    fig.update_xaxes(title_text="Realized Volatility (%)", ticksuffix="%", **_AXIS_STYLE)
+    fig.update_yaxes(title_text="P&L ($)", tickprefix="$", **_AXIS_STYLE)
+    st.plotly_chart(fig, width="stretch")
+    st.caption(
+        "Each dot is one simulated path — its realized volatility against its "
+        "terminal P&L. The amber line is the conditional mean E[P&L | realized "
+        "vol] with its ±1σ band: its slope is the link between volatility and the "
+        "strategy's P&L."
+    )
+
+
+def render_vol_pnl_scatter_by_dte(
+    result: SimulationResult,
+    position_arrays: dict,
+    rate: float,
+    sigma: float,
+    time_to_expiry: float,
+    sigma0: float | None = None,
+    terminal_pnl: np.ndarray | None = None,
+    max_scatter: int = 5000,
+    n_checkpoints: int = 8,
+    n_bins: int = 25,
+) -> None:
+    """Realized-vol → P&L scatter navigable by a Plotly Days-to-Expiry slider.
+
+    Mirrors the Mark-to-Market P&L chart's DTE slider: at each checkpoint the
+    x-axis is each path's realized volatility *up to that time* and the y-axis is
+    its mark-to-market P&L there (exact MC P&L at DTE=0 when ``terminal_pnl`` is
+    given). Sliding from inception toward expiry shows the vol → P&L link emerge
+    over the trade's life (DTE 0 = expiry). The amber line is the conditional
+    mean ``E[P&L | realized vol]`` with its ±1σ band.
+    """
+    from services.simulation_runner import compute_mtm_pnl_at_step
+
+    n_paths = result.n_paths
+    n_steps = result.n_steps
+    ann_factor = np.sqrt(n_steps / time_to_expiry)
+
+    if n_paths > max_scatter:
+        idx = np.random.choice(n_paths, max_scatter, replace=False)
+    else:
+        idx = np.arange(n_paths)
+    paths = result.price_paths[idx]
+    term_sub = None if terminal_pnl is None else np.round(np.asarray(terminal_pnl)[idx], 2)
+
+    # DTE checkpoints (ascending, 0 → just under T) — same logic as the MtM chart.
+    # 1 step = 1 "day": the DTE axis spans the simulation grid (max = n_steps).
+    t_days = n_steps
+    step_d = max(t_days // n_checkpoints, 1 if t_days <= 30 else 5)
+    dte_days = sorted(set(range(0, max(t_days, 1), step_d)))
+    if not dte_days or dte_days[0] != 0:
+        dte_days.insert(0, 0)
+    n_dte = len(dte_days)
+
+    # Per-DTE realized vol (windowed) + mark-to-market P&L.
+    slices: list[tuple[int, np.ndarray, np.ndarray]] = []
+    g_rv_hi, g_pnl_lo, g_pnl_hi = 0.0, float("inf"), float("-inf")
+    for dte in dte_days:
+        step_idx = n_steps - dte  # exact grid column (dte=0 → terminal)
+        if step_idx < 2:
+            rv = np.full(paths.shape[0], np.nan)
+        else:
+            log_ret = np.diff(np.log(paths[:, : step_idx + 1]), axis=1)
+            rv = np.nanstd(log_ret, axis=1) * ann_factor * 100.0
+        if dte == 0 and term_sub is not None:
+            pnl = term_sub
+        else:
+            pnl = np.round(
+                compute_mtm_pnl_at_step(
+                    paths=paths,
+                    step_idx=step_idx,
+                    position_arrays=position_arrays,
+                    rate=rate,
+                    sigma=sigma,
+                    time_to_expiry=time_to_expiry,
+                ),
+                2,
+            )
+        slices.append((dte, rv, pnl))
+        fin = np.isfinite(rv) & np.isfinite(pnl)
+        if fin.any():
+            g_rv_hi = max(g_rv_hi, float(np.percentile(rv[fin], 99)))
+            g_pnl_lo = min(g_pnl_lo, float(np.percentile(pnl[fin], 1)))
+            g_pnl_hi = max(g_pnl_hi, float(np.percentile(pnl[fin], 99)))
+    if not np.isfinite(g_pnl_lo):
+        g_pnl_lo, g_pnl_hi = -1.0, 1.0
+
+    fig = go.Figure()
+    for i, (dte, rv, pnl) in enumerate(slices):
+        vis = i == 0  # default view = terminal (DTE 0), the clearest slice
+        fin = np.isfinite(rv) & np.isfinite(pnl)
+        rvf, pnlf = rv[fin], pnl[fin]
+        cx, cm, cs = _vol_pnl_conditional_mean(rvf, pnlf, n_bins)
+        prof = pnlf >= 0
+        _hover = (
+            "<b>Realized Vol:</b> %{x:.1f}%<br><b>P&L:</b> $%{y:+.2f}<br>"
+            f"<b>DTE:</b> {dte}<extra></extra>"
+        )
+        # ±1σ band (behind)
+        fig.add_trace(
+            go.Scatter(
+                x=np.concatenate([cx, cx[::-1]]) if cx.size else [],
+                y=np.concatenate([cm + cs, (cm - cs)[::-1]]) if cx.size else [],
+                fill="toself",
+                fillcolor="rgba(251, 191, 36, 0.12)",
+                line=dict(width=0),
+                name="±1σ",
+                legendgroup="vp_band",
+                hoverinfo="skip",
+                visible=vis,
+                showlegend=bool(vis and cx.size),
+            )
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=rvf[prof],
+                y=pnlf[prof],
+                mode="markers",
+                name="Profit",
+                legendgroup="vp_profit",
+                marker=dict(size=4, color=_GREEN_MARKER),
+                visible=vis,
+                showlegend=vis,
+                hovertemplate=_hover,
+            )
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=rvf[~prof],
+                y=pnlf[~prof],
+                mode="markers",
+                name="Loss",
+                legendgroup="vp_loss",
+                marker=dict(size=4, color=_RED_MARKER),
+                visible=vis,
+                showlegend=vis,
+                hovertemplate=_hover,
+            )
+        )
+        # Conditional mean line (on top)
+        fig.add_trace(
+            go.Scatter(
+                x=cx,
+                y=cm,
+                mode="lines+markers",
+                name="Mean P&L | vol",
+                legendgroup="vp_mean",
+                line=dict(color="#fbbf24", width=2.5),
+                marker=dict(size=4, color="#fbbf24"),
+                visible=vis,
+                showlegend=bool(vis and cx.size),
+                hovertemplate=(
+                    "<b>Realized Vol:</b> %{x:.1f}%<br>"
+                    "<b>Mean P&L:</b> $%{y:+.2f}<extra></extra>"
+                ),
+            )
+        )
+
+    # DTE slider: toggle the 4 traces of each checkpoint.
+    traces_per_dte = 4
+    total = traces_per_dte * n_dte
+    steps = []
+    for i, dte in enumerate(dte_days):
+        visible = [False] * total
+        for k in range(traces_per_dte):
+            visible[traces_per_dte * i + k] = True
+        steps.append(
+            dict(method="update", args=[{"visible": visible}], label=str(dte))
+        )
+    slider = dict(
+        active=0,
+        currentvalue=dict(
+            prefix="Days to Expiration: ", font=dict(size=13, color=_AXIS_LABEL)
+        ),
+        pad=dict(t=30),
+        steps=steps,
+        bgcolor="#1e293b",
+        activebgcolor="#0d9488",
+        bordercolor="rgba(255,255,255,0.15)",
+        font=dict(color=_TICK_COLOR, size=10),
+    )
+
+    fig.add_hline(y=0, line_dash="dot", line_color=_ZERO_LINE, line_width=1)
+    if sigma0 is not None and sigma0 > 0:
+        fig.add_vline(
+            x=sigma0 * 100.0,
+            line_dash="dash",
+            line_color="#78c8ff",
+            line_width=1.2,
+            annotation_text=f" σ₀ = {sigma0 * 100:.1f}% ",
+            annotation_position="top",
+            **_badge("#78c8ff"),
+        )
+
+    pad = 0.05 * max(g_pnl_hi - g_pnl_lo, 1.0)
+    fig.update_layout(
+        height=CHART_HEIGHT_LG,
+        paper_bgcolor=_PAPER_BG,
+        plot_bgcolor=_PLOT_BG,
+        hovermode="closest",
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="center",
+            x=0.5,
+            font=dict(size=11, color=_LEGEND_COLOR),
+            bgcolor="rgba(0,0,0,0)",
+        ),
+        margin=dict(t=50, b=45, l=60, r=20),
+        sliders=[slider],
+    )
+    fig.update_xaxes(
+        title_text="Realized Volatility (%)",
+        ticksuffix="%",
+        range=[0, g_rv_hi * 1.05 if g_rv_hi > 0 else 1.0],
+        **_AXIS_STYLE,
+    )
+    fig.update_yaxes(
+        title_text="Mark-to-Market P&L ($)",
+        tickprefix="$",
+        range=[g_pnl_lo - pad, g_pnl_hi + pad],
+        **_AXIS_STYLE,
+    )
+    st.plotly_chart(fig, width="stretch")
+    st.caption(
+        "Each dot is one path — its realized volatility up to the selected DTE "
+        "against its mark-to-market P&L there. The amber line is E[P&L | realized "
+        "vol] with its ±1σ band; its slope is the vol → P&L link. Slide the DTE "
+        "to watch the relationship build up over the trade's life (DTE 0 = expiry)."
     )

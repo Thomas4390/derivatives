@@ -8,19 +8,22 @@ import pandas as pd
 import streamlit as st
 
 from charts.comparison import (
+    garch_q_aggregate_recovery,
     multi_comparison_table,
     render_multi_overlaid_loss,
     render_multi_pareto,
     render_parameter_recovery_bars,
 )
 from charts.info_criteria_table import render_info_criteria_table
-from config.constants import MODEL_DISPLAY_NAMES
+from config.constants import (
+    GARCH_FAMILY,
+    MODEL_DISPLAY_NAMES,
+    RN_GARCH_SURFACE_MODELS,
+)
 from services import state_manager
 from services.model_selection_service import compute_info_criteria
 from streamlit_app.simulation.config.styles import section_header_html  # type: ignore
 from tabs._helpers import series_view_filter, subdict_from_series
-
-GARCH_FAMILY_KEYS = frozenset({"garch", "ngarch", "gjr_garch"})
 
 
 def render(ctx: dict) -> None:
@@ -89,7 +92,7 @@ def render(ctx: dict) -> None:
             ),
         },
     )
-    if any(k in GARCH_FAMILY_KEYS for k in results_all):
+    if any(k in GARCH_FAMILY for k in results_all):
         st.caption(
             "ℹ️ For GARCH-family models, **ω is stored on the annualised "
             "scale** (multiplied by `annualization_factor`, 252 by default); "
@@ -121,7 +124,7 @@ def render(ctx: dict) -> None:
         )
         # Encoding hint moved out of the (former) in-figure title so the
         # legend has the top of the chart to itself.
-        st.caption("Colour = model · shape = solver.")
+        st.caption("Each run has a distinct colour · shape = solver.")
     with col2:
         st.markdown(
             section_header_html("📉", "Loss overlay · every (model, solver)"),
@@ -151,10 +154,47 @@ def render(ctx: dict) -> None:
             width="stretch",
         )
         st.caption(
-            "Recovery bars are scoped to the generator model — only it has "
-            "a ground truth. Other candidates compare their fit quality via "
-            "RMSE / Pareto above instead."
+            "Bars show |estimated − true| / |true| per parameter (log scale). "
+            "Recovery is scoped to the generator model — only it has a ground "
+            "truth; other candidates compare their fit quality via RMSE / Pareto "
+            "above instead."
         )
+        # Levier 4 — honest framing for the nonaffine GARCH-Q trio: lead the
+        # recovery story with the *identified aggregates* rather than the raw
+        # (weakly identified) ω/γ/h₀ bars above.
+        if generator_model in RN_GARCH_SURFACE_MODELS:
+            agg_rows = garch_q_aggregate_recovery(
+                results_all[generator_model], generator_model, true_params,
+            )
+            if len(agg_rows) > 1:
+                st.markdown(
+                    section_header_html(
+                        "🧭", "Identified aggregates · persistence & long-run vol",
+                    ),
+                    unsafe_allow_html=True,
+                )
+                agg_df = pd.DataFrame(agg_rows)
+                st.dataframe(
+                    agg_df.style.format(
+                        {
+                            "Persistence": "{:.4f}",
+                            "|Δ persist|": "{:.4f}",
+                            "σ_LT ann (%)": "{:.2f}",
+                            "|Δ σ_LT| (%)": "{:.2f}",
+                        },
+                        na_rep="—",
+                    ),
+                    width="stretch",
+                    hide_index=True,
+                )
+                st.caption(
+                    "An option surface only weakly identifies ω, γ and h₀ "
+                    "individually (Christoffersen-Jacobs 2004) — many (ω, γ, h₀) "
+                    "triples price almost the same smile, so judge the bars above "
+                    "with caution. What the surface **does** pin down are the "
+                    "variance **persistence** and the annualised **long-run "
+                    "volatility** σ_LT; read recovery off these aggregates."
+                )
     else:
         st.caption(
             "Parameter recovery requires synthetic data with the generator "

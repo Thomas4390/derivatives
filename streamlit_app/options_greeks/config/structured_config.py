@@ -22,6 +22,21 @@ STRUCTURED_MODEL_TYPES = {
 
 STRUCTURED_OBSERVATION_FREQUENCIES = ["monthly", "quarterly", "semi_annual", "annual"]
 
+# Model parameter input specs for the structured-product pricing sidebar —
+# slider/number_input bounds + defaults, centralised so the ranges live in one
+# place instead of being hard-coded in the rendering function.
+SP_GBM_VOL_SPEC = {
+    "label": "Volatility", "default": 0.20, "min": 0.05, "max": 0.80, "step": 0.01,
+    "format": "%.2f",
+}
+SP_HESTON_PARAM_SPECS = [
+    {"name": "v0", "key": "sp_v0", "label": "v₀", "default": 0.04, "min": 0.001, "max": 0.50, "step": 0.01, "format": "%.3f", "col": 0},
+    {"name": "kappa", "key": "sp_kappa", "label": "κ", "default": 2.0, "min": 0.1, "max": 10.0, "step": 0.1, "format": "%.1f", "col": 0},
+    {"name": "rho", "key": "sp_rho", "label": "ρ", "default": -0.7, "min": -0.99, "max": 0.99, "step": 0.05, "format": "%.2f", "col": 0},
+    {"name": "theta", "key": "sp_theta", "label": "σ²", "default": 0.04, "min": 0.001, "max": 0.50, "step": 0.01, "format": "%.3f", "col": 1},
+    {"name": "alpha", "key": "sp_xi", "label": "α", "default": 0.3, "min": 0.01, "max": 1.5, "step": 0.05, "format": "%.2f", "col": 1},
+]
+
 # =============================================================================
 # DEFAULT PARAMETERS
 # =============================================================================

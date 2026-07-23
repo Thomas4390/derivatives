@@ -5,6 +5,7 @@ from .pricing_service import (
     PricingComparison,
     compare_pricing,
     get_available_pricing_methods,
+    price_exotic_from_terminals,
     price_from_terminals,
     price_multiple_strikes,
     price_with_analytical,

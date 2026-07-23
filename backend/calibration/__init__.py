@@ -33,8 +33,8 @@ from backend.calibration.base import BaseCalibrator, CalibrationResult
 from backend.calibration.feller import (
     DEFAULT_FELLER_WEIGHT,
     FellerMode,
-    feller_capped_xi,
-    feller_xi_to_unit,
+    feller_capped_alpha,
+    feller_alpha_to_unit,
     penalty_weight,
 )
 from backend.calibration.stationarity import (
@@ -58,6 +58,10 @@ from backend.calibration.garch_calibrator import GARCHCalibrator
 from backend.calibration.ngarch_q_calibrator import (
     GARCHRiskNeutralCalibrator,
     NGARCHRiskNeutralCalibrator,
+)
+from backend.calibration.custom_calibrator import (
+    CustomModelCalibrator,
+    CustomTerminalSimulator,
 )
 
 # Shared infrastructure
@@ -123,8 +127,8 @@ __all__ = [
     # Feller-condition control
     "FellerMode",
     "DEFAULT_FELLER_WEIGHT",
-    "feller_capped_xi",
-    "feller_xi_to_unit",
+    "feller_capped_alpha",
+    "feller_alpha_to_unit",
     "penalty_weight",
     # Stationarity control (Heston-Nandi GARCH)
     "StationarityMode",
@@ -140,6 +144,8 @@ __all__ = [
     "GARCHCalibrator",
     "GARCHRiskNeutralCalibrator",
     "NGARCHRiskNeutralCalibrator",
+    "CustomModelCalibrator",
+    "CustomTerminalSimulator",
     # Shared infrastructure
     "IdentityTransform",
     "ParameterTransform",

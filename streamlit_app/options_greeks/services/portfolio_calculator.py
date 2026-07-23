@@ -20,6 +20,7 @@ from config.constants import (
     SPOT_RANGE_POINTS,
     STRIKE_RANGE_FACTORS,
 )
+from config.exotic_config import EXOTIC_LEG_KEYS
 
 from .risk_analyzer import check_unlimited_risk
 
@@ -64,19 +65,13 @@ def prepare_portfolio_data(positions: list, stock_position, spot_price: float) -
                 "premium_paid": pos["premium_paid"],
                 "instrument_class": pos.get("instrument_class", "vanilla"),
             }
-            # Pass through exotic fields when present
+            # Pass through exotic fields when present. EXOTIC_LEG_KEYS covers
+            # the advanced families too (supershare corridor, double/discrete/
+            # binary-barrier adv_* keys, cash, ...) so the base curve, the
+            # metrics and the premium all describe the same instrument as the
+            # scenario overlay.
             if opt["instrument_class"] != "vanilla":
-                for key in (
-                    "barrier",
-                    "is_up",
-                    "is_knock_in",
-                    "rebate",
-                    "payout",
-                    "extra1",
-                    "choice_time_pct",
-                    "power_n",
-                    "gap_trigger",
-                ):
+                for key in EXOTIC_LEG_KEYS:
                     if key in pos:
                         opt[key] = pos[key]
             portfolio_data["options"].append(opt)
@@ -103,6 +98,8 @@ def prepare_portfolio_arrays(portfolio_data: dict) -> tuple:
         Tuple of (strikes, option_types, position_types, quantities, premiums,
                  stock_quantity, stock_entry_price, exotic_metadata)
     """
+    from .exotic_pricing_adapter import haug_factory_params
+
     exotic_metadata = []
     ref_spot = portfolio_data.get("spot_price", 0.0)
     if portfolio_data.get("options") and len(portfolio_data["options"]) > 0:
@@ -135,6 +132,8 @@ def prepare_portfolio_arrays(portfolio_data: dict) -> tuple:
                     "extra1": pos.get("extra1", 0.0),
                     "power_n": pos.get("power_n", 2.0),
                     "gap_trigger": pos.get("gap_trigger", 0.0),
+                    "cap": pos.get("cap", 0.0),
+                    "params": haug_factory_params(pos),
                     "ref_spot": ref_spot,
                 }
             )
@@ -178,6 +177,7 @@ def calculate_all_surfaces(
     _find_breakeven_func,
     has_positions: bool,
     _calculate_exotic_greeks_func=None,
+    dividend_yield: float = 0.0,
 ) -> dict:
     """
     Calculate all P&L and Greeks data at once.
@@ -193,6 +193,7 @@ def calculate_all_surfaces(
         _find_breakeven_func: Function to find breakeven points (not hashed)
         has_positions: Whether there are active positions
         _calculate_exotic_greeks_func: Function to calculate exotic Greeks (not hashed)
+        dividend_yield: Continuous dividend yield (decimal, default 0.0)
 
     Returns:
         Dictionary with all calculated data
@@ -231,6 +232,7 @@ def calculate_all_surfaces(
         _calculate_all_greeks_func,
         exotic_metadata=exotic_metadata,
         calculate_exotic_greeks_func=_calculate_exotic_greeks_func,
+        dividend_yield=dividend_yield,
     )
 
     # Calculate P&L at expiration (split vanilla / exotic)
@@ -281,6 +283,59 @@ def calculate_all_surfaces(
     else:
         unlimited_profit, unlimited_loss = check_unlimited_risk(portfolio_data)
 
+    # Override for exotic portfolios — per-type logic
+    if has_exotic_legs:
+        for j, m in enumerate(exotic_metadata):
+            if m["instrument_class"] == "vanilla":
+                continue
+            is_long = position_types[j] == 1
+            typ = m["instrument_class"]
+            # Lookback and Asian: only calls are unbounded
+            if typ in ("lookback_fixed", "lookback_floating", "asian"):
+                is_call = portfolio_data["options"][j]["option_type"] == "call"
+                if is_call:
+                    if is_long:
+                        unlimited_profit = True
+                    else:
+                        unlimited_loss = True
+            elif typ == "barrier":
+                is_call = portfolio_data["options"][j]["option_type"] == "call"
+                if is_long:
+                    if is_call:
+                        unlimited_profit = True
+                else:
+                    if is_call:
+                        unlimited_loss = True
+            elif typ == "chooser":
+                # Chooser = max(call, put) → long has unlimited upside, short has unlimited downside
+                if is_long:
+                    unlimited_profit = True
+                else:
+                    unlimited_loss = True
+            elif typ == "power":
+                # Power options: convex payoff → unlimited for long calls
+                is_call = portfolio_data["options"][j]["option_type"] == "call"
+                if is_long and is_call:
+                    unlimited_profit = True
+                elif not is_long and is_call:
+                    unlimited_loss = True
+            elif typ == "gap":
+                # Gap call: unlimited upside for long, unlimited downside for short
+                is_call = portfolio_data["options"][j]["option_type"] == "call"
+                if is_long and is_call:
+                    unlimited_profit = True
+                elif not is_long and is_call:
+                    unlimited_loss = True
+            elif typ == "asset_or_nothing":
+                # Asset-or-nothing call pays spot → unbounded; put pays spot<strike → bounded
+                is_call = portfolio_data["options"][j]["option_type"] == "call"
+                if is_call:
+                    if is_long:
+                        unlimited_profit = True
+                    else:
+                        unlimited_loss = True
+            # Digital: bounded payout, no change needed
+
     # Build result
     result = _build_result(
         pnl_data,
@@ -312,6 +367,7 @@ def _calculate_surfaces(
     calculate_all_greeks_func,
     exotic_metadata: list = None,
     calculate_exotic_greeks_func=None,
+    dividend_yield: float = 0.0,
 ) -> tuple[dict, dict]:
     """Calculate P&L and Greeks surfaces."""
     pnl_data = {}
@@ -341,6 +397,7 @@ def _calculate_surfaces(
                 calculate_all_greeks_func,
                 exotic_metadata=exotic_metadata,
                 calculate_exotic_greeks_func=calculate_exotic_greeks_func,
+                dividend_yield=dividend_yield,
             )
 
             pnl_data[key] = pnl_values
@@ -364,24 +421,118 @@ def _calculate_for_params(
     calculate_all_greeks_func,
     exotic_metadata: list = None,
     calculate_exotic_greeks_func=None,
+    dividend_yield: float = 0.0,
 ) -> tuple[np.ndarray, dict]:
     """Calculate P&L and Greeks for a specific DTE/IV combination."""
+    from backend.engines.exotic_engine import (
+        ASSET_OR_NOTHING,
+        BARRIER,
+        CHOOSER,
+        DIGITAL,
+        GAP,
+        LOOKBACK_FIXED,
+        LOOKBACK_FLOATING,
+        POWER,
+        exotic_greeks_surface,
+    )
+    from backend.engines.exotic_engine import ASIAN_GEO
     from backend.engines.vectorized_bs import calculate_greeks_vectorized
+
+    _TYPE_MAP = {
+        "barrier": BARRIER,
+        "asian": ASIAN_GEO,
+        "digital": DIGITAL,
+        "lookback_floating": LOOKBACK_FLOATING,
+        "lookback_fixed": LOOKBACK_FIXED,
+        "chooser": CHOOSER,
+        "asset_or_nothing": ASSET_OR_NOTHING,
+        "power": POWER,
+        "gap": GAP,
+    }
 
     n = len(spot_range)
     pnl_values = np.zeros(n)
     greeks_by_name = {name: np.zeros(n) for name in GREEK_NAMES}
 
     for j in range(len(strikes)):
-        leg_greeks = calculate_greeks_vectorized(
-            spot_range,
-            strikes[j],
-            time_to_expiry,
-            risk_free_rate,
-            iv_decimal,
-            option_types[j],
-        )
+        meta = exotic_metadata[j] if exotic_metadata else None
+        is_exotic = meta and meta["instrument_class"] != "vanilla"
 
+        if is_exotic and meta["instrument_class"] in _TYPE_MAP:
+            opt_type = _TYPE_MAP[meta["instrument_class"]]
+            H = (
+                meta.get("barrier", 0.0)
+                if meta["instrument_class"] == "barrier"
+                else 0.0
+            )
+            # For lookback_floating, pass ref spot so surface tracks extremes
+            inst_cls = meta["instrument_class"]
+            ref_spot = (
+                meta.get("ref_spot", 0.0) if inst_cls == "lookback_floating" else 0.0
+            )
+            surface = exotic_greeks_surface(
+                opt_type,
+                spot_range,
+                strikes[j],
+                time_to_expiry,
+                risk_free_rate,
+                dividend_yield,
+                iv_decimal,
+                option_types[j] == 1,
+                H,
+                ref_spot,
+                ref_spot,
+                meta.get("is_knock_in", False),
+                meta.get("is_up", True),
+                meta.get("rebate", 0.0),
+                meta.get("payout", 1.0),
+                meta.get("extra1", 0.0),
+            )
+            # surface is (n, 6) — map to 14-element layout
+            leg_greeks = np.zeros((n, 14))
+            leg_greeks[:, 0] = surface[:, 0]
+            leg_greeks[:, 1] = surface[:, 1]
+            leg_greeks[:, 2] = surface[:, 2]
+            leg_greeks[:, 3] = surface[:, 3]
+            leg_greeks[:, 4] = surface[:, 4]
+            leg_greeks[:, 5] = surface[:, 5]
+        elif is_exotic:
+            # Registry-priced (Haug advanced) families: per-cell backend path,
+            # the same seam the 3D surface tab uses. Previously these fell
+            # through to the vanilla branch below — Black-Scholes prices AND
+            # Greeks silently displayed for exotic legs.
+            from .exotic_pricing_adapter import calculate_exotic_greeks_curve
+
+            leg_greeks = calculate_exotic_greeks_curve(
+                spot_range,
+                strikes[j],
+                time_to_expiry,
+                risk_free_rate,
+                iv_decimal,
+                int(option_types[j]),
+                meta["instrument_class"],
+                barrier=meta.get("barrier", 0.0),
+                is_up=meta.get("is_up", True),
+                is_knock_in=meta.get("is_knock_in", False),
+                rebate=meta.get("rebate", 0.0),
+                payout=meta.get("payout", 1.0),
+                extra1=meta.get("extra1", 0.0),
+                cap=meta.get("cap", 0.0),
+                dividend_yield=dividend_yield,
+                params=meta.get("params"),
+            )
+        else:
+            leg_greeks = calculate_greeks_vectorized(
+                spot_range,
+                strikes[j],
+                time_to_expiry,
+                risk_free_rate,
+                iv_decimal,
+                option_types[j],
+                dividend_yield,
+            )
+
+        # Guard against NaN from exotic discontinuities
         leg_greeks = np.where(np.isnan(leg_greeks), 0.0, leg_greeks)
 
         # P&L: per-leg vectorized
@@ -417,20 +568,83 @@ def _calculate_expiry_pnl(
     exotic_metadata: list = None,
     portfolio_data: dict = None,
 ) -> np.ndarray:
-    """Calculate P&L at expiration for all spot prices (vanilla legs)."""
+    """Calculate P&L at expiration for all spot prices.
+
+    Vanilla legs use the fast Numba path. Exotic legs use a Python loop
+    calling calculate_exotic_payoff_at_expiry.
+
+    A NaN cell of one discrete-event leg (its scenario is infeasible at that
+    terminal spot) poisons the WHOLE portfolio curve at that spot by design:
+    the scenario cannot occur there, so no portfolio P&L is defined — even for
+    the vanilla legs. Locked by test_scenario_pnl.py.
+    """
+    # Separate vanilla and exotic indices
+    vanilla_indices = []
+    exotic_indices = []
+    if exotic_metadata:
+        for j, meta in enumerate(exotic_metadata):
+            if meta["instrument_class"] != "vanilla":
+                exotic_indices.append(j)
+            else:
+                vanilla_indices.append(j)
+    else:
+        vanilla_indices = list(range(len(strikes)))
+
+    # Vanilla part: use fast Numba function
+    if vanilla_indices:
+        v_strikes = strikes[vanilla_indices]
+        v_option_types = option_types[vanilla_indices]
+        v_position_types = position_types[vanilla_indices]
+        v_quantities = quantities[vanilla_indices]
+        v_premiums = premiums[vanilla_indices]
+    else:
+        v_strikes = np.array([])
+        v_option_types = np.array([], dtype=np.int32)
+        v_position_types = np.array([], dtype=np.int32)
+        v_quantities = np.array([], dtype=np.int32)
+        v_premiums = np.array([])
+
     expiry_pnl = np.zeros(len(spot_range))
-    for i, spot in enumerate(spot_range):
-        if len(strikes) > 0 or stock_quantity != 0:
+
+    # Vanilla legs (Numba) — per spot.
+    if len(v_strikes) > 0 or stock_quantity != 0:
+        for i, spot in enumerate(spot_range):
             expiry_pnl[i] = calculate_pnl_at_expiry_func(
                 spot,
-                strikes,
-                option_types,
-                position_types,
-                quantities,
-                premiums,
+                v_strikes,
+                v_option_types,
+                v_position_types,
+                v_quantities,
+                v_premiums,
                 stock_quantity,
                 stock_entry_price,
             )
+
+    # Exotic legs — vectorized over the whole spot range, once per leg, instead
+    # of a scalar payoff call per (spot, leg) cell.
+    if exotic_indices and portfolio_data:
+        from config.exotic_config import PAYOFF_SCENARIOS
+
+        from .exotic_pricing_adapter import (
+            calculate_exotic_payoff_at_expiry_vec,
+            conditional_exotic_payoff_vec,
+        )
+
+        options = portfolio_data.get("options", [])
+        for j in exotic_indices:
+            opt = options[j]
+            spec = PAYOFF_SCENARIOS.get(opt.get("instrument_class"))
+            if spec and spec.get("kind") == "discrete_event":
+                scenario = opt.get("scenario") or spec["scenarios"][0][0]
+                payoff, feasible = conditional_exotic_payoff_vec(
+                    spot_range, opt, scenario
+                )
+                payoff = np.where(feasible, payoff, np.nan)
+            else:
+                payoff = calculate_exotic_payoff_at_expiry_vec(spot_range, opt)
+            premium = premiums[j]
+            sign = 1.0 if position_types[j] == 1 else -1.0  # long vs short
+            expiry_pnl += sign * (payoff - premium) * quantities[j]
 
     return expiry_pnl
 
@@ -510,7 +724,9 @@ def _breakeven_from_pnl_curve(
     """Compute breakeven points from a PnL curve via sign-change interpolation."""
     from .pricing_adapter import BreakevenResult
 
-    # Find sign changes (breakeven crossings)
+    # Find sign changes (breakeven crossings). NaN cells (infeasible regions of
+    # a scenario-conditional payoff) make the product NaN, so ``< 0`` is False
+    # and no spurious crossing is reported across an infeasible gap.
     breakeven_points = []
     for i in range(len(expiry_pnl) - 1):
         if expiry_pnl[i] * expiry_pnl[i + 1] < 0:
@@ -519,16 +735,71 @@ def _breakeven_from_pnl_curve(
             bp = spot_range[i] + frac * (spot_range[i + 1] - spot_range[i])
             breakeven_points.append(float(bp))
 
-    # Max profit / loss from the PnL curve
-    max_profit_idx = int(np.argmax(expiry_pnl))
-    max_loss_idx = int(np.argmin(expiry_pnl))
+    # Max profit / loss over the FEASIBLE (non-NaN) cells; a scenario-conditional
+    # curve is NaN where the scenario cannot occur. argmax/argmin are not
+    # NaN-aware, so use the nan-variants and guard the all-NaN case.
+    finite = np.isfinite(expiry_pnl)
+    if finite.any():
+        max_profit_idx = int(np.nanargmax(expiry_pnl))
+        max_loss_idx = int(np.nanargmin(expiry_pnl))
+        max_profit = float(expiry_pnl[max_profit_idx])
+        max_profit_spot = float(spot_range[max_profit_idx])
+        max_loss = float(expiry_pnl[max_loss_idx])
+        max_loss_spot = float(spot_range[max_loss_idx])
+    else:
+        max_profit = max_loss = 0.0
+        max_profit_spot = max_loss_spot = (
+            float(spot_range[0]) if len(spot_range) else 0.0
+        )
 
     return BreakevenResult(
         breakeven_points=breakeven_points,
-        max_profit=float(expiry_pnl[max_profit_idx]),
-        max_profit_spot=float(spot_range[max_profit_idx]),
-        max_loss=float(expiry_pnl[max_loss_idx]),
-        max_loss_spot=float(spot_range[max_loss_idx]),
+        max_profit=max_profit,
+        max_profit_spot=max_profit_spot,
+        max_loss=max_loss,
+        max_loss_spot=max_loss_spot,
+    )
+
+
+def combine_scenario_metrics(
+    curves: list[np.ndarray], spot_range: np.ndarray
+) -> "BreakevenResult | None":
+    """Metrics of an overlaid discrete-event chart: union of its outcome curves.
+
+    Each curve is one conditional outcome, NaN-masked to its feasible region.
+    Max profit / loss are taken across the feasible cells of ALL curves, and
+    the breakeven points are the union of the per-curve crossings (deduplicated
+    within half a grid step — the two outcomes share the pre-event region, so
+    their crossings there coincide). Returns None if every curve is fully
+    infeasible.
+    """
+    from .pricing_adapter import BreakevenResult
+
+    spot = np.asarray(spot_range, dtype=np.float64)
+    per_curve = [
+        _breakeven_from_pnl_curve(arr, spot)
+        for arr in (np.asarray(c, dtype=np.float64) for c in curves)
+        if np.isfinite(arr).any()
+    ]
+    if not per_curve:
+        return None
+
+    step = (float(spot[-1]) - float(spot[0])) / max(len(spot) - 1, 1)
+    breakevens: list[float] = []
+    for res in per_curve:
+        for point in res.breakeven_points:
+            if not any(abs(point - seen) <= step / 2.0 for seen in breakevens):
+                breakevens.append(point)
+    breakevens.sort()
+
+    best = max(per_curve, key=lambda r: r.max_profit)
+    worst = min(per_curve, key=lambda r: r.max_loss)
+    return BreakevenResult(
+        breakeven_points=breakevens,
+        max_profit=best.max_profit,
+        max_profit_spot=best.max_profit_spot,
+        max_loss=worst.max_loss,
+        max_loss_spot=worst.max_loss_spot,
     )
 
 
@@ -636,6 +907,7 @@ def calculate_strike_surfaces(
     _calculate_all_greeks_func,
     _calculate_pnl_at_expiry_func,
     _find_breakeven_func=None,
+    dividend_yield: float = 0.0,
 ) -> tuple[dict, dict, dict]:
     """
     Calculate P&L and Greeks data for varying strike prices (single-leg only).
@@ -684,12 +956,19 @@ def calculate_strike_surfaces(
             risk_free_rate,
             fixed_iv,
             option_type_int,
+            dividend_yield,
         )
         premium = initial_greeks[0]
 
         for i, spot in enumerate(spot_range_arr):
             greeks = _calculate_all_greeks_func(
-                spot, strike, time_to_expiry, risk_free_rate, fixed_iv, option_type_int
+                spot,
+                strike,
+                time_to_expiry,
+                risk_free_rate,
+                fixed_iv,
+                option_type_int,
+                dividend_yield,
             )
 
             option_value = greeks[0]
@@ -776,6 +1055,7 @@ def calculate_individual_leg_greeks(
     risk_free_rate: float,
     _calculate_all_greeks_func,
     _calculate_exotic_greeks_func=None,
+    dividend_yield: float = 0.0,
 ) -> dict:
     """
     Calculate Greeks for each individual leg of a multi-leg portfolio.
@@ -829,6 +1109,7 @@ def calculate_individual_leg_greeks(
                         rebate=pos.get("rebate", 0.0),
                         payout=pos.get("payout", 1.0),
                         extra1=pos.get("extra1", 0.0),
+                        dividend_yield=dividend_yield,
                     )
                 else:
                     greeks = _calculate_all_greeks_func(
@@ -838,6 +1119,7 @@ def calculate_individual_leg_greeks(
                         risk_free_rate,
                         iv_decimal,
                         option_type,
+                        dividend_yield,
                     )
 
                 for k, name in enumerate(GREEK_NAMES):
@@ -883,6 +1165,7 @@ def calculate_all_individual_leg_greeks(
     risk_free_rate: float,
     _calculate_all_greeks_func,
     _calculate_exotic_greeks_func=None,
+    dividend_yield: float = 0.0,
 ) -> dict:
     """
     Calculate Greeks for each individual leg for all DTE/IV combinations.
@@ -1012,6 +1295,7 @@ def calculate_all_individual_leg_greeks(
                                 rebate=meta.get("rebate", 0.0),
                                 payout=meta.get("payout", 1.0),
                                 extra1=meta.get("extra1", 0.0),
+                                dividend_yield=dividend_yield,
                             )
                         else:
                             greeks = _calculate_all_greeks_func(
@@ -1021,6 +1305,7 @@ def calculate_all_individual_leg_greeks(
                                 risk_free_rate,
                                 iv_decimal,
                                 meta["option_type_int"],
+                                dividend_yield,
                             )
 
                         for k, name in enumerate(GREEK_NAMES):

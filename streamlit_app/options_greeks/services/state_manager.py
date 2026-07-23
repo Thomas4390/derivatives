@@ -25,6 +25,22 @@ Position dict formats:
 """
 
 import streamlit as st
+from config.constants import (
+    DEFAULT_DIVIDEND_YIELD,
+    DEFAULT_RISK_FREE_RATE,
+    DEFAULT_SPOT_PRICE,
+)
+
+# Widget-state keys for the restorable market inputs (sidebar_market reads/writes
+# these via ``key=``; a restored setup writes them before the widgets render).
+MARKET_SPOT_KEY = "og_market_spot"
+MARKET_RATE_KEY = "og_market_rate"
+MARKET_Q_KEY = "og_market_q"
+
+# Slot that queues a decoded snapshot to be applied at the top of the next run,
+# before the market widgets instantiate (Streamlit forbids mutating a widget's
+# value after it has rendered in the same run).
+_PENDING_SNAPSHOT_KEY = "_og_pending_snapshot"
 
 
 def init_session_state() -> None:
@@ -41,6 +57,10 @@ def init_session_state() -> None:
     for key in ("sp_config", "sp_result", "sp_greeks", "sp_product_type"):
         if key not in st.session_state:
             st.session_state[key] = None
+
+    st.session_state.setdefault(MARKET_SPOT_KEY, DEFAULT_SPOT_PRICE)
+    st.session_state.setdefault(MARKET_RATE_KEY, DEFAULT_RISK_FREE_RATE)
+    st.session_state.setdefault(MARKET_Q_KEY, DEFAULT_DIVIDEND_YIELD)
 
 
 def get_positions() -> list[dict]:
@@ -158,6 +178,36 @@ def set_positions_from_strategy(
     """
     st.session_state.positions = positions
     st.session_state.stock_position = stock_position
+
+
+# =============================================================================
+# Snapshot restore (save / load a previous-session setup)
+# =============================================================================
+
+
+def request_snapshot_restore(snapshot) -> None:
+    """Queue a decoded snapshot to be applied at the very top of the next run.
+
+    The actual state mutation happens in :func:`consume_pending_snapshot` (called
+    before the market widgets render), because Streamlit forbids changing a
+    widget's value after it has been instantiated in the current run.
+    """
+    st.session_state[_PENDING_SNAPSHOT_KEY] = snapshot
+
+
+def consume_pending_snapshot() -> bool:
+    """Apply a queued snapshot to session state. Call early, before the sidebar.
+
+    Returns ``True`` if a snapshot was applied (the caller may show a confirmation).
+    """
+    snapshot = st.session_state.pop(_PENDING_SNAPSHOT_KEY, None)
+    if snapshot is None:
+        return False
+    st.session_state[MARKET_SPOT_KEY] = float(snapshot.market["spot"])
+    st.session_state[MARKET_RATE_KEY] = float(snapshot.market["rate"])
+    st.session_state[MARKET_Q_KEY] = float(snapshot.market["dividend_yield"])
+    set_positions_from_strategy(list(snapshot.positions), snapshot.stock)
+    return True
 
 
 # =============================================================================

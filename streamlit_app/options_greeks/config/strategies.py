@@ -38,13 +38,21 @@ AVAILABLE_STRATEGIES = [
     "digital_call",
     "digital_put",
     "digital_range_bet",
-    "asian_call",
-    "lookback_fixed_call",
     "chooser",
     "asset_or_nothing_call",
     "asset_or_nothing_put",
     "power_call",
     "gap_call",
+    # Haug exotic presets
+    "powered_call",
+    "capped_power_call",
+    "log_contract",
+    "log_option",
+    "supershare",
+    "double_barrier_call",
+    "discrete_barrier_call",
+    "partial_barrier_call",
+    "binary_barrier_call",
 ]
 
 # =============================================================================
@@ -80,13 +88,21 @@ STRATEGY_DISPLAY_NAMES = {
     "digital_call": "Digital Call",
     "digital_put": "Digital Put",
     "digital_range_bet": "Digital Range Bet",
-    "asian_call": "Asian Call (Geometric)",
-    "lookback_fixed_call": "Lookback Call (Fixed Strike)",
     "chooser": "Chooser Option",
     "asset_or_nothing_call": "Asset-or-Nothing Call",
     "asset_or_nothing_put": "Asset-or-Nothing Put",
     "power_call": "Power Call (n=2)",
     "gap_call": "Gap Call",
+    # Haug exotic presets
+    "powered_call": "Powered Call (Esser)",
+    "capped_power_call": "Capped Power Call (Esser)",
+    "log_contract": "Log Contract (Neuberger)",
+    "log_option": "Log Option (Wilmott)",
+    "supershare": "Supershare (Hakansson)",
+    "double_barrier_call": "Double Barrier Call (Ikeda-Kunitomo)",
+    "discrete_barrier_call": "Discrete Barrier Call (BGK)",
+    "partial_barrier_call": "Partial-Time Barrier Call (Heynen-Kat)",
+    "binary_barrier_call": "Binary Barrier (Reiner-Rubinstein)",
 }
 
 # =============================================================================
@@ -123,15 +139,22 @@ STRATEGY_DESCRIPTIONS: dict[str, str] = {
     "digital_call": "Binary payoff: pays a fixed amount if stock > strike at expiry, else zero.",
     "digital_put": "Binary payoff: pays a fixed amount if stock < strike at expiry, else zero.",
     "digital_range_bet": "Pays if stock finishes between two strikes. Built from two digital calls.",
-    # Exotic -- Path-dependent
-    "asian_call": "Payoff based on geometric average price. Cheaper than vanilla (averaging reduces vol).",
-    "lookback_fixed_call": "Payoff based on the maximum price observed vs fixed strike.",
     # Exotic -- Other
     "chooser": "Choose call or put at time t_c. Price >= max(call, put). Decomposes via put-call parity.",
     "asset_or_nothing_call": "Pays the asset price S if S > K at expiry, else zero.",
     "asset_or_nothing_put": "Pays the asset price S if S < K at expiry, else zero.",
     "power_call": "Payoff on S^n instead of S. n=2 gives quadratic payoff. Adjusted vol = n * sigma.",
     "gap_call": "Two strikes: K1 (payment) and K2 (trigger). Pays (S-K1) if S > K2.",
+    # Haug exotic presets
+    "powered_call": "Esser powered payoff max(S-K, 0)^i. Convex, leverages deep-ITM moves.",
+    "capped_power_call": "Esser power payoff min(max(S^i - K, 0), cap). Capped upside.",
+    "log_contract": "Neuberger log contract: pays ln(S/K). Variance-swap building block.",
+    "log_option": "Wilmott log option: pays max(ln(S/K), 0).",
+    "supershare": "Hakansson supershare: pays S/X_L if X_L < S < X_H at expiry.",
+    "double_barrier_call": "Ikeda-Kunitomo corridor: knocks out if the path leaves [L, U].",
+    "discrete_barrier_call": "Barrier monitored at discrete dates only (BGK).",
+    "partial_barrier_call": "Heynen-Kat: barrier live only over a partial window.",
+    "binary_barrier_call": "Reiner-Rubinstein binary barrier: cash/asset gated by a path hit.",
     # Structured Products
     "sp_cpn": "Capital Protected Note: bond floor guarantees capital at maturity, upside via participation in the underlying with optional cap.",
     "sp_reverse_convertible": "Reverse Convertible: high coupon in exchange for downside risk — if underlying breaches barrier, investor receives shares instead of notional.",
@@ -472,26 +495,6 @@ STRATEGY_LEGS = {
             "payout": 1.0,
         },
     ],
-    # Asian Call (Geometric): payoff based on geometric average price
-    "asian_call": [
-        {
-            "option_type": "call",
-            "position_type": "long",
-            "strike_factor": 1.0,
-            "quantity": 1,
-            "instrument_class": "asian",
-        }
-    ],
-    # Lookback Fixed Call: payoff based on max price vs fixed strike
-    "lookback_fixed_call": [
-        {
-            "option_type": "call",
-            "position_type": "long",
-            "strike_factor": 1.0,
-            "quantity": 1,
-            "instrument_class": "lookback_fixed",
-        }
-    ],
     # Chooser: holder chooses call or put at choice time
     "chooser": [
         {
@@ -543,6 +546,102 @@ STRATEGY_LEGS = {
             "quantity": 1,
             "instrument_class": "gap",
             "gap_trigger_factor": 1.05,
+        }
+    ],
+    # ==========================================================================
+    # HAUG EXOTIC PRESETS (Esser / Neuberger / Wilmott / Hakansson / BGK / etc.)
+    # ==========================================================================
+    # Powered Call (Esser): payoff = max(S - K, 0)^n
+    "powered_call": [
+        {
+            "option_type": "call",
+            "position_type": "long",
+            "strike_factor": 1.0,
+            "quantity": 1,
+            "instrument_class": "powered",
+            "power_n": 2,
+        }
+    ],
+    # Capped Power Call (Esser): payoff = min(max(S^n - K, 0), cap)
+    "capped_power_call": [
+        {
+            "option_type": "call",
+            "position_type": "long",
+            "strike_factor": 1.0,
+            "quantity": 1,
+            "instrument_class": "capped_power",
+            "power_n": 2.0,
+            "cap": 50.0,
+        }
+    ],
+    # Log Contract (Neuberger): pays ln(S/K) — variance-swap building block
+    "log_contract": [
+        {
+            "option_type": "call",
+            "position_type": "long",
+            "strike_factor": 1.0,
+            "quantity": 1,
+            "instrument_class": "log_contract",
+        }
+    ],
+    # Log Option (Wilmott): pays max(ln(S/K), 0)
+    "log_option": [
+        {
+            "option_type": "call",
+            "position_type": "long",
+            "strike_factor": 1.0,
+            "quantity": 1,
+            "instrument_class": "log_option",
+        }
+    ],
+    # Supershare (Hakansson): pays S/X_L if X_L < S < X_H at expiry
+    "supershare": [
+        {
+            "option_type": "call",
+            "position_type": "long",
+            "strike_factor": 1.0,
+            "quantity": 1,
+            "instrument_class": "supershare",
+        }
+    ],
+    # Double Barrier Call (Ikeda-Kunitomo): knocks out if path leaves [L, U]
+    "double_barrier_call": [
+        {
+            "option_type": "call",
+            "position_type": "long",
+            "strike_factor": 1.0,
+            "quantity": 1,
+            "instrument_class": "double_barrier",
+        }
+    ],
+    # Discrete Barrier Call (BGK): barrier monitored at discrete dates only
+    "discrete_barrier_call": [
+        {
+            "option_type": "call",
+            "position_type": "long",
+            "strike_factor": 1.0,
+            "quantity": 1,
+            "instrument_class": "discrete_barrier",
+        }
+    ],
+    # Partial-Time Barrier Call (Heynen-Kat): barrier live only over a partial window
+    "partial_barrier_call": [
+        {
+            "option_type": "call",
+            "position_type": "long",
+            "strike_factor": 1.0,
+            "quantity": 1,
+            "instrument_class": "partial_barrier",
+        }
+    ],
+    # Binary Barrier (Reiner-Rubinstein): cash/asset gated by a path hit
+    "binary_barrier_call": [
+        {
+            "option_type": "call",
+            "position_type": "long",
+            "strike_factor": 1.0,
+            "quantity": 1,
+            "instrument_class": "binary_barrier",
         }
     ],
 }

@@ -49,13 +49,14 @@ def reshape_residuals_to_grid(
     """Project a flat residual vector onto a (n_T, n_K) grid.
 
     Each quote is matched to its (maturity, strike) cell in the grid.
-    Cells without a matching quote are filled with NaN. Runs serially —
-    parallel writes via prange would race on the (i_T, i_K) cell when two
-    quotes hash to the same grid index, and the loop is microsecond-scale
-    anyway (gain from parallelism would be lost to JIT thread overhead).
+    ``grid_strikes`` is 2D ``(n_T, n_K)`` — strikes are per-maturity on the adaptive
+    moneyness grid (real data tiles one shared row), so the strike match is taken
+    *within* the matched maturity row. Cells without a matching quote stay NaN. Runs
+    serially — parallel writes via prange would race on the (i_T, i_K) cell when two
+    quotes hash to the same grid index, and the loop is microsecond-scale anyway.
     """
     n_T = grid_maturities.shape[0]
-    n_K = grid_strikes.shape[0]
+    n_K = grid_strikes.shape[1]
     out = np.full((n_T, n_K), np.nan, dtype=np.float64)
     for q in range(residuals.shape[0]):
         # closest grid index — quotes were generated on the same grid
@@ -72,7 +73,7 @@ def reshape_residuals_to_grid(
                 best_dT = d
                 i_T = i
         for j in range(n_K):
-            d = abs(grid_strikes[j] - K)
+            d = abs(grid_strikes[i_T, j] - K)
             if d < best_dK:
                 best_dK = d
                 i_K = j

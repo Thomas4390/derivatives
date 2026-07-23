@@ -2,8 +2,8 @@
 Structured Products Pricing Adapter.
 
 Bridge between Streamlit UI and the backend StructuredProductMCEngine.
-Provides factory functions plus cached wrappers for Streamlit session
-management.
+Follows the same pattern as exotic_pricing_adapter.py: factory functions
++ cached wrappers for Streamlit session management.
 
 Surface calculation:
   - Computes MC on a reduced grid (SP_DTE_RANGE × SP_IV_RANGE × SP_SPOT_RANGE_POINTS)
@@ -31,6 +31,7 @@ from backend.models.heston import HestonModel
 from backend.models.vol_bump import create_vol_bumped_pair
 from backend.utils.constants.monte_carlo import DEFAULT_SPOT_BUMP, DEFAULT_VOL_BUMP
 from backend.utils.constants.time import CALENDAR_DAYS_PER_YEAR
+from backend.utils.logging import get_logger
 
 from config.constants import (
     DEFAULT_SCENARIO_PATHS,
@@ -39,6 +40,8 @@ from config.constants import (
     SP_IV_RANGE,
     SP_SURFACE_PATHS,
 )
+
+logger = get_logger(__name__)
 
 
 # =============================================================================
@@ -500,6 +503,9 @@ def _prepare_theta_product(
         theta_params = _adjust_frequency_for_maturity(theta_params)
         return build_product(product_type, theta_params)
     except ValueError:
+        logger.debug(
+            "theta product build failed for %s (maturity bump)", product_type, exc_info=True
+        )
         return None
 
 

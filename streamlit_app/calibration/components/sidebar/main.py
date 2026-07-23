@@ -17,6 +17,7 @@ from components.sidebar import (
     family_picker,
     model_picker,
     objective_panel,
+    search_space,
     solver_panel,
     synthetic_config,
     true_params,
@@ -30,7 +31,8 @@ def _render_run_button(blocking_error: str | None) -> bool:
         "▶  Run calibration",
         width="stretch",
         type="primary",
-        help=blocking_error or "Run every selected solver on every candidate model and stream live progress.",
+        help=blocking_error
+        or "Run every selected solver on every candidate model and stream live progress.",
         disabled=blocking_error is not None,
     )
 
@@ -52,6 +54,11 @@ def render_sidebar() -> dict[str, Any]:
             generator_model = None
             params = {}
             data_config = {"_mode": "real", **data_src["real_cfg"]}
+            # Real-data mode skips the true-params panel, so nothing here clears a
+            # stationarity block left by a previous synthetic GARCH generator —
+            # reset it so the Run button can't stay disabled by a stale error
+            # after switching to real data.
+            state_manager.set("calib_blocking_error", None)
         st.markdown("---")
 
         candidate_models = model_picker.render_candidates(family)
@@ -64,6 +71,11 @@ def render_sidebar() -> dict[str, Any]:
         st.markdown("---")
 
         constraint_settings = constraints_panel.render(candidate_models)
+        st.markdown("---")
+
+        search_bounds = search_space.render(
+            candidate_models, params, data_src["source"], generator_model
+        )
         st.markdown("---")
 
         # true_params.render has already populated calib_blocking_error for
@@ -84,6 +96,7 @@ def render_sidebar() -> dict[str, Any]:
         "objectives": objectives,
         "objective_settings": objective_settings,
         "constraint_settings": constraint_settings,
+        "search_bounds": search_bounds,
         "run_clicked": run_clicked,
         "blocking_error": blocking_error,
     }

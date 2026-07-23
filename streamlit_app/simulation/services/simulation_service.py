@@ -16,6 +16,8 @@ from backend.simulation.base import SimulationResult
 
 # Backend imports
 from backend.simulation.factory import create_simulator
+from config.model_registry import get_all_models
+from services import model_adapter
 
 
 def get_spot(sim_params: dict[str, Any]) -> float:
@@ -24,75 +26,14 @@ def get_spot(sim_params: dict[str, Any]) -> float:
 
 
 def _extract_model_params(model: str, params: dict[str, Any]) -> dict[str, Any]:
-    """Extract model-specific parameters from unified params dict."""
-    model_lower = model.lower()
+    """Extract model-specific parameters from the unified params dict.
 
-    if model_lower == "gbm":
-        result = {"sigma": params.get("sigma", 0.20)}
-        if params.get("n_paths", 10000) < 2:
-            result["antithetic"] = False
-        return result
-
-    if model_lower == "heston":
-        return {
-            "v0": params.get("v0", 0.04),
-            "kappa": params.get("kappa", 2.0),
-            "theta": params.get("theta", 0.04),
-            "alpha": params.get("alpha", 0.3),
-            "rho": params.get("rho", -0.7),
-        }
-
-    if model_lower == "merton":
-        return {
-            "sigma": params.get("sigma", 0.20),
-            "lam": params.get("lam", 0.5),
-            "alpha_j": params.get("alpha_j", -0.1),
-            "sigma_j": params.get("sigma_j", 0.2),
-        }
-
-    if model_lower == "bates":
-        return {
-            "v0": params.get("v0", 0.04),
-            "kappa": params.get("kappa", 2.0),
-            "theta": params.get("theta", 0.04),
-            "alpha": params.get("alpha", 0.3),
-            "rho": params.get("rho", -0.7),
-            "lam": params.get("lam", 0.5),
-            "alpha_j": params.get("alpha_j", -0.1),
-            "sigma_j": params.get("sigma_j", 0.2),
-        }
-
-    if model_lower == "garch":
-        return {
-            "sigma0": params.get("sigma0", 0.20),
-            "omega": params.get("omega", 0.002),
-            "alpha": params.get("alpha", 0.06),
-            "beta": params.get("beta", 0.90),
-        }
-
-    if model_lower == "ngarch":
-        return {
-            "sigma0": params.get("sigma0", 0.20),
-            "omega": params.get("omega", 0.002),
-            "alpha": params.get("alpha", 0.06),
-            "beta": params.get("beta", 0.90),
-            "gamma": params.get("gamma_ngarch", params.get("gamma", 0.5)),
-        }
-
-    if model_lower == "gjr_garch":
-        return {
-            "sigma0": params.get("sigma0", 0.20),
-            "omega": params.get("omega", 0.002),
-            "alpha": params.get("alpha", 0.06),
-            "beta": params.get("beta", 0.90),
-            "gamma": params.get("gamma", 0.03),
-        }
-
-    # Custom model: extract params from PARAMETER_SPECS
-    from services.custom_model_service import (
-        get_custom_model_class,
-        is_custom_model,
-    )
+    Delegates the 7 registered models to the registry-backed
+    :mod:`services.model_adapter` (single source of parameter names/defaults).
+    Only the dynamic custom-model path and the GBM antithetic guard (disable
+    antithetic sampling below 2 paths) remain here.
+    """
+    from services.custom_model_service import get_custom_model_class, is_custom_model
 
     if is_custom_model(model):
         cls = get_custom_model_class()
@@ -101,7 +42,11 @@ def _extract_model_params(model: str, params: dict[str, Any]) -> dict[str, Any]:
                 s["name"]: params.get(s["name"], s["default"])
                 for s in cls.PARAMETER_SPECS
             }
-    raise ValueError(f"Unknown model: {model}")
+
+    result = model_adapter.extract_params(model, params)
+    if model.lower() == "gbm" and params.get("n_paths", 10000) < 2:
+        result["antithetic"] = False
+    return result
 
 
 def run_simulation(
@@ -122,6 +67,9 @@ def run_simulation(
     # Extract parameters
     spot = params.get("spot", 100.0)
     drift = params.get("drift", 0.08)
+    dividend_yield = params.get("dividend_yield", 0.0)
+    # Dividends lower the price drift: the asset appreciates at (μ − q).
+    effective_drift = drift - dividend_yield
     time_horizon = params.get("time_horizon", 1.0)
     n_paths = int(params.get("n_paths", 10000))
     n_steps = int(params.get("n_steps", 252))
@@ -148,7 +96,12 @@ def run_simulation(
 
     # Run simulation
     result = simulator.simulate_paths(
-        s0=spot, mu=drift, t=time_horizon, n_paths=n_paths, n_steps=n_steps, seed=seed
+        s0=spot,
+        mu=effective_drift,
+        t=time_horizon,
+        n_paths=n_paths,
+        n_steps=n_steps,
+        seed=seed,
     )
 
     if return_simulator:
@@ -170,6 +123,9 @@ def run_terminal_simulation(model: str, params: dict[str, Any]) -> np.ndarray:
     # Extract parameters
     spot = params.get("spot", 100.0)
     drift = params.get("drift", 0.08)
+    dividend_yield = params.get("dividend_yield", 0.0)
+    # Dividends lower the price drift: the asset appreciates at (μ − q).
+    effective_drift = drift - dividend_yield
     time_horizon = params.get("time_horizon", 1.0)
     n_paths = int(params.get("n_paths", 10000))
     n_steps = int(params.get("n_steps", 252))
@@ -192,7 +148,12 @@ def run_terminal_simulation(model: str, params: dict[str, Any]) -> np.ndarray:
         simulator = create_simulator(model, **model_params)
 
     return simulator.simulate_terminal(
-        s0=spot, mu=drift, t=time_horizon, n_paths=n_paths, n_steps=n_steps, seed=seed
+        s0=spot,
+        mu=effective_drift,
+        t=time_horizon,
+        n_paths=n_paths,
+        n_steps=n_steps,
+        seed=seed,
     )
 
 
@@ -426,20 +387,12 @@ def compute_long_run_volatility(model: str, params: dict[str, Any]) -> float | N
 
 
 def get_initial_volatility(model: str, params: dict[str, Any]) -> float:
-    """Get initial volatility for a model."""
-    model_lower = model.lower()
+    """Representative initial volatility for a model.
 
-    if model_lower in ["gbm", "merton"]:
-        return params.get("sigma", 0.20)
-
-    if model_lower in ["heston", "bates"]:
-        v0 = params.get("v0", 0.04)
-        return np.sqrt(v0)
-
-    if model_lower in ["garch", "ngarch", "gjr_garch"]:
-        return params.get("sigma0", 0.20)
-
-    # Custom model: try to read first vol-like param
+    The 7 registered models delegate to the registry-backed
+    :mod:`services.model_adapter`; the dynamic custom-model heuristic (first
+    vol-like parameter, √ when the value looks like a variance) is preserved here.
+    """
     from services.custom_model_service import get_custom_model_class, is_custom_model
 
     if is_custom_model(model):
@@ -450,19 +403,13 @@ def get_initial_volatility(model: str, params: dict[str, Any]) -> float:
                 if "sigma" in name or "vol" in name or "v0" in name:
                     val = params.get(s["name"], s["default"])
                     return val if val < 1.0 else np.sqrt(val)
-    return 0.20
+        return 0.20
+    return model_adapter.initial_volatility(model, params)
 
 
-# Convenience mapping for model display
-MODEL_NAMES = {
-    "gbm": "Geometric Brownian Motion",
-    "heston": "Heston Stochastic Volatility",
-    "merton": "Merton Jump-Diffusion",
-    "bates": "Bates (Heston + Jumps)",
-    "garch": "GARCH(1,1)",
-    "ngarch": "NGARCH (Nonlinear)",
-    "gjr_garch": "GJR-GARCH (Threshold)",
-}
+# Convenience mapping for model display — derived from the registry (single
+# source of truth) rather than hand-maintained.
+MODEL_NAMES = {key: spec.name for key, spec in get_all_models().items()}
 
 
 def get_model_display_name(key: str) -> str:

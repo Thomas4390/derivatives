@@ -63,9 +63,11 @@ def render(ctx: dict) -> None:
     feller_mode = constraints.get("feller_mode")
     stationarity_mode = constraints.get("stationarity_mode")
 
-    has_results = bool(state_manager.get("calib_results") or {})
-
-    surface_candidates = tuple(c for c in candidates if c in SURFACE_FAMILY)
+    # The registered custom model is a surface candidate too, but lives
+    # outside the static SURFACE_FAMILY tuple.
+    surface_candidates = tuple(
+        c for c in candidates if c in SURFACE_FAMILY or c == "custom"
+    )
     show_objectives_tab = mode == "surface" and any(
         c not in ("iv_gbm",) for c in surface_candidates
     )
@@ -78,7 +80,7 @@ def render(ctx: dict) -> None:
 
     with st.expander(
         "📐 Equations for the current selection",
-        expanded=not has_results,
+        expanded=False,
     ):
         st.caption(
             "Live reference for whatever you've picked in the sidebar. "

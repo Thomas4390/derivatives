@@ -259,9 +259,11 @@ def compute_risk_metrics_core(pnl: np.ndarray) -> tuple[float, ...]:
     var_95 = sorted_pnl[var_95_idx]
     var_99 = sorted_pnl[var_99_idx]
 
-    # CVaR (Expected Shortfall) - mean of worst cases
-    cvar_95 = np.mean(sorted_pnl[: var_95_idx + 1]) if var_95_idx > 0 else sorted_pnl[0]
-    cvar_99 = np.mean(sorted_pnl[: var_99_idx + 1]) if var_99_idx > 0 else sorted_pnl[0]
+    # CVaR (Expected Shortfall): mean of the worst alpha% strictly beyond VaR.
+    # Excludes the VaR boundary point (index var_*_idx) — including it biased ES
+    # toward VaR (made it less conservative).
+    cvar_95 = np.mean(sorted_pnl[:var_95_idx]) if var_95_idx > 0 else sorted_pnl[0]
+    cvar_99 = np.mean(sorted_pnl[:var_99_idx]) if var_99_idx > 0 else sorted_pnl[0]
 
     # Probability of profit
     n_profit = 0

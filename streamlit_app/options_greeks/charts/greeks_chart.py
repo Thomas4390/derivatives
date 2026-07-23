@@ -17,6 +17,8 @@ from config.chart_theme import (
 from config.constants import (
     DTE_RANGE,
     FIRST_ORDER,
+    GREEK_AVAILABILITY,
+    GREEK_NAMES,
     GREEK_TITLES,
     IV_RANGE,
     SECOND_ORDER,
@@ -24,6 +26,27 @@ from config.constants import (
     THIRD_ORDER,
 )
 from plotly.subplots import make_subplots
+
+_ALL_GREEKS = frozenset(GREEK_NAMES)
+
+
+def _portfolio_greek_availability(positions) -> frozenset:
+    """Greeks defined for EVERY option leg in the portfolio (intersection).
+
+    Vanilla legs expose the full analytic Greek set; exotic legs expose only the
+    Greeks in ``GREEK_AVAILABILITY[instrument_class]`` (first-order on the
+    aggregate spot-axis surface). Unknown classes default to the full set so
+    only the families we know to be first-order-only trigger suppression. The
+    higher-order Greeks tabs use this to hide Greeks that would otherwise be
+    drawn as misleading flat-zero curves for exotic legs.
+    """
+    avail = _ALL_GREEKS
+    for pos in positions or []:
+        inst_class = pos.get("instrument_class", "vanilla")
+        if inst_class == "vanilla":
+            continue
+        avail = avail & GREEK_AVAILABILITY.get(inst_class, _ALL_GREEKS)
+    return avail
 
 # Colors for individual legs (distinct from aggregate)
 LEG_COLORS = [
@@ -514,6 +537,7 @@ def render_greeks_tab(
     sp_mode: bool = False,
     dte_range=None,
     iv_range=None,
+    dividend_yield: float = 0.0,
 ) -> None:
     """
     Render a complete Greeks tab.
@@ -612,6 +636,7 @@ def render_greeks_tab(
                 risk_free_rate=risk_free_rate,
                 _calculate_all_greeks_func=calculate_all_greeks_func,
                 _calculate_exotic_greeks_func=calculate_exotic_greeks_func,
+                dividend_yield=dividend_yield,
             )
 
     # Handle Strike variation for single-leg
@@ -640,6 +665,7 @@ def render_greeks_tab(
             risk_free_rate=risk_free_rate,
             _calculate_all_greeks_func=calculate_all_greeks_func,
             _calculate_pnl_at_expiry_func=calculate_pnl_at_expiry_func,
+            dividend_yield=dividend_yield,
         )
 
         fig, slider_dict = create_greeks_subplot_strike(
@@ -722,6 +748,11 @@ def render_greeks_tab(
             "color": "#1e293b",
         }
 
+    if not sp_mode and positions:
+        from charts._exotic_annotations import add_barrier_markers
+
+        add_barrier_markers(fig, positions)
+
     st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
 
 
@@ -739,6 +770,7 @@ def render_first_order_greeks(
     sp_mode: bool = False,
     dte_range=None,
     iv_range=None,
+    dividend_yield: float = 0.0,
 ) -> None:
     """Render the first-order Greeks tab."""
     render_greeks_tab(
@@ -760,6 +792,7 @@ def render_first_order_greeks(
         sp_mode=sp_mode,
         dte_range=dte_range,
         iv_range=iv_range,
+        dividend_yield=dividend_yield,
     )
 
 
@@ -778,13 +811,18 @@ def render_second_order_greeks(
     sp_mode: bool = False,
     dte_range=None,
     iv_range=None,
+    dividend_yield: float = 0.0,
 ) -> None:
     """Render the second-order Greeks tab."""
-    if has_exotic_legs:
+    if not set(SECOND_ORDER) <= _portfolio_greek_availability(positions):
         st.info(
-            "Higher-order Greeks for exotic legs are computed via numerical finite differences and may be less precise than the analytic vanilla Greeks.",
+            "Second-order Greeks (vanna, volga, charm, veta) are not defined "
+            "for the exotic legs in this position, so they are hidden here "
+            "rather than drawn as flat zeros. First-order Greeks remain "
+            "available in the Greeks tab.",
             icon="ℹ️",
         )
+        return
     render_greeks_tab(
         greeks_list=SECOND_ORDER,
         greeks_data=greeks_data,
@@ -804,6 +842,7 @@ def render_second_order_greeks(
         sp_mode=sp_mode,
         dte_range=dte_range,
         iv_range=iv_range,
+        dividend_yield=dividend_yield,
     )
 
 
@@ -822,13 +861,18 @@ def render_third_order_greeks(
     sp_mode: bool = False,
     dte_range=None,
     iv_range=None,
+    dividend_yield: float = 0.0,
 ) -> None:
     """Render the third-order Greeks tab."""
-    if has_exotic_legs:
+    if not set(THIRD_ORDER) <= _portfolio_greek_availability(positions):
         st.info(
-            "Higher-order Greeks for exotic legs are computed via numerical finite differences and may be less precise than the analytic vanilla Greeks.",
+            "Third-order Greeks (speed, zomma, color, ultima) are not defined "
+            "for the exotic legs in this position, so they are hidden here "
+            "rather than drawn as flat zeros. First-order Greeks remain "
+            "available in the Greeks tab.",
             icon="ℹ️",
         )
+        return
     render_greeks_tab(
         greeks_list=THIRD_ORDER,
         greeks_data=greeks_data,
@@ -848,4 +892,5 @@ def render_third_order_greeks(
         sp_mode=sp_mode,
         dte_range=dte_range,
         iv_range=iv_range,
+        dividend_yield=dividend_yield,
     )

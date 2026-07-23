@@ -180,7 +180,7 @@ def bs_gamma(s: float, k: float, t: float, r: float, q: float, sigma: float) -> 
 
 
 def bs_greeks_second_order(
-    s: float, k: float, t: float, r: float, q: float, sigma: float
+    s: float, k: float, t: float, r: float, q: float, sigma: float, is_call: bool = True
 ) -> tuple[float, float, float, float]:
     """
     Calculate second-order Black-Scholes Greeks.
@@ -199,13 +199,15 @@ def bs_greeks_second_order(
         Dividend yield
     sigma : float
         Volatility
+    is_call : bool
+        True for a call, False for a put. Only affects charm when q != 0.
 
     Returns
     -------
     tuple
         (vanna, volga, charm, veta)
     """
-    return _bs_second_order_greeks(s, k, t, r, sigma, q)
+    return _bs_second_order_greeks(s, k, t, r, sigma, q, is_call)
 
 
 # =============================================================================
@@ -295,7 +297,7 @@ def bs_all_greeks(
     price, delta, gamma, vega, theta, rho = _bs_greeks(s, k, t, r, sigma, is_call, q)
 
     # Second order
-    vanna, volga, charm, veta = _bs_second_order_greeks(s, k, t, r, sigma, q)
+    vanna, volga, charm, veta = _bs_second_order_greeks(s, k, t, r, sigma, q, is_call)
 
     # Third order
     speed, zomma, color, ultima = _bs_third_order_greeks(s, k, t, r, sigma, q)

@@ -73,18 +73,34 @@ def render_market_parameters(key_prefix: str = "market") -> dict[str, float]:
         )
         st.session_state[f"{key_prefix}_drift"] = params["drift"]
 
-    # Time horizon
-    params["time_horizon"] = st.number_input(
-        "Time Horizon (T)",
-        min_value=0.1,
-        max_value=10.0,
-        value=st.session_state.get(f"{key_prefix}_time", 1.0),
-        step=0.1,
-        format="%.1f",
-        key=f"{key_prefix}_time_input",
-        help="Simulation horizon in years",
-    )
-    st.session_state[f"{key_prefix}_time"] = params["time_horizon"]
+    # Dividend yield and time horizon
+    col3, col4 = st.columns(2)
+
+    with col3:
+        params["dividend_yield"] = st.number_input(
+            "Dividend Yield (q)",
+            min_value=0.0,
+            max_value=0.20,
+            value=st.session_state.get(f"{key_prefix}_div", 0.0),
+            step=0.005,
+            format="%.3f",
+            key=f"{key_prefix}_div_input",
+            help="Annual continuous dividend yield (reduces price drift to μ − q)",
+        )
+        st.session_state[f"{key_prefix}_div"] = params["dividend_yield"]
+
+    with col4:
+        params["time_horizon"] = st.number_input(
+            "Time Horizon (T)",
+            min_value=0.1,
+            max_value=10.0,
+            value=st.session_state.get(f"{key_prefix}_time", 1.0),
+            step=0.1,
+            format="%.1f",
+            key=f"{key_prefix}_time_input",
+            help="Simulation horizon in years",
+        )
+        st.session_state[f"{key_prefix}_time"] = params["time_horizon"]
 
     return params
 

@@ -1,8 +1,8 @@
 """Cross-model information criteria (AIC / BIC / LR-test).
 
-Given the nested ``dict[model][solver]`` result produced by
-``calibrate_multi``, selects the best solver per model and computes the
-AIC/BIC scores so the Compare tab can rank candidates.
+Given the nested ``dict[model][solver][objective]`` result produced by
+``run_multi_model_with_live_progress``, selects the best solver per model
+and computes the AIC/BIC scores so the Compare tab can rank candidates.
 
 For surface models we lean on a Gaussian-likelihood approximation built
 from the IV residual standard deviation (``rmse_iv``). The GARCH family
@@ -13,6 +13,7 @@ under iid normal residuals** — the table caption warns about it.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
 
@@ -26,9 +27,9 @@ from config.model_registry import get_spec
 # *simpler* model — restricting parameters in the *full* model recovers
 # it. Reduce the LR statistic to ``2 * (logL_full - logL_nested)``.
 _NESTED_PAIRS: dict[str, str] = {
-    "bates": "heston",          # Bates restrict to Heston by setting jump params to 0
-    "ngarch": "garch",          # NGARCH → GARCH when leverage θ=0
-    "gjr_garch": "garch",       # GJR → GARCH when γ=0
+    "bates": "heston",  # Bates restrict to Heston by setting jump params to 0
+    "ngarch": "garch",  # NGARCH → GARCH when leverage θ=0
+    "gjr_garch": "garch",  # GJR → GARCH when γ=0
 }
 
 
@@ -37,53 +38,85 @@ class ModelSelectionRow:
     model_key: str
     model_label: str
     best_solver: str
-    k: int                       # number of free parameters
-    n: int                       # sample size (quotes or returns)
-    rmse_iv: float | None        # surface models only
-    log_likelihood: float        # log L at the calibrated optimum
-    aic: float                   # 2k − 2 logL
-    bic: float                   # k log n − 2 logL
-    delta_aic: float = 0.0       # AIC − min(AIC) across models
+    k: int  # number of free parameters
+    n: int  # sample size (quotes or returns)
+    rmse_iv: float | None  # surface models only
+    log_likelihood: float  # log L at the calibrated optimum
+    aic: float  # 2k − 2 logL
+    bic: float  # k log n − 2 logL
+    delta_aic: float = 0.0  # AIC − min(AIC) across models
     lr_p_value: float | None = None  # p-value vs nested model (None if N/A)
 
 
-def _best_solver(per_solver: dict) -> tuple[str, Any] | None:
-    """Pick the (solver, objective) slot with the lowest RMSE-price (surface) or
-    objective_value (returns). Returns ``None`` if no slot succeeded.
+def _has_price(result) -> bool:
+    """True when the result carries a finite price RMSE (in dollars)."""
+    rmse = getattr(result, "rmse_price", None)
+    return rmse is not None and np.isfinite(rmse)
 
-    Handles both legacy ``dict[solver, Summary]`` and new
-    ``dict[solver, dict[objective, Summary]]`` schemas.
+
+def best_slot(
+    candidates: Iterable[tuple[str, Any]],
+) -> tuple[str, Any] | None:
+    """Pick the best ``(label, summary)`` among one model's calibration slots.
+
+    Scoring never mixes units. ``rmse_price`` is in option-price dollars;
+    ``objective_value`` is ``rss/2`` for surface calibrators or a (possibly
+    large-negative) NLL for returns-GARCH — comparing the two in one ``min``
+    let a failure-branch slot (which returns a default model with no
+    ``rmse_price`` but a tiny ``objective_value``) beat a converged fit. So:
+
+    - ignore failure results (``success is False``) when any success survives;
+    - if **any** successful slot exposes a finite ``rmse_price``, rank **only**
+      the priced slots by ``rmse_price``;
+    - otherwise (the whole returns-GARCH family) rank every slot by
+      ``objective_value``.
+
+    Returns ``None`` when no slot has a result. Accepts the flattened
+    ``(label, summary)`` stream from either results schema.
     """
-    best: tuple[str, Any] | None = None
-    best_score = np.inf
+    slots = [(lbl, s) for lbl, s in candidates if s.result is not None]
+    if not slots:
+        return None
+    live = [(lbl, s) for lbl, s in slots if getattr(s.result, "success", True)]
+    pool = live or slots  # all-failed model still anchors on its least-bad slot
+    priced = [(lbl, s) for lbl, s in pool if _has_price(s.result)]
+    if priced:
+        return min(priced, key=lambda ls: float(ls[1].result.rmse_price))
+    return min(pool, key=lambda ls: float(ls[1].result.objective_value))
+
+
+def _flatten_solver_slots(per_solver: dict) -> list[tuple[str, Any]]:
+    """Normalise both result schemas to a ``(label, summary)`` list.
+
+    ``label`` is ``solver`` (legacy flat) or ``solver/objective`` (nested).
+    """
+    out: list[tuple[str, Any]] = []
     for solver_name, slot in per_solver.items():
-        # Normalise to a list of (label, summary) pairs covering both schemas.
         if isinstance(slot, dict):
-            candidates = list(slot.items())  # (objective_name, summary)
-            label_fmt = lambda obj_name: f"{solver_name}/{obj_name}"  # noqa: E731
+            out.extend((f"{solver_name}/{obj}", s) for obj, s in slot.items())
         else:
-            candidates = [(solver_name, slot)]
-            label_fmt = lambda _: solver_name  # noqa: E731
-        for obj_label, s in candidates:
-            if s.result is None:
-                continue
-            if s.result.rmse_price is not None and not np.isnan(s.result.rmse_price):
-                score = float(s.result.rmse_price)
-            else:
-                score = float(s.result.objective_value)
-            if score < best_score:
-                best_score = score
-                best = (label_fmt(obj_label), s)
-    return best
+            out.append((solver_name, slot))
+    return out
+
+
+def _best_solver(per_solver: dict) -> tuple[str, Any] | None:
+    """Best ``(label, summary)`` slot for one model (both result schemas)."""
+    return best_slot(_flatten_solver_slots(per_solver))
 
 
 def _surface_log_likelihood(rmse_iv: float, n: int) -> float:
     """Gaussian-likelihood approximation: residuals ~ N(0, σ²) with σ = RMSE.
 
-    ``rmse_iv`` is stored as a decimal (e.g. 0.002 ≡ 20 bps) so we use it
-    directly as the residual standard deviation.
+    ``rmse_iv`` arrives in **basis points** — ``backend.calibration.utils.
+    compute_rmse_iv`` scales the IV RMSE by 1e4 — so it must be converted back
+    to a decimal standard deviation before squaring. Squaring the raw bps value
+    inflates the residual variance by 1e8, which flips the sign of the
+    log-likelihood and makes the absolute AIC/BIC physically meaningless (the
+    within-family *ranking* survives because the offset is constant across rows,
+    but the displayed numbers do not).
     """
-    resid_var = max(float(rmse_iv) ** 2, 1e-30)
+    sd = float(rmse_iv) / 1e4
+    resid_var = max(sd * sd, 1e-30)
     return -0.5 * n * (np.log(2.0 * np.pi) + np.log(resid_var) + 1.0)
 
 
@@ -111,7 +144,8 @@ def _sample_size(market_data) -> int:
 
 
 def compute_info_criteria(
-    results: dict, market_data,
+    results: dict,
+    market_data,
 ) -> list[ModelSelectionRow]:
     """Build a sorted list of ``ModelSelectionRow`` — one per candidate.
 
@@ -132,7 +166,9 @@ def compute_info_criteria(
         result = summary.result
 
         rmse_iv_value = None
-        if model_key in SURFACE_FAMILY:
+        # The registered custom model is a surface model too (it joins the
+        # surface pickers) but lives outside the static SURFACE_FAMILY tuple.
+        if model_key in SURFACE_FAMILY or model_key == "custom":
             if result.rmse_iv is None or not np.isfinite(result.rmse_iv):
                 continue
             rmse_iv_value = float(result.rmse_iv)

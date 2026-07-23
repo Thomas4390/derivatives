@@ -1,0 +1,74 @@
+"""
+Digital (cash-or-nothing) option pricing kernel.
+
+Author: Thomas Vaudescal
+Created: 2026
+"""
+
+from __future__ import annotations
+
+import math
+
+from numba import njit
+
+from backend.utils.math import norm_cdf
+
+
+@njit(fastmath=True, cache=True)
+def digital_price(
+    S: float,
+    K: float,
+    T: float,
+    r: float,
+    q: float,
+    sigma: float,
+    is_call: bool,
+    payout: float = 1.0,
+) -> float:
+    """
+    Digital (cash-or-nothing) option price.
+
+    Parameters
+    ----------
+    S : float
+        Spot price
+    K : float
+        Strike price
+    T : float
+        Time to expiry
+    r : float
+        Risk-free rate
+    q : float
+        Continuous dividend yield
+    sigma : float
+        Volatility
+    is_call : bool
+        True for call, False for put
+    payout : float
+        Fixed payout amount
+
+    Returns
+    -------
+    float
+        Option price
+    """
+    if T <= 0:
+        if is_call:
+            return payout if S > K else 0.0
+        return payout if S < K else 0.0
+
+    if sigma <= 0:
+        # Deterministic forward
+        F = S * math.exp((r - q) * T)
+        df = math.exp(-r * T)
+        if is_call:
+            return (payout * df) if F > K else 0.0
+        return (payout * df) if F < K else 0.0
+
+    sqrt_T = math.sqrt(T)
+    d2 = (math.log(S / K) + (r - q - 0.5 * sigma * sigma) * T) / (sigma * sqrt_T)
+    df = math.exp(-r * T)
+
+    if is_call:
+        return payout * df * norm_cdf(d2)
+    return payout * df * norm_cdf(-d2)

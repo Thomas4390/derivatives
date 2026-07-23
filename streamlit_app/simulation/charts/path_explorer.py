@@ -192,8 +192,13 @@ def render_path_explorer_chart(
     params: dict[str, Any],
     position_arrays: dict | None = None,
     exotic_metadata: list[dict] | None = None,
+    seed_paths: np.ndarray | None = None,
 ) -> float | None:
     """Render single-path price + volatility chart with P&L coloring and exotic overlays.
+
+    ``seed_paths`` (optional, shape ``(k, n_steps + 1)``) overlays additional
+    price paths from independent seeds run with the same parameters, drawn faint
+    behind the primary path so the effect of the random seed is visible.
 
     Returns the single-path P&L value if a strategy is active, else None.
     """
@@ -218,6 +223,25 @@ def render_path_explorer_chart(
         single_pnl = _compute_path_aware_pnl(result.price_paths[0], position_arrays)
         is_profit = single_pnl >= 0
         path_color = _PROFIT_COLOR if is_profit else _LOSS_COLOR
+
+    # ── Seed-sensitivity overlay: extra independent seeds (same params) drawn
+    # faint behind the primary path so the effect of the random seed is visible.
+    if seed_paths is not None and len(seed_paths) > 0:
+        for _sp in seed_paths:
+            fig.add_trace(
+                go.Scatter(
+                    x=time_grid,
+                    y=_sp,
+                    mode="lines",
+                    line=dict(width=0.9, color="rgba(148,163,184,0.35)"),
+                    name="other seeds",
+                    legendgroup="seeds",
+                    showlegend=False,
+                    hoverinfo="skip",
+                ),
+                row=1,
+                col=1,
+            )
 
     # ── Top panel: Price path ──────────────────────────────────────────────
     fig.add_trace(

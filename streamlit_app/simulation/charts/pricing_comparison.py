@@ -12,6 +12,7 @@ import plotly.graph_objects as go
 import streamlit as st
 from plotly.subplots import make_subplots
 from services.pricing_service import (
+    price_exotic_from_terminals,
     price_from_terminals,
     price_with_analytical,
     price_with_fft,
@@ -20,6 +21,31 @@ from services.simulation_service import _extract_model_params
 from utils.chart_helpers import spread_annotations
 
 from backend.simulation.factory import create_simulator
+
+# Lazy-loaded exotic pricing for reference prices
+_calculate_exotic_price = None
+
+
+def _get_exotic_price_fn():
+    """Lazy-load calculate_exotic_price on first use."""
+    global _calculate_exotic_price
+    if _calculate_exotic_price is None:
+        import importlib.util
+        from pathlib import Path
+
+        _adapter_path = (
+            Path(__file__).parent.parent.parent
+            / "options_greeks"
+            / "services"
+            / "exotic_pricing_adapter.py"
+        )
+        _spec = importlib.util.spec_from_file_location(
+            "exotic_pricing_adapter_charts", _adapter_path
+        )
+        _mod = importlib.util.module_from_spec(_spec)
+        _spec.loader.exec_module(_mod)
+        _calculate_exotic_price = _mod.calculate_exotic_price
+    return _calculate_exotic_price
 
 
 from config.chart_theme import (
@@ -214,6 +240,45 @@ def compute_reference_prices(
         leg["ref_price"] = None
         leg["ref_method"] = None
 
+        # Exotic legs: use exotic analytic pricing (GBM only)
+        if leg.get("instrument_class", "vanilla") != "vanilla":
+            if model_key.lower() == "gbm":
+                try:
+                    meta = leg.get("exotic_params", {}) or {}
+                    sigma = params.get("sigma", 0.20)
+                    # Build extra1
+                    inst = leg["instrument_class"]
+                    extra1 = 0.0
+                    if inst == "chooser":
+                        extra1 = meta.get("choice_time_pct", 0.5) * T
+                    elif inst == "power":
+                        extra1 = meta.get("power_n", 2.0)
+                    elif inst == "gap":
+                        extra1 = meta.get("gap_trigger", leg["strike"])
+                    ref = _get_exotic_price_fn()(
+                        exotic_type=inst,
+                        spot=spot,
+                        strike=leg["strike"],
+                        maturity=T,
+                        rate=r,
+                        sigma=sigma,
+                        is_call=leg["is_call"],
+                        barrier=meta.get("barrier", 0.0),
+                        is_knock_in=meta.get("is_knock_in", False),
+                        is_up=meta.get("is_up", True),
+                        rebate=meta.get("rebate", 0.0),
+                        payout=meta.get("payout", 1.0),
+                        extra1=extra1,
+                    )
+                    if ref is not None and ref > 0:
+                        leg["ref_price"] = ref
+                        leg["ref_method"] = "Exotic Analytic"
+                except Exception as e:
+                    import logging
+
+                    logging.warning(f"Exotic analytic pricing failed for {inst}: {e}")
+            continue
+
         ana = price_with_analytical(
             model_key, params, leg["strike"], T, spot, r, leg["is_call"]
         )
@@ -314,7 +379,10 @@ def precompute_convergence(
             seed=seed,
         )
         for i, leg in enumerate(legs):
-            mc = price_from_terminals(terminal, leg["strike"], T, r, leg["is_call"])
+            if leg.get("instrument_class", "vanilla") != "vanilla":
+                mc = price_exotic_from_terminals(terminal, leg, T, r)
+            else:
+                mc = price_from_terminals(terminal, leg["strike"], T, r, leg["is_call"])
             acc[i]["prices"].append(mc["price"])
             acc[i]["se"].append(mc["std_error"])
             acc[i]["ci_lo"].append(mc["confidence_interval"][0])

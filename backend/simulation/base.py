@@ -137,15 +137,19 @@ class SimulationResult:
         return np.diff(np.log(self.price_paths), axis=1)
 
     def realized_volatility(
-        self, annualization_factor: float = np.sqrt(252)
+        self, annualization_factor: float | None = None
     ) -> np.ndarray:
         """
         Compute realized volatility for each path.
 
         Parameters
         ----------
-        annualization_factor : float
-            Factor to annualize volatility (default: sqrt(252) for daily)
+        annualization_factor : float, optional
+            Factor to annualize the per-step return std. If None (default), it
+            is derived from the actual time step as ``1/sqrt(dt)`` with
+            ``dt = T / n_steps`` (from ``time_grid``), which is correct for any
+            step size. The previous hard-coded ``sqrt(252)`` was only valid for
+            daily steps and silently mis-scaled every other ``dt``.
 
         Returns
         -------
@@ -153,6 +157,9 @@ class SimulationResult:
             Realized volatility for each path, shape (n_paths,)
         """
         log_rets = self.log_returns()
+        if annualization_factor is None:
+            dt = float(self.time_grid[-1]) / self.n_steps if self.n_steps > 0 else 0.0
+            annualization_factor = 1.0 / np.sqrt(dt) if dt > 0 else 1.0
         return np.std(log_rets, axis=1) * annualization_factor
 
     @property

@@ -71,6 +71,7 @@ def calculate_option_premium(
     risk_free_rate: float,
     volatility: float,
     option_type: str,  # 'call' or 'put'
+    dividend_yield: float = 0.0,
 ) -> float:
     """
     Calculate option premium using Black-Scholes.
@@ -82,6 +83,7 @@ def calculate_option_premium(
         risk_free_rate: Risk-free rate (decimal)
         volatility: Implied volatility (decimal)
         option_type: 'call' or 'put'
+        dividend_yield: Continuous dividend yield (decimal, default 0.0)
 
     Returns:
         Option premium per share
@@ -89,7 +91,13 @@ def calculate_option_premium(
     time_to_expiry = dte_days / 365.0
     opt_type_int = 1 if option_type == "call" else 0
     greeks = _calculate_all_greeks_numba(
-        spot, strike, time_to_expiry, risk_free_rate, volatility, opt_type_int
+        spot,
+        strike,
+        time_to_expiry,
+        risk_free_rate,
+        volatility,
+        opt_type_int,
+        dividend_yield,
     )
     return greeks[0]  # Price is index 0
 
@@ -106,6 +114,7 @@ def calculate_all_greeks(
     risk_free_rate: float,
     volatility: float,
     option_type: int,  # 1 for call, 0 for put
+    dividend_yield: float = 0.0,
 ) -> np.ndarray:
     """
     Calculate all 14 Greeks for a single option.
@@ -123,12 +132,19 @@ def calculate_all_greeks(
         risk_free_rate: Risk-free rate (decimal)
         volatility: Implied volatility (decimal)
         option_type: 1 for call, 0 for put
+        dividend_yield: Continuous dividend yield (decimal, default 0.0)
 
     Returns:
         np.ndarray: Array of 14 Greek values
     """
     return _calculate_all_greeks_numba(
-        spot, strike, time_to_expiry, risk_free_rate, volatility, option_type
+        spot,
+        strike,
+        time_to_expiry,
+        risk_free_rate,
+        volatility,
+        option_type,
+        dividend_yield,
     )
 
 
@@ -250,10 +266,192 @@ def find_breakeven_points(
 
 
 def _split_vanilla_exotic(options: list) -> tuple[list, list, list, list]:
-    """Split options into vanilla and exotic lists. Only vanilla supported."""
-    vanilla_opts = list(options)
-    vanilla_idx = list(range(len(options)))
-    return vanilla_opts, vanilla_idx, [], []
+    """Split options into vanilla and exotic lists with their indices.
+
+    Returns:
+        (vanilla_options, vanilla_indices, exotic_options, exotic_indices)
+    """
+    vanilla_opts, vanilla_idx = [], []
+    exotic_opts, exotic_idx = [], []
+    for i, opt in enumerate(options):
+        if opt.get("instrument_class", "vanilla") != "vanilla":
+            exotic_opts.append(opt)
+            exotic_idx.append(i)
+        else:
+            vanilla_opts.append(opt)
+            vanilla_idx.append(i)
+    return vanilla_opts, vanilla_idx, exotic_opts, exotic_idx
+
+
+# Greek-result indices (matching calculate_exotic_all_greeks) that the parallel
+# exotic_greeks_surface kernel produces. Higher-order Greeks (vanna, volga, ...,
+# indices >= 6) are not computed by that kernel and keep the per-cell path.
+_FIRST_ORDER_GREEK_KEYS = ("price", "delta", "gamma", "vega", "theta", "rho")
+
+# Exotic types whose first-order Greeks the surface kernel reproduces exactly.
+# chooser/power/gap depend on an extra1 parameter (choice_time / exponent /
+# trigger) which the per-cell path resolves through instrument defaults — they
+# stay on the per-cell path to preserve identical behaviour.
+_SURFACE_SAFE_EXOTIC_TYPES = frozenset(
+    {
+        "barrier",
+        "asian",
+        "digital",
+        "lookback_floating",
+        "lookback_fixed",
+        "asset_or_nothing",
+    }
+)
+
+
+def _exotic_greeks_surface_dte(
+    exotic_options: list,
+    spot_range: np.ndarray,
+    dte_range: np.ndarray,
+    risk_free_rate: float,
+    base_iv: float,
+    greek_index: int,
+    dividend_yield: float = 0.0,
+) -> np.ndarray:
+    """Calculate 3D surface for exotic legs varying spot and DTE.
+
+    First-order Greeks (price/delta/gamma/vega/theta/rho, indices 0-5) are
+    computed with the parallel ``exotic_greeks_surface`` kernel — one ``prange``
+    sweep over the whole spot range per DTE, instead of a scalar pricing call
+    per (spot, DTE) cell. Higher-order Greeks (indices >= 6) are not produced by
+    that kernel and keep the original per-cell evaluation.
+    """
+    from services.exotic_pricing_adapter import (
+        calculate_exotic_all_greeks,
+        calculate_exotic_greeks_surface,
+        haug_factory_params,
+    )
+
+    result = np.zeros((len(spot_range), len(dte_range)))
+    use_surface = greek_index < len(_FIRST_ORDER_GREEK_KEYS)
+    greek_key = _FIRST_ORDER_GREEK_KEYS[greek_index] if use_surface else ""
+    for opt in exotic_options:
+        opt_type_int = 1 if opt["option_type"] == "call" else 0
+        is_call = opt_type_int == 1
+        pos_sign = 1 if opt["position_type"] == "long" else -1
+        signed_qty = opt["quantity"] * 100 * pos_sign
+
+        if use_surface and opt["instrument_class"] in _SURFACE_SAFE_EXOTIC_TYPES:
+            for j, dte in enumerate(dte_range):
+                surf = calculate_exotic_greeks_surface(
+                    opt["instrument_class"],
+                    spot_range,
+                    opt["strike"],
+                    dte / 365.0,
+                    risk_free_rate,
+                    base_iv,
+                    is_call,
+                    barrier=opt.get("barrier", 0.0),
+                    is_knock_in=opt.get("is_knock_in", False),
+                    is_up=opt.get("is_up", True),
+                    rebate=opt.get("rebate", 0.0),
+                    payout=opt.get("payout", 1.0),
+                    dividend_yield=dividend_yield,
+                )
+                result[:, j] += surf[greek_key] * signed_qty
+        else:
+            params = haug_factory_params(opt)
+            for i, spot in enumerate(spot_range):
+                for j, dte in enumerate(dte_range):
+                    greeks = calculate_exotic_all_greeks(
+                        spot,
+                        opt["strike"],
+                        dte / 365.0,
+                        risk_free_rate,
+                        base_iv,
+                        opt_type_int,
+                        exotic_type=opt["instrument_class"],
+                        barrier=opt.get("barrier", 0.0),
+                        is_up=opt.get("is_up", True),
+                        is_knock_in=opt.get("is_knock_in", False),
+                        rebate=opt.get("rebate", 0.0),
+                        payout=opt.get("payout", 1.0),
+                        extra1=opt.get("extra1", 0.0),
+                        cap=opt.get("cap", 0.0),
+                        dividend_yield=dividend_yield,
+                        params=params,
+                    )
+                    result[i, j] += greeks[greek_index] * signed_qty
+    return result
+
+
+def _exotic_greeks_surface_iv(
+    exotic_options: list,
+    spot_range: np.ndarray,
+    iv_range: np.ndarray,
+    risk_free_rate: float,
+    base_dte: float,
+    greek_index: int,
+    dividend_yield: float = 0.0,
+) -> np.ndarray:
+    """Calculate 3D surface for exotic legs varying spot and IV.
+
+    First-order Greeks use the parallel ``exotic_greeks_surface`` kernel (one
+    ``prange`` sweep over spot per IV); higher-order Greeks keep the per-cell path.
+    """
+    from services.exotic_pricing_adapter import (
+        calculate_exotic_all_greeks,
+        calculate_exotic_greeks_surface,
+        haug_factory_params,
+    )
+
+    t = base_dte / 365.0
+    result = np.zeros((len(spot_range), len(iv_range)))
+    use_surface = greek_index < len(_FIRST_ORDER_GREEK_KEYS)
+    greek_key = _FIRST_ORDER_GREEK_KEYS[greek_index] if use_surface else ""
+    for opt in exotic_options:
+        opt_type_int = 1 if opt["option_type"] == "call" else 0
+        is_call = opt_type_int == 1
+        pos_sign = 1 if opt["position_type"] == "long" else -1
+        signed_qty = opt["quantity"] * 100 * pos_sign
+
+        if use_surface and opt["instrument_class"] in _SURFACE_SAFE_EXOTIC_TYPES:
+            for j, iv in enumerate(iv_range):
+                surf = calculate_exotic_greeks_surface(
+                    opt["instrument_class"],
+                    spot_range,
+                    opt["strike"],
+                    t,
+                    risk_free_rate,
+                    iv,
+                    is_call,
+                    barrier=opt.get("barrier", 0.0),
+                    is_knock_in=opt.get("is_knock_in", False),
+                    is_up=opt.get("is_up", True),
+                    rebate=opt.get("rebate", 0.0),
+                    payout=opt.get("payout", 1.0),
+                    dividend_yield=dividend_yield,
+                )
+                result[:, j] += surf[greek_key] * signed_qty
+        else:
+            params = haug_factory_params(opt)
+            for i, spot in enumerate(spot_range):
+                for j, iv in enumerate(iv_range):
+                    greeks = calculate_exotic_all_greeks(
+                        spot,
+                        opt["strike"],
+                        t,
+                        risk_free_rate,
+                        iv,
+                        opt_type_int,
+                        exotic_type=opt["instrument_class"],
+                        barrier=opt.get("barrier", 0.0),
+                        is_up=opt.get("is_up", True),
+                        is_knock_in=opt.get("is_knock_in", False),
+                        rebate=opt.get("rebate", 0.0),
+                        payout=opt.get("payout", 1.0),
+                        extra1=opt.get("extra1", 0.0),
+                        cap=opt.get("cap", 0.0),
+                        dividend_yield=dividend_yield,
+                        params=params,
+                    )
+                    result[i, j] += greeks[greek_index] * signed_qty
+    return result
 
 
 def calculate_portfolio_greeks_3d_dte(
@@ -263,6 +461,7 @@ def calculate_portfolio_greeks_3d_dte(
     risk_free_rate: float,
     base_iv: float,
     greek_index: int = 1,  # Default to delta
+    dividend_yield: float = 0.0,
 ) -> np.ndarray:
     """
     Calculate 3D Greek surface varying spot and DTE.
@@ -276,6 +475,7 @@ def calculate_portfolio_greeks_3d_dte(
         risk_free_rate: Risk-free rate
         base_iv: Base implied volatility (decimal)
         greek_index: Index of Greek to calculate (1=delta, 2=gamma, etc.)
+        dividend_yield: Continuous dividend yield (decimal, default 0.0)
 
     Returns:
         2D array of Greek values [len(spot_range), len(dte_range)]
@@ -311,6 +511,19 @@ def calculate_portfolio_greeks_3d_dte(
             risk_free_rate,
             base_iv,
             greek_index,
+            dividend_yield,
+        )
+
+    # Exotic legs: Python loop
+    if exotic_opts:
+        result += _exotic_greeks_surface_dte(
+            exotic_opts,
+            spot_range,
+            dte_range,
+            risk_free_rate,
+            base_iv,
+            greek_index,
+            dividend_yield,
         )
 
     # Add stock contribution (only affects delta)
@@ -329,6 +542,7 @@ def calculate_portfolio_greeks_3d_iv(
     risk_free_rate: float,
     base_dte: float,
     greek_index: int = 1,  # Default to delta
+    dividend_yield: float = 0.0,
 ) -> np.ndarray:
     """
     Calculate 3D Greek surface varying spot and IV.
@@ -342,6 +556,7 @@ def calculate_portfolio_greeks_3d_iv(
         risk_free_rate: Risk-free rate
         base_dte: Base DTE (days)
         greek_index: Index of Greek to calculate
+        dividend_yield: Continuous dividend yield (decimal, default 0.0)
 
     Returns:
         2D array of Greek values [len(spot_range), len(iv_range)]
@@ -377,6 +592,19 @@ def calculate_portfolio_greeks_3d_iv(
             risk_free_rate,
             base_dte,
             greek_index,
+            dividend_yield,
+        )
+
+    # Exotic legs: Python loop
+    if exotic_opts:
+        result += _exotic_greeks_surface_iv(
+            exotic_opts,
+            spot_range,
+            iv_range,
+            risk_free_rate,
+            base_dte,
+            greek_index,
+            dividend_yield,
         )
 
     # Add stock contribution (only affects delta)
@@ -396,6 +624,7 @@ def calculate_greeks_3d_strike(
     base_iv: float,
     base_dte: float,
     greek_index: int = 1,
+    dividend_yield: float = 0.0,
 ) -> np.ndarray:
     """
     Calculate 3D Greek surface varying spot and strike for single option.
@@ -410,6 +639,7 @@ def calculate_greeks_3d_strike(
         base_iv: Base IV (decimal)
         base_dte: Base DTE (days)
         greek_index: Index of Greek to calculate
+        dividend_yield: Continuous dividend yield (decimal, default 0.0)
 
     Returns:
         2D array of Greek values
@@ -436,4 +666,5 @@ def calculate_greeks_3d_strike(
         position_type,
         quantity,
         greek_index,
+        dividend_yield,
     )

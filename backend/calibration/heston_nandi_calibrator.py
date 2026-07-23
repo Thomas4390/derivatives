@@ -25,19 +25,23 @@ Created: 2026
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass, replace
+from dataclasses import replace
 
 import jax
 import jax.numpy as jnp
 import numpy as np
 
+from backend.calibration._reparam import (
+    _CompiledResiduals,
+    build_cf_residual_fn,
+    logit,
+)
 from backend.calibration.base import BaseCalibrator, CalibrationResult
 from backend.calibration.lm_helpers import make_multi_starts
 from backend.calibration.market_data import OptionMarketData
 from backend.calibration.objectives import (
     ObjectiveStrategy,
     PriceMSEObjective,
-    VegaWeightedObjective,
 )
 from backend.calibration.optimizers import (
     CalibrationProblem,
@@ -82,82 +86,92 @@ logger = get_logger(__name__)
 # Reparametrization — JAX-compatible sigmoid bijections
 # --------------------------------------------------------------------------- #
 
-_OMEGA_LO, _OMEGA_HI = HESTON_NANDI_BOUNDS["omega"]
-_ALPHA_LO, _ALPHA_HI = HESTON_NANDI_BOUNDS["alpha"]
-_BETA_LO, _BETA_HI = HESTON_NANDI_BOUNDS["beta"]
-_GAMMA_LO, _GAMMA_HI = HESTON_NANDI_BOUNDS["gamma"]
-_H0_LO, _H0_HI = HESTON_NANDI_BOUNDS["h0"]
+# Canonical (default) admissible box in HESTON_NANDI_PARAM_NAMES order. The
+# search universe is configurable per-run (see ``param_bounds``); the default
+# is the centralised ``HESTON_NANDI_BOUNDS`` (also exposed via
+# ``backend.calibration.search_space.default_search_bounds``).
+Bounds = tuple[tuple[float, float], ...]
+_HN_BOUNDS: Bounds = tuple(HESTON_NANDI_BOUNDS[n] for n in HESTON_NANDI_PARAM_NAMES)
 
 _SPY = HESTON_NANDI_STEPS_PER_YEAR
+
+
+def _resolve_bounds(param_bounds: dict[str, tuple[float, float]] | None) -> Bounds:
+    """Map a ``{param: (lo, hi)}`` override onto the ordered Heston-Nandi box."""
+    if not param_bounds:
+        return _HN_BOUNDS
+    return tuple(
+        (float(param_bounds[n][0]), float(param_bounds[n][1]))
+        if n in param_bounds
+        else _HN_BOUNDS[i]
+        for i, n in enumerate(HESTON_NANDI_PARAM_NAMES)
+    )
 
 
 def _hn_theta_to_params(
     theta: jnp.ndarray,
     mode: StationarityMode = StationarityMode.SOFT,
+    bounds: Bounds = _HN_BOUNDS,
 ) -> tuple[float, float, float, float, float]:
     """Unconstrained R^5 -> (omega, alpha, beta, gamma, h0) in the box.
 
     In :attr:`StationarityMode.HARD` gamma is reparametrised so that
     ``beta + alpha*gamma^2 < 1`` holds by construction.
     """
+    (o_lo, o_hi), (a_lo, a_hi), (b_lo, b_hi), (g_lo, g_hi), (h_lo, h_hi) = bounds
     sg = jax.nn.sigmoid(theta)
-    omega = _OMEGA_LO + (_OMEGA_HI - _OMEGA_LO) * sg[0]
-    alpha = _ALPHA_LO + (_ALPHA_HI - _ALPHA_LO) * sg[1]
-    beta = _BETA_LO + (_BETA_HI - _BETA_LO) * sg[2]
+    omega = o_lo + (o_hi - o_lo) * sg[0]
+    alpha = a_lo + (a_hi - a_lo) * sg[1]
+    beta = b_lo + (b_hi - b_lo) * sg[2]
     if mode is StationarityMode.HARD:
-        gamma = stationarity_capped_gamma(
-            alpha, beta, sg[3], _GAMMA_LO, _GAMMA_HI, xp=jnp
-        )
+        gamma = stationarity_capped_gamma(alpha, beta, sg[3], g_lo, g_hi, xp=jnp)
     else:
-        gamma = _GAMMA_LO + (_GAMMA_HI - _GAMMA_LO) * sg[3]
-    h0 = _H0_LO + (_H0_HI - _H0_LO) * sg[4]
+        gamma = g_lo + (g_hi - g_lo) * sg[3]
+    h0 = h_lo + (h_hi - h_lo) * sg[4]
     return omega, alpha, beta, gamma, h0
 
 
 def _np_theta_to_params(
     theta: np.ndarray,
     mode: StationarityMode = StationarityMode.SOFT,
+    bounds: Bounds = _HN_BOUNDS,
 ) -> np.ndarray:
     """Numpy equivalent of :func:`_hn_theta_to_params` (post-opt reporting)."""
+    (o_lo, o_hi), (a_lo, a_hi), (b_lo, b_hi), (g_lo, g_hi), (h_lo, h_hi) = bounds
     sg = 1.0 / (1.0 + np.exp(-np.asarray(theta, dtype=float)))
-    omega = _OMEGA_LO + (_OMEGA_HI - _OMEGA_LO) * sg[0]
-    alpha = _ALPHA_LO + (_ALPHA_HI - _ALPHA_LO) * sg[1]
-    beta = _BETA_LO + (_BETA_HI - _BETA_LO) * sg[2]
+    omega = o_lo + (o_hi - o_lo) * sg[0]
+    alpha = a_lo + (a_hi - a_lo) * sg[1]
+    beta = b_lo + (b_hi - b_lo) * sg[2]
     if mode is StationarityMode.HARD:
-        gamma = stationarity_capped_gamma(
-            alpha, beta, sg[3], _GAMMA_LO, _GAMMA_HI, xp=np
-        )
+        gamma = stationarity_capped_gamma(alpha, beta, sg[3], g_lo, g_hi, xp=np)
     else:
-        gamma = _GAMMA_LO + (_GAMMA_HI - _GAMMA_LO) * sg[3]
-    h0 = _H0_LO + (_H0_HI - _H0_LO) * sg[4]
+        gamma = g_lo + (g_hi - g_lo) * sg[3]
+    h0 = h_lo + (h_hi - h_lo) * sg[4]
     return np.array([omega, alpha, beta, gamma, h0])
 
 
 def _params_to_theta(
     params: np.ndarray,
     mode: StationarityMode = StationarityMode.SOFT,
+    bounds: Bounds = _HN_BOUNDS,
 ) -> np.ndarray:
     """Inverse map: constrained params -> unconstrained R^5 seed."""
+    (o_lo, o_hi), (a_lo, a_hi), (b_lo, b_hi), (g_lo, g_hi), (h_lo, h_hi) = bounds
     omega, alpha, beta, gamma, h0 = (float(x) for x in params)
 
-    def logit(x: float, lo: float, hi: float) -> float:
-        frac = (x - lo) / (hi - lo)
-        frac = float(np.clip(frac, 1e-8, 1.0 - 1e-8))
-        return float(np.log(frac / (1.0 - frac)))
-
     if mode is StationarityMode.HARD:
-        gamma_unit = stationarity_gamma_to_unit(alpha, beta, gamma, _GAMMA_LO, _GAMMA_HI)
+        gamma_unit = stationarity_gamma_to_unit(alpha, beta, gamma, g_lo, g_hi)
         gamma_theta = logit(gamma_unit, 0.0, 1.0)
     else:
-        gamma_theta = logit(gamma, _GAMMA_LO, _GAMMA_HI)
+        gamma_theta = logit(gamma, g_lo, g_hi)
 
     return np.array(
         [
-            logit(omega, _OMEGA_LO, _OMEGA_HI),
-            logit(alpha, _ALPHA_LO, _ALPHA_HI),
-            logit(beta, _BETA_LO, _BETA_HI),
+            logit(omega, o_lo, o_hi),
+            logit(alpha, a_lo, a_hi),
+            logit(beta, b_lo, b_hi),
             gamma_theta,
-            logit(h0, _H0_LO, _H0_HI),
+            logit(h0, h_lo, h_hi),
         ]
     )
 
@@ -165,6 +179,7 @@ def _params_to_theta(
 def _chain_rule_jacobian(
     theta: np.ndarray,
     mode: StationarityMode = StationarityMode.SOFT,
+    bounds: Bounds = _HN_BOUNDS,
 ) -> np.ndarray:
     """Return dp/dtheta_u for each parameter (size-5 vector).
 
@@ -173,27 +188,28 @@ def _chain_rule_jacobian(
     In HARD mode the gamma span is the capped-interval width (first-order; the
     cross-coupling of the cap on alpha/beta is neglected).
     """
+    (o_lo, o_hi), (a_lo, a_hi), (b_lo, b_hi), (g_lo, g_hi), (h_lo, h_hi) = bounds
     sg = 1.0 / (1.0 + np.exp(-np.asarray(theta, dtype=float)))
     deriv = sg * (1.0 - sg)
     if mode is StationarityMode.HARD:
-        alpha = _ALPHA_LO + (_ALPHA_HI - _ALPHA_LO) * sg[1]
-        beta = _BETA_LO + (_BETA_HI - _BETA_LO) * sg[2]
+        alpha = a_lo + (a_hi - a_lo) * sg[1]
+        beta = b_lo + (b_hi - b_lo) * sg[2]
         alpha_safe = max(float(alpha), 1e-12)
         gamma_stat_max = STATIONARITY_STRICT_FACTOR * float(
             ((1.0 - beta) / alpha_safe) ** 0.5
         )
-        gamma_upper = min(_GAMMA_HI, gamma_stat_max)
-        gamma_lower = min(_GAMMA_LO, gamma_upper)
+        gamma_upper = min(g_hi, gamma_stat_max)
+        gamma_lower = min(g_lo, gamma_upper)
         gamma_span = gamma_upper - gamma_lower
     else:
-        gamma_span = _GAMMA_HI - _GAMMA_LO
+        gamma_span = g_hi - g_lo
     spans = np.array(
         [
-            _OMEGA_HI - _OMEGA_LO,
-            _ALPHA_HI - _ALPHA_LO,
-            _BETA_HI - _BETA_LO,
+            o_hi - o_lo,
+            a_hi - a_lo,
+            b_hi - b_lo,
             gamma_span,
-            _H0_HI - _H0_LO,
+            h_hi - h_lo,
         ]
     )
     return spans * deriv
@@ -204,80 +220,59 @@ def _chain_rule_jacobian(
 # --------------------------------------------------------------------------- #
 
 
-@dataclass
-class _CompiledResiduals:
-    """Bundle of JIT-compiled residual and Jacobian callables."""
-
-    residual: callable
-    jacobian: callable
-    n_quote_residuals: int  # excludes the final stationarity-penalty element
-
-
 def _build_residual_fn(
     market_data: OptionMarketData,
     grids: JaxFFTGrids,
     stationarity_weight: float,
     objective: ObjectiveStrategy,
     mode: StationarityMode = StationarityMode.SOFT,
+    bounds: Bounds = _HN_BOUNDS,
 ) -> _CompiledResiduals:
-    """JIT-compile the residual function for a fixed surface + grid config."""
+    """JIT-compile the residual function for a fixed surface + grid config.
+
+    Surface boilerplate lives in
+    :func:`backend.calibration._reparam.build_cf_residual_fn`; only the
+    Heston-Nandi reparametrisation, CF pricing and stationarity penalty
+    are supplied here.
+    """
     spot = float(market_data.spot)
     rate = float(market_data.rate)
     q = float(market_data.dividend_yield)
-    unique_mats = [float(T) for T in market_data.unique_maturities]
-
-    strikes_per_T: list[jnp.ndarray] = []
-    is_calls_per_T: list[jnp.ndarray] = []
-    running = 0
-    for T in unique_mats:
-        quotes = market_data.quotes_for_maturity(T)
-        running += len(quotes)
-        strikes_per_T.append(jnp.asarray([qt.strike for qt in quotes], dtype=jnp.float64))
-        is_calls_per_T.append(jnp.asarray([qt.is_call for qt in quotes], dtype=jnp.bool_))
-    n_quotes = running
-
-    objective_residual_fn = objective.make_jax_residual_fn(market_data)
     eff_weight = penalty_weight(mode, stationarity_weight)
 
-    def _residual_untraced(theta: jnp.ndarray) -> jnp.ndarray:
-        omega, alpha, beta, gamma, h0 = _hn_theta_to_params(theta, mode)
+    def theta_to_params(theta: jnp.ndarray) -> tuple:
+        return _hn_theta_to_params(theta, mode, bounds)
 
-        model_prices_blocks: list[jnp.ndarray] = []
-        for i, tau in enumerate(unique_mats):
-            strikes_T = strikes_per_T[i]
-            is_calls_T = is_calls_per_T[i]
+    def price_calls(params: tuple, strikes_T: jnp.ndarray, tau: float) -> jnp.ndarray:
+        omega, alpha, beta, gamma, h0 = params
 
-            def cf(u, tau=tau):
-                return heston_nandi_cf_jax(
-                    u, omega, alpha, beta, gamma, h0, tau, rate, _SPY
-                )
+        def cf(u):
+            # Risk-neutral drift is (rate - q): the CF previously ignored the
+            # dividend yield while put-call parity used exp(-q*tau), making
+            # calls and puts inconsistent whenever q != 0. (No-op at q = 0,
+            # e.g. the SPY surface and the FFT-vs-MC cross-check.)
+            return heston_nandi_cf_jax(
+                u, omega, alpha, beta, gamma, h0, tau, rate - q, _SPY
+            )
 
-            call_prices = price_call_strikes_jax(cf, spot, strikes_T, tau, rate, grids)
+        return price_call_strikes_jax(cf, spot, strikes_T, tau, rate, grids)
 
-            disc_spot = spot * jnp.exp(-q * tau)
-            disc_k = strikes_T * jnp.exp(-rate * tau)
-            put_prices = call_prices - disc_spot + disc_k
-
-            prices_T = jnp.where(is_calls_T, call_prices, put_prices)
-            prices_T = jnp.maximum(prices_T, 0.0)
-            model_prices_blocks.append(prices_T)
-
-        model_prices = jnp.concatenate(model_prices_blocks)
-        quote_residuals = objective_residual_fn(model_prices)
-
+    def penalty_fn(params: tuple) -> jnp.ndarray:
+        _omega, alpha, beta, gamma, _h0 = params
         # Soft stationarity penalty: sqrt(weight) * (beta + alpha*gamma^2 - 1)_+
         persistence = beta + alpha * gamma**2
-        stat_res = jnp.where(
+        return jnp.where(
             persistence > 1.0,
             jnp.sqrt(eff_weight) * (persistence - 1.0),
             0.0,
         )
-        return jnp.concatenate([quote_residuals, jnp.array([stat_res])])
 
-    return _CompiledResiduals(
-        residual=jax.jit(_residual_untraced),
-        jacobian=jax.jit(jax.jacfwd(_residual_untraced)),
-        n_quote_residuals=n_quotes,
+    return build_cf_residual_fn(
+        market_data,
+        objective,
+        theta_to_params=theta_to_params,
+        price_calls=price_calls,
+        penalty_fn=penalty_fn,
     )
 
 
@@ -307,7 +302,12 @@ class HestonNandiGARCHCalibrator(BaseCalibrator):
         log_iterations: bool = False,
         iteration_callback=None,
         stationarity_mode: StationarityMode | str = StationarityMode.SOFT,
+        param_bounds: dict[str, tuple[float, float]] | None = None,
     ) -> None:
+        # Per-run search universe (the sigmoid box). ``None`` -> canonical
+        # default box, so default-bounds runs are byte-identical to the legacy
+        # behaviour.
+        self._bounds: Bounds = _resolve_bounds(param_bounds)
         self.n_restarts = max(1, int(n_restarts))
         self.stationarity_weight = float(stationarity_weight)
         self.stationarity_mode = StationarityMode.coerce(stationarity_mode)
@@ -331,30 +331,12 @@ class HestonNandiGARCHCalibrator(BaseCalibrator):
         self._grids = fft_grids or JaxFFTGrids.build()
         self._engine = FFTEngine()
 
-    @staticmethod
-    def _resolve_objective(obj: ObjectiveStrategy) -> ObjectiveStrategy:
-        """Coerce JAX-incompatible objectives (iv_mse) into vega_weighted."""
-        if obj.jax_compatible:
-            return obj
-        logger.info(
-            "HestonNandiGARCHCalibrator: objective '%s' is not JAX-compatible. "
-            "Falling back to 'vega_weighted' (first-order IV approximation).",
-            obj.name,
-        )
-        return VegaWeightedObjective()
-
     # ------------------------------------------------------------------ #
     # BaseCalibrator contract
     # ------------------------------------------------------------------ #
 
     def default_bounds(self) -> list[tuple[float, float]]:
-        return [
-            (_OMEGA_LO, _OMEGA_HI),
-            (_ALPHA_LO, _ALPHA_HI),
-            (_BETA_LO, _BETA_HI),
-            (_GAMMA_LO, _GAMMA_HI),
-            (_H0_LO, _H0_HI),
-        ]
+        return [(float(lo), float(hi)) for lo, hi in self._bounds]
 
     def objective(self, params: np.ndarray, market_data: OptionMarketData) -> float:
         r = self.residuals(params, market_data)
@@ -369,8 +351,11 @@ class HestonNandiGARCHCalibrator(BaseCalibrator):
             self.stationarity_weight,
             self.objective,
             self.stationarity_mode,
+            self._bounds,
         )
-        theta = _params_to_theta(np.asarray(params, dtype=float), self.stationarity_mode)
+        theta = _params_to_theta(
+            np.asarray(params, dtype=float), self.stationarity_mode, self._bounds
+        )
         return np.asarray(compiled.residual(jnp.asarray(theta)))
 
     # ------------------------------------------------------------------ #
@@ -386,17 +371,24 @@ class HestonNandiGARCHCalibrator(BaseCalibrator):
             self.stationarity_weight,
             self.objective,
             self.stationarity_mode,
+            self._bounds,
         )
 
         # --- Initial guess from ATM IV (per-period scale) ---
+        _lo = np.array([b[0] for b in self._bounds])
+        _hi = np.array([b[1] for b in self._bounds])
         atm_iv = get_atm_iv(market_data)
         v_per = atm_iv**2 / _SPY
         beta0, gamma0 = 0.7, 200.0
         alpha0 = 0.2 / gamma0**2  # alpha*gamma^2 ~ 0.2 of persistence
         persist0 = beta0 + alpha0 * gamma0**2
-        omega0 = max(v_per * (1.0 - persist0) - alpha0, _OMEGA_LO)
-        seed_params = np.array([omega0, alpha0, beta0, gamma0, v_per])
-        x0_base = _params_to_theta(seed_params, self.stationarity_mode)
+        omega0 = max(v_per * (1.0 - persist0) - alpha0, float(_lo[0]))
+        # Clamp the seed into the (possibly tightened) box — a no-op for the
+        # default box, so default-bounds runs are unchanged.
+        seed_params = np.clip(
+            np.array([omega0, alpha0, beta0, gamma0, v_per]), _lo, _hi
+        )
+        x0_base = _params_to_theta(seed_params, self.stationarity_mode, self._bounds)
         logger.info(
             "Heston-Nandi calibration | ATM IV=%.2f%% | seed=%s",
             atm_iv * 100.0,
@@ -428,7 +420,9 @@ class HestonNandiGARCHCalibrator(BaseCalibrator):
             param_mapper=lambda theta_arr: dict(
                 zip(
                     HESTON_NANDI_PARAM_NAMES,
-                    _np_theta_to_params(theta_arr, self.stationarity_mode),
+                    _np_theta_to_params(
+                        theta_arr, self.stationarity_mode, self._bounds
+                    ),
                 )
             ),
         )
@@ -473,7 +467,10 @@ class HestonNandiGARCHCalibrator(BaseCalibrator):
 
         # --- Build calibrated model ---
         omega, alpha, beta, gamma, h0 = (
-            float(x) for x in _np_theta_to_params(best["theta"], self.stationarity_mode)
+            float(x)
+            for x in _np_theta_to_params(
+                best["theta"], self.stationarity_mode, self._bounds
+            )
         )
         try:
             model = HestonNandiGARCHModel(
@@ -542,7 +539,9 @@ class HestonNandiGARCHCalibrator(BaseCalibrator):
             try:
                 J_u = np.asarray(best["jac"])[: compiled.n_quote_residuals, :]
                 r_q = np.asarray(best["fun"])[: compiled.n_quote_residuals]
-                dpdu = _chain_rule_jacobian(best["theta"], self.stationarity_mode)
+                dpdu = _chain_rule_jacobian(
+                    best["theta"], self.stationarity_mode, self._bounds
+                )
                 J_constrained = J_u * dpdu[np.newaxis, :]
                 unc = least_squares_covariance(J_constrained, r_q)
                 diagnostics["uncertainty"] = summary_table(
@@ -612,18 +611,29 @@ if __name__ == "__main__":
         for k, p in zip(strikes, prices):
             try:
                 iv = implied_volatility(
-                    price=float(p), spot=spot, strike=float(k),
-                    time_to_expiry=float(T), rate=rate, is_call=True,
+                    price=float(p),
+                    spot=spot,
+                    strike=float(k),
+                    time_to_expiry=float(T),
+                    rate=rate,
+                    is_call=True,
                     dividend_yield=div,
                 )
             except (ValueError, RuntimeError):
                 iv = None
             quotes.append(
-                OptionQuote(strike=float(k), maturity=float(T), is_call=True,
-                            market_price=float(max(p, 0.0)), implied_vol=iv)
+                OptionQuote(
+                    strike=float(k),
+                    maturity=float(T),
+                    is_call=True,
+                    market_price=float(max(p, 0.0)),
+                    implied_vol=iv,
+                )
             )
 
-    md = OptionMarketData(spot=spot, rate=rate, dividend_yield=div, quotes=tuple(quotes))
+    md = OptionMarketData(
+        spot=spot, rate=rate, dividend_yield=div, quotes=tuple(quotes)
+    )
     print(f"Heston-Nandi synthetic surface: {md.n_quotes} quotes")
 
     cal = HestonNandiGARCHCalibrator(n_restarts=3, max_nfev=120)

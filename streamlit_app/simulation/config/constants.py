@@ -187,6 +187,24 @@ DEFAULT_EGARCH_GAMMA = -0.1  # Asymmetry coefficient
 # Number of paths to display in path charts
 MAX_DISPLAY_PATHS = 100
 
+# Upper bound of the "Display Paths" slider. Batched (nan-separated) trace
+# rendering makes thousands of paths cheap, so we expose a much larger ceiling
+# than the legacy per-path-trace loop could afford.
+MAX_PATH_DISPLAY_CAP = 2000
+
+# Path line opacity (alpha). The effective alpha auto-decreases with the number
+# of displayed paths so that overlapping semi-transparent lines compose into a
+# readable density field instead of a solid wall:
+#   alpha(n) = clip(PATH_ALPHA_BASE * sqrt(PATH_ALPHA_REF_N / n),
+#                   PATH_ALPHA_MIN, PATH_ALPHA_MAX)
+PATH_ALPHA_BASE = 0.40  # alpha at the reference path count
+PATH_ALPHA_REF_N = 150  # reference path count (current default)
+PATH_ALPHA_MIN = 0.04  # floor — keep dense plots from going fully transparent
+PATH_ALPHA_MAX = 0.85  # ceiling — keep sparse plots from going fully opaque
+
+# Number of price bins for the density-heatmap path view.
+N_DENSITY_BINS = 80
+
 # Chart heights
 CHART_HEIGHT_STANDARD = 500
 CHART_HEIGHT_LARGE = 600
@@ -367,3 +385,16 @@ SP_PRODUCT_COLORS_NEW = {
     "twin_win": "#ec4899",  # pink
     "snowball": "#84cc16",  # lime
 }
+
+# =============================================================================
+# MONTE-CARLO PRICING DEFAULTS
+# =============================================================================
+# Path counts and fixed seeds for the model-consistent risk-neutral pricers in
+# services/consistent_pricing.py. Fixed seeds make premiums reproducible across
+# Streamlit reruns (and cacheable). Centralised here so the knobs live in one
+# place rather than scattered as module-level magic numbers.
+
+MC_PRICING_SEED = 12_345  # shared seed for reproducible risk-neutral MC pricing
+GARCH_PREMIUM_MC_PATHS = 60_000  # vanilla GARCH-family premium
+EXOTIC_PREMIUM_MC_PATHS = 50_000  # terminal-payoff exotic premium
+GREEKS_MC_PATHS = 40_000  # GARCH model-Greeks value curve

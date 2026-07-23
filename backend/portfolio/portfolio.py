@@ -241,28 +241,49 @@ class OptionsPortfolio:
 
         return total
 
-    def pnl_at_expiry(self, spot: float | np.ndarray) -> float | np.ndarray:
+    def pnl_at_expiry(
+        self, spot: float | np.ndarray, multiplier: float = 100.0
+    ) -> float | np.ndarray:
         """
         Calculate P&L at expiry (no model needed).
+
+        Terminal payoff as a function of spot, for vanilla options + stock. The
+        ``multiplier`` (contract size, default 100) is applied to the option legs
+        — matching pnl_at_expiry_fast / payoff_curve — so the two P&L paths agree
+        (they previously differed by 100x). Stock P&L is per-share (no multiplier).
+
+        Path-dependent structured products cannot be expressed as a terminal-spot
+        payoff, so they are rejected explicitly instead of being silently dropped.
 
         Parameters
         ----------
         spot : float or array
             Spot price(s) at expiry
+        multiplier : float
+            Contract multiplier applied to option legs (default 100).
 
         Returns
         -------
         float or array
             Total P&L
         """
+        if self._structured_positions:
+            raise ValueError(
+                "pnl_at_expiry supports only vanilla options + stock (terminal "
+                "payoff vs spot). Path-dependent structured products have no "
+                "terminal-spot payoff; use the Monte-Carlo P&L path instead."
+            )
+
         spot_arr = np.atleast_1d(np.asarray(spot, dtype=float))
         total = np.zeros_like(spot_arr)
 
         for pos in self._positions:
             total += pos.payoff_at_expiry(spot_arr)
 
+        total *= multiplier  # contract multiplier on option legs
+
         if self._stock:
-            total += self._stock.pnl(spot_arr)
+            total += self._stock.pnl(spot_arr)  # stock P&L is already per-share
 
         return float(total[0]) if np.isscalar(spot) else total
 

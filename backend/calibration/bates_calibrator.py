@@ -34,13 +34,18 @@ import numpy as np
 
 from backend.calibration.lm_helpers import make_multi_starts
 
+from backend.calibration._reparam import (
+    _CompiledResiduals,
+    build_cf_residual_fn,
+    logit,
+)
 from backend.calibration.base import BaseCalibrator, CalibrationResult
 from backend.calibration.feller import (
     DEFAULT_FELLER_WEIGHT,
     FELLER_STRICT_FACTOR,
     FellerMode,
-    feller_capped_xi,
-    feller_xi_to_unit,
+    feller_capped_alpha,
+    feller_alpha_to_unit,
     penalty_weight,
 )
 from backend.calibration.heston_calibrator import HestonCalibrator
@@ -48,8 +53,8 @@ from backend.calibration.market_data import OptionMarketData
 from backend.calibration.objectives import (
     ObjectiveStrategy,
     PriceMSEObjective,
-    VegaWeightedObjective,
 )
+from backend.calibration.search_space import BATES_SEARCH_BOUNDS
 from backend.calibration.optimizers import (
     CalibrationProblem,
     IterationLogger,
@@ -83,99 +88,108 @@ logger = logging.getLogger(__name__)
 # 8-parameter reparametrization (Heston + jumps)
 # --------------------------------------------------------------------------- #
 
-_V0_LO, _V0_HI = 1e-5, 1.0
-_KAPPA_LO, _KAPPA_HI = 0.01, 20.0
-_THETA_LO, _THETA_HI = 1e-5, 1.0
-_XI_LO, _XI_HI = 1e-3, 2.0
-_RHO_LO, _RHO_HI = -0.999, 0.999
-_LAMBDA_LO, _LAMBDA_HI = 1e-3, 5.0
-_MUJ_LO, _MUJ_HI = -0.5, 0.1
-_SIGMAJ_LO, _SIGMAJ_HI = 0.01, 0.5
+# Canonical (default) admissible box in BATES_PARAM_NAMES order
+# (v0, kappa, theta, alpha, rho, lam, alpha_j, sigma_j). The search universe is
+# configurable per-run (see ``param_bounds``); sourced from the single source
+# of truth in ``backend.calibration.search_space``.
+Bounds = tuple[tuple[float, float], ...]
+_BATES_BOUNDS: Bounds = tuple(BATES_SEARCH_BOUNDS[n] for n in BATES_PARAM_NAMES)
 
-_BATES_BOUNDS = (
-    (_V0_LO, _V0_HI),
-    (_KAPPA_LO, _KAPPA_HI),
-    (_THETA_LO, _THETA_HI),
-    (_XI_LO, _XI_HI),
-    (_RHO_LO, _RHO_HI),
-    (_LAMBDA_LO, _LAMBDA_HI),
-    (_MUJ_LO, _MUJ_HI),
-    (_SIGMAJ_LO, _SIGMAJ_HI),
-)
+
+def _resolve_bounds(param_bounds: dict[str, tuple[float, float]] | None) -> Bounds:
+    """Map a ``{param: (lo, hi)}`` override onto the ordered 8-param Bates box."""
+    if not param_bounds:
+        return _BATES_BOUNDS
+    return tuple(
+        (float(param_bounds[n][0]), float(param_bounds[n][1]))
+        if n in param_bounds
+        else _BATES_BOUNDS[i]
+        for i, n in enumerate(BATES_PARAM_NAMES)
+    )
 
 
 def _bates_theta_to_params(
     theta: jnp.ndarray,
     feller_mode: FellerMode = FellerMode.SOFT,
+    bounds: Bounds = _BATES_BOUNDS,
 ) -> tuple[float, ...]:
+    (
+        (v0_lo, v0_hi),
+        (k_lo, k_hi),
+        (t_lo, t_hi),
+        (alpha_lo, alpha_hi),
+        (r_lo, r_hi),
+        (l_lo, l_hi),
+        (m_lo, m_hi),
+        (j_lo, j_hi),
+    ) = bounds
     sg = jax.nn.sigmoid(theta)
-    kappa = _KAPPA_LO + (_KAPPA_HI - _KAPPA_LO) * sg[1]
-    theta_h = _THETA_LO + (_THETA_HI - _THETA_LO) * sg[2]
+    kappa = k_lo + (k_hi - k_lo) * sg[1]
+    theta_h = t_lo + (t_hi - t_lo) * sg[2]
     if feller_mode is FellerMode.HARD:
-        alpha = feller_capped_xi(kappa, theta_h, sg[3], _XI_LO, _XI_HI, xp=jnp)
+        alpha = feller_capped_alpha(kappa, theta_h, sg[3], alpha_lo, alpha_hi, xp=jnp)
     else:
-        alpha = _XI_LO + (_XI_HI - _XI_LO) * sg[3]
+        alpha = alpha_lo + (alpha_hi - alpha_lo) * sg[3]
     return (
-        _V0_LO + (_V0_HI - _V0_LO) * sg[0],
+        v0_lo + (v0_hi - v0_lo) * sg[0],
         kappa,
         theta_h,
         alpha,
-        _RHO_LO + (_RHO_HI - _RHO_LO) * sg[4],
-        _LAMBDA_LO + (_LAMBDA_HI - _LAMBDA_LO) * sg[5],
-        _MUJ_LO + (_MUJ_HI - _MUJ_LO) * sg[6],
-        _SIGMAJ_LO + (_SIGMAJ_HI - _SIGMAJ_LO) * sg[7],
+        r_lo + (r_hi - r_lo) * sg[4],
+        l_lo + (l_hi - l_lo) * sg[5],
+        m_lo + (m_hi - m_lo) * sg[6],
+        j_lo + (j_hi - j_lo) * sg[7],
     )
 
 
 def _np_theta_to_params(
     theta: np.ndarray,
     feller_mode: FellerMode = FellerMode.SOFT,
+    bounds: Bounds = _BATES_BOUNDS,
 ) -> np.ndarray:
     sg = 1.0 / (1.0 + np.exp(-np.asarray(theta, dtype=float)))
-    params = np.array(
-        [lo + (hi - lo) * sg[i] for i, (lo, hi) in enumerate(_BATES_BOUNDS)]
-    )
+    params = np.array([lo + (hi - lo) * sg[i] for i, (lo, hi) in enumerate(bounds)])
     if feller_mode is FellerMode.HARD:
-        params[3] = feller_capped_xi(params[1], params[2], sg[3], _XI_LO, _XI_HI, xp=np)
+        alpha_lo, alpha_hi = bounds[3]
+        params[3] = feller_capped_alpha(params[1], params[2], sg[3], alpha_lo, alpha_hi, xp=np)
     return params
 
 
 def _params_to_theta(
     params: np.ndarray,
     feller_mode: FellerMode = FellerMode.SOFT,
+    bounds: Bounds = _BATES_BOUNDS,
 ) -> np.ndarray:
     params = np.asarray(params, dtype=float)
 
-    def logit(x: float, lo: float, hi: float) -> float:
-        frac = (x - lo) / (hi - lo)
-        frac = float(np.clip(frac, 1e-8, 1.0 - 1e-8))
-        return float(np.log(frac / (1.0 - frac)))
-
     theta = np.array(
-        [logit(float(params[i]), lo, hi) for i, (lo, hi) in enumerate(_BATES_BOUNDS)]
+        [logit(float(params[i]), lo, hi) for i, (lo, hi) in enumerate(bounds)]
     )
     if feller_mode is FellerMode.HARD:
-        xi_unit = feller_xi_to_unit(
-            float(params[1]), float(params[2]), float(params[3]), _XI_LO, _XI_HI
+        alpha_lo, alpha_hi = bounds[3]
+        alpha_unit = feller_alpha_to_unit(
+            float(params[1]), float(params[2]), float(params[3]), alpha_lo, alpha_hi
         )
-        theta[3] = logit(xi_unit, 0.0, 1.0)
+        theta[3] = logit(alpha_unit, 0.0, 1.0)
     return theta
 
 
 def _chain_rule_jacobian(
     theta: np.ndarray,
     feller_mode: FellerMode = FellerMode.SOFT,
+    bounds: Bounds = _BATES_BOUNDS,
 ) -> np.ndarray:
     sg = 1.0 / (1.0 + np.exp(-np.asarray(theta, dtype=float)))
-    spans = np.array([hi - lo for (lo, hi) in _BATES_BOUNDS])
+    spans = np.array([hi - lo for (lo, hi) in bounds])
     if feller_mode is FellerMode.HARD:
-        kappa = _KAPPA_LO + (_KAPPA_HI - _KAPPA_LO) * sg[1]
-        theta_h = _THETA_LO + (_THETA_HI - _THETA_LO) * sg[2]
-        xi_feller_max = FELLER_STRICT_FACTOR * float((2.0 * kappa * theta_h) ** 0.5)
-        xi_upper = min(_XI_HI, xi_feller_max)
-        xi_lower = min(_XI_LO, xi_upper)
+        (k_lo, k_hi), (t_lo, t_hi), (alpha_lo, alpha_hi) = bounds[1], bounds[2], bounds[3]
+        kappa = k_lo + (k_hi - k_lo) * sg[1]
+        theta_h = t_lo + (t_hi - t_lo) * sg[2]
+        alpha_feller_max = FELLER_STRICT_FACTOR * float((2.0 * kappa * theta_h) ** 0.5)
+        alpha_upper = min(alpha_hi, alpha_feller_max)
+        alpha_lower = min(alpha_lo, alpha_upper)
         spans = spans.copy()
-        spans[3] = xi_upper - xi_lower
+        spans[3] = alpha_upper - alpha_lower
     return spans * sg * (1.0 - sg)
 
 
@@ -184,88 +198,64 @@ def _chain_rule_jacobian(
 # --------------------------------------------------------------------------- #
 
 
-@dataclass
-class _CompiledResiduals:
-    residual: callable
-    jacobian: callable
-    n_quote_residuals: int
-
-
 def _build_residual_fn(
     market_data: OptionMarketData,
     grids: JaxFFTGrids,
     feller_weight: float,
     objective: ObjectiveStrategy,
     feller_mode: FellerMode = FellerMode.SOFT,
+    bounds: Bounds = _BATES_BOUNDS,
 ) -> _CompiledResiduals:
+    """JIT-compile the joint Bates residual for a fixed surface + grid config.
+
+    Surface boilerplate lives in
+    :func:`backend.calibration._reparam.build_cf_residual_fn`; only the
+    Bates reparametrisation, CF pricing and Feller penalty are supplied
+    here.
+    """
     spot = float(market_data.spot)
     rate = float(market_data.rate)
     q = float(market_data.dividend_yield)
-    unique_mats = [float(T) for T in market_data.unique_maturities]
-
-    strikes_per_T: list[jnp.ndarray] = []
-    is_calls_per_T: list[jnp.ndarray] = []
-    running = 0
-    for T in unique_mats:
-        quotes = market_data.quotes_for_maturity(T)
-        strikes_per_T.append(jnp.asarray([q.strike for q in quotes], dtype=jnp.float64))
-        is_calls_per_T.append(jnp.asarray([q.is_call for q in quotes], dtype=jnp.bool_))
-        running += len(quotes)
-    n_quotes = running
-
-    objective_residual_fn = objective.make_jax_residual_fn(market_data)
 
     # OFF/HARD -> 0 (HARD guarantees Feller via the capped reparametrisation);
     # SOFT -> feller_weight. See backend.calibration.feller.
     eff_feller_weight = penalty_weight(feller_mode, feller_weight)
 
-    def _residual_untraced(theta: jnp.ndarray) -> jnp.ndarray:
-        v0, kappa, theta_h, alpha, rho, lam, alpha_j, sigma_j = _bates_theta_to_params(
-            theta, feller_mode
-        )
+    def theta_to_params(theta: jnp.ndarray) -> tuple:
+        return _bates_theta_to_params(theta, feller_mode, bounds)
 
-        model_prices_blocks: list[jnp.ndarray] = []
-        for i, tau in enumerate(unique_mats):
-            strikes_T = strikes_per_T[i]
-            is_calls_T = is_calls_per_T[i]
+    def price_calls(params: tuple, strikes_T: jnp.ndarray, tau: float) -> jnp.ndarray:
+        v0, kappa, theta_h, alpha, rho, lam, alpha_j, sigma_j = params
 
-            def cf(u):
-                return bates_cf_jax(
-                    u,
-                    v0,
-                    kappa,
-                    theta_h,
-                    alpha,
-                    rho,
-                    tau,
-                    rate,
-                    q,
-                    lam,
-                    alpha_j,
-                    sigma_j,
-                )
+        def cf(u):
+            return bates_cf_jax(
+                u,
+                v0,
+                kappa,
+                theta_h,
+                alpha,
+                rho,
+                tau,
+                rate,
+                q,
+                lam,
+                alpha_j,
+                sigma_j,
+            )
 
-            call_prices = price_call_strikes_jax(cf, spot, strikes_T, tau, rate, grids)
-            disc_spot = spot * jnp.exp(-q * tau)
-            disc_k = strikes_T * jnp.exp(-rate * tau)
-            put_prices = call_prices - disc_spot + disc_k
-            prices_T = jnp.maximum(jnp.where(is_calls_T, call_prices, put_prices), 0.0)
-            model_prices_blocks.append(prices_T)
+        return price_call_strikes_jax(cf, spot, strikes_T, tau, rate, grids)
 
-        model_prices = jnp.concatenate(model_prices_blocks)
-        quote_residuals = objective_residual_fn(model_prices)
-
+    def penalty_fn(params: tuple) -> jnp.ndarray:
+        _v0, kappa, theta_h, alpha = params[0], params[1], params[2], params[3]
         feller = 2.0 * kappa * theta_h - alpha**2
-        feller_res = jnp.where(
-            feller < 0.0, jnp.sqrt(eff_feller_weight) * (-feller), 0.0
-        )
+        return jnp.where(feller < 0.0, jnp.sqrt(eff_feller_weight) * (-feller), 0.0)
 
-        return jnp.concatenate([quote_residuals, jnp.array([feller_res])])
-
-    return _CompiledResiduals(
-        residual=jax.jit(_residual_untraced),
-        jacobian=jax.jit(jax.jacfwd(_residual_untraced)),
-        n_quote_residuals=n_quotes,
+    return build_cf_residual_fn(
+        market_data,
+        objective,
+        theta_to_params=theta_to_params,
+        price_calls=price_calls,
+        penalty_fn=penalty_fn,
     )
 
 
@@ -278,6 +268,7 @@ def _build_jump_residual_fn(
     market_data: OptionMarketData,
     grids: JaxFFTGrids,
     heston_params: dict[str, float],
+    jump_bounds: Bounds = _BATES_BOUNDS[5:8],
 ) -> _CompiledResiduals:
     spot = float(market_data.spot)
     rate = float(market_data.rate)
@@ -301,12 +292,14 @@ def _build_jump_residual_fn(
     alpha = float(heston_params["alpha"])
     rho = float(heston_params["rho"])
 
+    (l_lo, l_hi), (m_lo, m_hi), (j_lo, j_hi) = jump_bounds
+
     def _residual_untraced(theta_jump: jnp.ndarray) -> jnp.ndarray:
         # theta_jump is 3-element unconstrained vec for [lam, alpha_j, sigma_j]
         sg = jax.nn.sigmoid(theta_jump)
-        lam = _LAMBDA_LO + (_LAMBDA_HI - _LAMBDA_LO) * sg[0]
-        alpha_j = _MUJ_LO + (_MUJ_HI - _MUJ_LO) * sg[1]
-        sigma_j = _SIGMAJ_LO + (_SIGMAJ_HI - _SIGMAJ_LO) * sg[2]
+        lam = l_lo + (l_hi - l_lo) * sg[0]
+        alpha_j = m_lo + (m_hi - m_lo) * sg[1]
+        sigma_j = j_lo + (j_hi - j_lo) * sg[2]
 
         model_prices_blocks: list[jnp.ndarray] = []
         for i, tau in enumerate(unique_mats):
@@ -422,7 +415,13 @@ class BatesCalibrator(BaseCalibrator):
         log_iterations: bool = False,
         iteration_callback=None,
         feller_mode: FellerMode | str = FellerMode.SOFT,
+        param_bounds: dict[str, tuple[float, float]] | None = None,
     ) -> None:
+        # Per-run search universe (8-param sigmoid box). ``None`` -> the
+        # canonical default box, so default-bounds runs are byte-identical to
+        # the legacy behaviour. The v0..rho sub-box is forwarded to the Phase-1
+        # Heston warmup; the lam/alpha_j/sigma_j sub-box drives Phase 2.
+        self._bounds: Bounds = _resolve_bounds(param_bounds)
         self.n_restarts_joint = max(1, int(n_restarts_joint))
         self.feller_weight = float(feller_weight)
         self.feller_mode = FellerMode.coerce(feller_mode)
@@ -440,15 +439,9 @@ class BatesCalibrator(BaseCalibrator):
         )
         # JAX-compatible fallback: iv_mse degenerates to vega_weighted under
         # the Cont-Tankov first-order approximation (see HestonCalibrator).
-        chosen = objective or PriceMSEObjective()
-        if not chosen.jax_compatible:
-            logger.info(
-                "BatesCalibrator: objective '%s' not JAX-compatible; "
-                "falling back to 'vega_weighted'.",
-                chosen.name,
-            )
-            chosen = VegaWeightedObjective()
-        self.objective: ObjectiveStrategy = chosen
+        self.objective: ObjectiveStrategy = self._resolve_objective(
+            objective or PriceMSEObjective()
+        )
         self.objective_type = self.objective.name
         self.log_iterations = bool(log_iterations)
         self.iteration_callback = iteration_callback
@@ -457,7 +450,7 @@ class BatesCalibrator(BaseCalibrator):
         self._engine = FFTEngine()
 
     def default_bounds(self) -> list[tuple[float, float]]:
-        return list(_BATES_BOUNDS)
+        return [(float(lo), float(hi)) for lo, hi in self._bounds]
 
     def objective(self, params: np.ndarray, market_data: OptionMarketData) -> float:
         r = self.residuals(params, market_data)
@@ -472,8 +465,11 @@ class BatesCalibrator(BaseCalibrator):
             self.feller_weight,
             self.objective,
             self.feller_mode,
+            self._bounds,
         )
-        theta = _params_to_theta(np.asarray(params, dtype=float), self.feller_mode)
+        theta = _params_to_theta(
+            np.asarray(params, dtype=float), self.feller_mode, self._bounds
+        )
         return np.asarray(compiled.residual(jnp.asarray(theta)))
 
     def calibrate(self, market_data: OptionMarketData) -> CalibrationResult:
@@ -489,6 +485,11 @@ class BatesCalibrator(BaseCalibrator):
     # ------------------------------------------------------------------ #
     def _phase1_heston(self, market_data: OptionMarketData) -> _Phase1Out:
         logger.info("Phase 1: Heston sub-calibration via HestonCalibrator")
+        # Forward the v0..rho sub-box (first 5 slots) to the Heston warmup so a
+        # tightened Bates search universe also constrains Phase 1.
+        heston_bounds = {
+            name: self._bounds[i] for i, name in enumerate(BATES_PARAM_NAMES[:5])
+        }
         heston_cal = HestonCalibrator(
             n_restarts=5,
             feller_weight=self.feller_weight,
@@ -501,6 +502,7 @@ class BatesCalibrator(BaseCalibrator):
             objective=self.objective,
             log_iterations=self.log_iterations,
             iteration_callback=self.iteration_callback,
+            param_bounds=heston_bounds,
         )
         heston_result = heston_cal.calibrate(market_data)
         heston_model: HestonModel = heston_result.model  # type: ignore[assignment]
@@ -521,7 +523,11 @@ class BatesCalibrator(BaseCalibrator):
         heston_params: dict[str, float],
     ) -> _Phase2Out:
         logger.info("Phase 2: Jump-only LM (lam, alpha_j, sigma_j)")
-        jump_compiled = _build_jump_residual_fn(market_data, self._grids, heston_params)
+        jump_bounds = self._bounds[5:8]
+        (l_lo, l_hi), (m_lo, m_hi), (j_lo, j_hi) = jump_bounds
+        jump_compiled = _build_jump_residual_fn(
+            market_data, self._grids, heston_params, jump_bounds
+        )
 
         def _jump_f(x):
             return np.asarray(jump_compiled.residual(jnp.asarray(x)))
@@ -529,15 +535,13 @@ class BatesCalibrator(BaseCalibrator):
         def _jump_jac(x):
             return np.asarray(jump_compiled.jacobian(jnp.asarray(x)))
 
-        def _logit(x, lo, hi):
-            frac = np.clip((x - lo) / (hi - lo), 1e-8, 1 - 1e-8)
-            return float(np.log(frac / (1 - frac)))
-
+        # Jump seed clamped into the (possibly tightened) jump box — no-op for
+        # the default box (0.3 ∈ [1e-3, 5], -0.1 ∈ [-0.5, 0.1], 0.15 ∈ [0.01, 0.5]).
         jump_x0 = np.array(
             [
-                _logit(0.3, _LAMBDA_LO, _LAMBDA_HI),
-                _logit(-0.1, _MUJ_LO, _MUJ_HI),
-                _logit(0.15, _SIGMAJ_LO, _SIGMAJ_HI),
+                logit(float(np.clip(0.3, l_lo, l_hi)), l_lo, l_hi),
+                logit(float(np.clip(-0.1, m_lo, m_hi)), m_lo, m_hi),
+                logit(float(np.clip(0.15, j_lo, j_hi)), j_lo, j_hi),
             ]
         )
 
@@ -562,9 +566,9 @@ class BatesCalibrator(BaseCalibrator):
         )
         jump_rss = 2.0 * float(jump_opt_res.objective_value)
         sg = 1.0 / (1.0 + np.exp(-jump_opt_res.x_optimal))
-        lam = float(_LAMBDA_LO + (_LAMBDA_HI - _LAMBDA_LO) * sg[0])
-        alpha_j = float(_MUJ_LO + (_MUJ_HI - _MUJ_LO) * sg[1])
-        sigma_j = float(_SIGMAJ_LO + (_SIGMAJ_HI - _SIGMAJ_LO) * sg[2])
+        lam = float(l_lo + (l_hi - l_lo) * sg[0])
+        alpha_j = float(m_lo + (m_hi - m_lo) * sg[1])
+        sigma_j = float(j_lo + (j_hi - j_lo) * sg[2])
         nfev = int(jump_opt_res.n_function_evals)
         logger.info(
             "Phase 2 done: RSS=%.6f, lam=%.4f alpha_j=%.4f sigma_j=%.4f",
@@ -600,6 +604,7 @@ class BatesCalibrator(BaseCalibrator):
             self.feller_weight,
             self.objective,
             self.feller_mode,
+            self._bounds,
         )
 
         x0_base = _params_to_theta(
@@ -616,6 +621,7 @@ class BatesCalibrator(BaseCalibrator):
                 ]
             ),
             self.feller_mode,
+            self._bounds,
         )
 
         rng = np.random.default_rng(self.seed + 1000)
@@ -643,7 +649,7 @@ class BatesCalibrator(BaseCalibrator):
             param_mapper=lambda theta_arr: dict(
                 zip(
                     BATES_PARAM_NAMES,
-                    _np_theta_to_params(theta_arr, self.feller_mode),
+                    _np_theta_to_params(theta_arr, self.feller_mode, self._bounds),
                 )
             ),
         )
@@ -708,7 +714,9 @@ class BatesCalibrator(BaseCalibrator):
         t_start: float,
     ) -> CalibrationResult:
         best = p3.best
-        params_final = _np_theta_to_params(best["theta"], self.feller_mode)
+        params_final = _np_theta_to_params(
+            best["theta"], self.feller_mode, self._bounds
+        )
         v0, kappa, theta_h, alpha, rho, lam, alpha_j, sigma_j = (
             float(p) for p in params_final
         )
@@ -776,7 +784,12 @@ class BatesCalibrator(BaseCalibrator):
 
         if self.compute_uncertainty:
             self._attach_uncertainty(
-                diagnostics, p3.joint_compiled, best, params_final, self.feller_mode
+                diagnostics,
+                p3.joint_compiled,
+                best,
+                params_final,
+                self.feller_mode,
+                self._bounds,
             )
 
         elapsed = time.perf_counter() - t_start
@@ -842,12 +855,13 @@ class BatesCalibrator(BaseCalibrator):
         best: dict,
         params_final: np.ndarray,
         feller_mode: FellerMode = FellerMode.SOFT,
+        bounds: Bounds = _BATES_BOUNDS,
     ) -> None:
         """Compute Gauss-Newton covariance on the joint Jacobian (in place)."""
         try:
             J_u = np.asarray(best["jac"])[: joint_compiled.n_quote_residuals, :]
             r_q = np.asarray(best["fun"])[: joint_compiled.n_quote_residuals]
-            dpdu = _chain_rule_jacobian(best["theta"], feller_mode)
+            dpdu = _chain_rule_jacobian(best["theta"], feller_mode, bounds)
             J_constrained = J_u * dpdu[np.newaxis, :]
 
             unc = least_squares_covariance(J_constrained, r_q)

@@ -127,13 +127,23 @@ class CarrMadanFFTEngine:
         return self._config
 
     def _compute_integrand(
-        self, characteristic_fn: CharacteristicFunction, s0: float, t: float, r: float
+        self,
+        characteristic_fn: CharacteristicFunction,
+        s0: float,
+        t: float,
+        r: float,
+        alpha: float | None = None,
     ) -> np.ndarray:
         """
         Compute the Carr-Madan integrand.
 
-        The damped call price transform is:
+        The damped price transform is:
             psi(v) = exp(-rT) * phi(v - (alpha+1)i) / (alpha^2 + alpha - v^2 + i(2alpha+1)v)
+
+        With ``alpha > 0`` this transform yields CALL prices; by Lee's duality
+        the very same expression with ``alpha < -1`` yields PUT prices directly
+        (see :meth:`price_strikes`). The damping is therefore parameterised
+        rather than always read from the config.
 
         Parameters
         ----------
@@ -145,13 +155,17 @@ class CarrMadanFFTEngine:
             Time to maturity
         r : float
             Risk-free rate
+        alpha : float, optional
+            Damping factor. Defaults to the configured call damping
+            ``self._config.alpha``.
 
         Returns
         -------
         np.ndarray
             Complex integrand values
         """
-        alpha = self._config.alpha
+        if alpha is None:
+            alpha = self._config.alpha
         v = self._v_grid
 
         # Shifted argument for characteristic function
@@ -163,24 +177,39 @@ class CarrMadanFFTEngine:
         # Carr-Madan denominator
         denominator = alpha**2 + alpha - v**2 + 1j * (2 * alpha + 1) * v
 
-        # Integrand
-        integrand = np.exp(-r * t) * cf_values / denominator
+        # Integrand. The characteristic function can overflow to ±inf/nan on the
+        # high-frequency tail of the v-grid (e.g. the Heston/Bates exponent
+        # exp(C + D v0) blows up before its asymptotic decay kicks in
+        # numerically). The true damped transform decays to 0 there, so we
+        # neutralise the non-finite tail rather than let a single nan/inf poison
+        # the whole FFT (which would NaN out every price on the slice). For a
+        # finite cf_values this is a no-op, leaving valid prices bit-identical.
+        with np.errstate(invalid="ignore", divide="ignore", over="ignore"):
+            integrand = np.exp(-r * t) * cf_values / denominator
+        integrand = np.nan_to_num(integrand, nan=0.0, posinf=0.0, neginf=0.0)
 
         return integrand
 
     def _fft_transform(
-        self, integrand: np.ndarray, log_s0: float
+        self, integrand: np.ndarray, log_s0: float, alpha: float | None = None
     ) -> tuple[np.ndarray, np.ndarray]:
         """
-        Apply FFT and return damped call prices and log-strike grid.
+        Apply FFT and return damped prices and log-strike grid.
+
+        The damping ``alpha`` must match the one used to build ``integrand``
+        (positive for calls, ``< -1`` for the direct put transform). The
+        log-strike grid is independent of ``alpha``.
 
         Returns
         -------
         damped_prices : np.ndarray
-            Damped call prices on log-strike grid
+            Damped option prices on log-strike grid
         log_strikes : np.ndarray
             Log-strike grid
         """
+        if alpha is None:
+            alpha = self._config.alpha
+
         # Apply Simpson weights and phase shift
         x = integrand * self._simpson * np.exp(-1j * self._v_grid * (-log_s0))
 
@@ -190,10 +219,8 @@ class CarrMadanFFTEngine:
         # Log-strike grid (centered at log(S0))
         log_strikes = -log_s0 + self._lambda_spacing * np.arange(self._config.n_fft)
 
-        # Damped call prices
-        damped_prices = (
-            np.exp(-self._config.alpha * log_strikes) / np.pi * np.real(fft_result)
-        )
+        # Damped prices
+        damped_prices = np.exp(-alpha * log_strikes) / np.pi * np.real(fft_result)
 
         return damped_prices, log_strikes
 
@@ -272,7 +299,11 @@ class CarrMadanFFTEngine:
         q: float = 0.0,
     ) -> float:
         """
-        Price a single European put option using put-call parity.
+        Price a single European put option via the direct Carr-Madan transform.
+
+        Uses the negative-damping (Lee duality) transform rather than
+        ``call FFT + put-call parity`` so deep-OTM puts stay accurate (see
+        :meth:`price_strikes`).
 
         Parameters
         ----------
@@ -294,10 +325,16 @@ class CarrMadanFFTEngine:
         float
             Put option price
         """
-        call_price = self.price_call(characteristic_fn, s0, k, t, r, q)
-        # Put-call parity: P = C - S*e^(-qT) + K*e^(-rT)
-        put_price = call_price - s0 * np.exp(-q * t) + k * np.exp(-r * t)
-        return max(put_price, 0.0)
+        prices = self.price_strikes(
+            characteristic_fn,
+            s0,
+            np.array([k], dtype=np.float64),
+            t,
+            r,
+            is_call=False,
+            q=q,
+        )
+        return float(prices[0])
 
     def price_strikes(
         self,
@@ -338,28 +375,44 @@ class CarrMadanFFTEngine:
             Array of option prices
         """
         log_s0 = np.log(s0)
+        strikes = np.asarray(strikes, dtype=np.float64)
 
-        # Single FFT computation
-        integrand = self._compute_integrand(characteristic_fn, s0, t, r)
-        damped_prices, log_strikes_grid = self._fft_transform(integrand, log_s0)
+        # Single FFT computation (call damping)
+        alpha = self._config.alpha
+        integrand = self._compute_integrand(characteristic_fn, s0, t, r, alpha)
+        damped_prices, log_strikes_grid = self._fft_transform(integrand, log_s0, alpha)
 
-        # Interpolate for each strike
-        prices = np.empty(len(strikes))
-        for i, k in enumerate(strikes):
-            log_k = np.log(k)
-            call_price = self._interpolate_price(
-                damped_prices, log_strikes_grid, log_k, log_s0
-            )
+        # Vectorized linear interpolation over all strikes at once (same formula
+        # as _interpolate_price, lifted out of the per-strike Python loop). The
+        # grid and hence (idx, w) are independent of the damping, so the same
+        # weights interpolate both the call and the direct-put transforms.
+        log_k = np.log(strikes)
+        idx = ((log_k + log_s0) / self._lambda_spacing).astype(np.int64)
+        idx = np.clip(idx, 0, self._config.n_fft - 2)
+        w = np.clip((log_k - log_strikes_grid[idx]) / self._lambda_spacing, 0.0, 1.0)
+        call_prices = (1.0 - w) * damped_prices[idx] + w * damped_prices[idx + 1]
+        call_prices = np.maximum(call_prices, 0.0)
 
-            if is_call:
-                prices[i] = call_price
-            else:
-                # Put-call parity: P = C - S*e^(-qT) + K*e^(-rT)
-                prices[i] = max(
-                    call_price - s0 * np.exp(-q * t) + k * np.exp(-r * t), 0.0
-                )
+        if is_call:
+            return call_prices
 
-        return prices
+        # Direct put pricing (Lee duality): the same damped transform with
+        # alpha_put = -alpha_call - 1 (< -1) returns puts directly. This avoids
+        # the catastrophic cancellation of ``call FFT + parity`` in the deep put
+        # wing, where the ~1e-4 absolute FFT error on the O(S) call swamps the
+        # O(1e-6) put and yields negative/garbage prices.
+        alpha_put = -alpha - 1.0
+        put_integrand = self._compute_integrand(characteristic_fn, s0, t, r, alpha_put)
+        put_damped, _ = self._fft_transform(put_integrand, log_s0, alpha_put)
+        put_prices = (1.0 - w) * put_damped[idx] + w * put_damped[idx + 1]
+
+        # Safety net: some exotic characteristic functions may not be analytic
+        # in the negative-damping band. Fall back cell-by-cell to put-call parity
+        # wherever the direct put value is non-finite.
+        parity_prices = call_prices - s0 * np.exp(-q * t) + strikes * np.exp(-r * t)
+        put_prices = np.where(np.isfinite(put_prices), put_prices, parity_prices)
+        put_prices = np.nan_to_num(put_prices, nan=0.0, posinf=0.0, neginf=0.0)
+        return np.maximum(put_prices, 0.0)
 
     def price_surface(
         self,
